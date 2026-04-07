@@ -1,0 +1,3 @@
+# 已迁移：请改用 deploy/compose-quick/docker-compose.yml
+# 示例：cd deploy/compose-quick && docker compose --env-file .env -f docker-compose.yml up -d
+services: {}

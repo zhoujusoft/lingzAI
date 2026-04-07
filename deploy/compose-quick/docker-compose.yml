@@ -1,0 +1,145 @@
+services:
+  frontend:
+    restart: unless-stopped
+    image: ${REGISTRY:registry.example.com:5001
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-80}:80"
+
+  backend:
+    restart: unless-stopped
+    image: ${REGISTRY:registry.example.com:5001
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      SERVER_PORT: 5050
+      SERVER_SERVLET_CONTEXT_PATH: /api
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-qwen}
+      SKILL_ROOT: /app/skills
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE}?useSSL=false&allowPublicKeyRetrieval=true&useUnicode=true&characterEncoding=UTF-8&serverTimezone=GMT%2B8&zeroDateTimeBehavior=convertToNull
+      SPRING_DATASOURCE_USERNAME: change-me-user
+      SPRING_DATASOURCE_PASSWORD: change-me-password
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: change-me-access-key
+      MINIO_SECRET_KEY: change-me-secret-key
+      MINIO_BUCKET: ${MINIO_BUCKET}
+      APP_CHAT_PROVIDER: ${APP_CHAT_PROVIDER:-qwen-online}
+      APP_CHAT_MEMORY_TYPE: ${APP_CHAT_MEMORY_TYPE:-in-memory}
+      APP_CHAT_VLLM_BASE_URL: ${APP_CHAT_VLLM_BASE_URL:-}
+      APP_CHAT_VLLM_API_KEY: ${APP_CHAT_VLLM_API_KEY:change-me-api-key
+      APP_CHAT_VLLM_MODEL: ${APP_CHAT_VLLM_MODEL:-}
+      APP_CHAT_QWEN_ONLINE_BASE_URL: ${APP_CHAT_QWEN_ONLINE_BASE_URL:-}
+      APP_CHAT_QWEN_ONLINE_API_KEY: ${APP_CHAT_QWEN_ONLINE_API_KEY:change-me-api-key
+      APP_CHAT_QWEN_ONLINE_MODEL: ${APP_CHAT_QWEN_ONLINE_MODEL:-}
+      APP_EMBEDDING_BASE_URL: ${APP_EMBEDDING_BASE_URL}
+      APP_EMBEDDING_API_KEY: change-me-api-key
+      APP_EMBEDDING_MODEL: ${APP_EMBEDDING_MODEL}
+      APP_EMBEDDING_EMBEDDINGS_PATH: ${APP_EMBEDDING_EMBEDDINGS_PATH:-/v1/embeddings}
+      APP_EMBEDDING_DIMENSIONS: ${APP_EMBEDDING_DIMENSIONS:-1024}
+      APP_RAG_ELASTICSEARCH_BASE_URL: http://elasticsearch:9200
+      APP_RAG_ELASTICSEARCH_INDEX_NAME: ${APP_RAG_ELASTICSEARCH_INDEX_NAME:-rag_chunks}
+      APP_RAG_ELASTICSEARCH_DIMENSIONS: ${APP_RAG_ELASTICSEARCH_DIMENSIONS:-1024}
+      APP_RAG_ELASTICSEARCH_SIMILARITY: ${APP_RAG_ELASTICSEARCH_SIMILARITY:-cosine}
+      APP_RAG_ELASTICSEARCH_SHARDS: ${APP_RAG_ELASTICSEARCH_SHARDS:-1}
+      APP_RAG_ELASTICSEARCH_REPLICAS: ${APP_RAG_ELASTICSEARCH_REPLICAS:-0}
+      APP_RAG_RERANK_ENABLED: ${APP_RAG_RERANK_ENABLED:-true}
+      APP_RAG_RERANK_BASE_URL: ${APP_RAG_RERANK_BASE_URL}
+      APP_RAG_RERANK_API_KEY: change-me-api-key
+      APP_RAG_RERANK_PATH: ${APP_RAG_RERANK_PATH:-/api/v1/services/rerank/text-rerank/text-rerank}
+      APP_RAG_RERANK_PROTOCOL: ${APP_RAG_RERANK_PROTOCOL:-dashscope}
+      APP_RAG_RERANK_MODEL: ${APP_RAG_RERANK_MODEL:-gte-rerank-v2}
+      PYTHON_BOOTSTRAP_ENABLED: ${PYTHON_BOOTSTRAP_ENABLED:-true}
+      PYTHON_RUNTIME_DIR: /app/runtime/python
+      PYTHON_REQUIREMENTS_FILE: /app/requirements.txt
+      PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+      PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-pypi.tuna.tsinghua.edu.cn}
+    volumes:
+      - ./data/backend/uploads:/app/uploads
+      - ./data/backend/skills:/app/skills
+      - ./data/backend/python-runtime:/app/runtime/python
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      minio:
+        condition: service_started
+
+  mysql:
+    restart: unless-stopped
+    image: mysql:8.0
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      MYSQL_ROOT_PASSWORD: change-me-password
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: change-me-user
+      MYSQL_PASSWORD: change-me-password
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+08:00
+    volumes:
+      - ./data/mysql:/var/lib/mysql
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+
+  redis:
+    restart: unless-stopped
+    image: redis:8.2.2
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - ./data/redis:/data
+      - ./config/redis/redis.conf:/etc/redis/redis.conf:ro
+    command: ["redis-server", "/etc/redis/redis.conf"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  minio:
+    restart: unless-stopped
+    image: minio/minio:latest
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      MINIO_ROOT_USER: change-me-user
+      MINIO_ROOT_PASSWORD: change-me-password
+    volumes:
+      - ./data/minio:/data
+    command: server /data --console-address ":9001"
+
+  elasticsearch:
+    restart: unless-stopped
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+    user: "change-me-user"
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      discovery.type: single-node
+      ES_JAVA_OPTS: ${ES_JAVA_OPTS:--Xms1g -Xmx1g}
+      xpack.security.enabled: "false"
+      xpack.security.http.ssl.enabled: "false"
+      xpack.security.enrollment.enabled: "false"
+    command:
+      - /bin/bash
+      - -c
+      - chown -R 1000:0 /usr/share/elasticsearch/data && exec su elasticsearch -s /bin/bash -c '/usr/local/bin/docker-entrypoint.sh eswrapper'
+    volumes:
+      - ./data/elasticsearch:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9200 >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 30s

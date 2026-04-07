@@ -1,0 +1,22 @@
+app:
+  chat:
+    provider: qwen-online
+    qwen-online:
+      base-url: ${APP_CHAT_QWEN_ONLINE_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode}
+      api-key: ${APP_CHAT_QWEN_ONLINE_API_KEY:change-me-api-key
+      completions-path: /v1/chat/completions
+      model: ${APP_CHAT_QWEN_ONLINE_MODEL:qwen3-max}
+      enable-thinking: false
+  embedding:
+    base-url: ${APP_EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode}
+    api-key: ${APP_EMBEDDING_API_KEY:change-me-api-key
+    model: ${APP_EMBEDDING_MODEL:text-embedding-v4}
+    embeddings-path: ${APP_EMBEDDING_EMBEDDINGS_PATH:/v1/embeddings}
+  rag:
+    rerank:
+      enabled: ${APP_RAG_RERANK_ENABLED:true}
+      base-url: ${APP_RAG_RERANK_BASE_URL:https://dashscope.aliyuncs.com}
+      api-key: ${APP_RAG_RERANK_API_KEY:change-me-api-key
+      path: ${APP_RAG_RERANK_PATH:/api/v1/services/rerank/text-rerank/text-rerank}
+      protocol: ${APP_RAG_RERANK_PROTOCOL:dashscope}
+      model: ${APP_RAG_RERANK_MODEL:gte-rerank-v2}

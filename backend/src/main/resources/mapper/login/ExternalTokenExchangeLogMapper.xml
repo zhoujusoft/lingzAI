@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="lingzhou.agent.backend.business.system.dao.ExternalTokenExchangeLogMapper">
+
+    <resultMap id="ExternalTokenExchangeLogModelMap" type="lingzhou.agent.backend.business.system.model.ExternalTokenExchangeLogModel">
+        <id property="id" column="id"/>
+        <result property="sourceSystem" column="source_system"/>
+        <result property="externalUserId" column="external_user_id"/>
+        <result property="externalPhone" column="external_phone"/>
+        <result property="matchedUserId" column="matched_user_id"/>
+        <result property="exchangeStatus" column="exchange_status"/>
+        <result property="message" column="message"/>
+        <result property="createdAt" column="created_at"/>
+    </resultMap>
+</mapper>

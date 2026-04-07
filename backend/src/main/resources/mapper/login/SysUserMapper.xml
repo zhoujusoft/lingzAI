@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="lingzhou.agent.backend.business.system.dao.SysUserMapper">
+
+    <resultMap id="SysUserModelMap" type="lingzhou.agent.backend.business.system.model.SysUserModel">
+        <id property="id" column="id"/>
+        <result property="name" column="name"/>
+        <result property="code" column="code"/>
+        <result property="password" column="password"/>
+        <result property="userType" column="user_type"/>
+        <result property="mobile" column="mobile"/>
+        <result property="email" column="email"/>
+        <result property="state" column="state"/>
+        <result property="parentId" column="parent_id"/>
+    </resultMap>
+
+    <select id="selectByCode" resultMap="SysUserModelMap">
+        SELECT id, name, code, password, user_type, mobile, email, state, parent_id
+        FROM t_user
+        WHERE LOWER(code) = LOWER(#{code})
+        LIMIT 1
+    </select>
+
+    <select id="selectByMobile" resultMap="SysUserModelMap">
+        SELECT id, name, code, password, user_type, mobile, email, state, parent_id
+        FROM t_user
+        WHERE mobile = #{mobile}
+    </select>
+</mapper>

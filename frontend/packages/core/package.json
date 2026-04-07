@@ -1,0 +1,19 @@
+{
+    "name": "@lingzhou/core",
+    "version": "0.1.0",
+    "private": true,
+    "type": "module",
+    "exports": {
+        ".": "./src/index.js",
+        "./constants": "./src/model/constants.js",
+        "./auth": "./src/service/auth.js",
+        "./request": "./src/http/request.js",
+        "./http/request": "./src/http/request.js"
+    },
+    "peerDependencies": {
+        "axios": "^1.13.6"
+    },
+    "devDependencies": {
+        "axios": "^1.13.6"
+    }
+}

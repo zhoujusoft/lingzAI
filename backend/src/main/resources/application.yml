@@ -1,0 +1,176 @@
+server:
+  port: 5050
+  servlet:
+    context-path: /api
+
+spring:
+  profiles:
+    active: qwen
+  devtools:
+    restart:
+      enabled: true
+      # Fallback polling mode is more stable in some IDE/filesystem setups.
+      poll-interval: 2s
+      quiet-period: 1s
+  datasource:
+    #nullCatalogMeansCurrent=true&
+    url: jdbc:mysql://localhost:3306/lingzhou?useSSL=false&allowPublicKeyRetrieval=true&useUnicode=true&characterEncoding=UTF-8&serverTimezone=GMT%2B8&zeroDateTimeBehavior=convertToNull
+    username: change-me-user
+    password:  change-me-password
+    #新版mysql驱动配置方法
+    driverClassName: com.mysql.cj.jdbc.Driver
+    ###################以下为druid增加的配置###########################
+    type: com.alibaba.druid.pool.DruidDataSource
+    # 下面为连接池的补充设置，应用到上面所有数据源中
+    # 初始化大小，最小，最大
+    initialSize: 5
+    minIdle: 5
+    maxActive: 20
+    # 配置获取连接等待超时的时间
+    maxWait: 60000
+    # 配置间隔多久才进行一次检测，检测需要关闭的空闲连接，单位是毫秒
+    timeBetweenEvictionRunsMillis: 60000
+    # 配置一个连接在池中最小生存的时间，单位是毫秒
+    minEvictableIdleTimeMillis: 300000
+    validationQuery: select 1
+    testWhileIdle: true
+    testOnBorrow: false
+    testOnReturn: false
+    # 打开PSCache，并且指定每个连接上PSCache的大小
+    poolPreparedStatements: true
+    maxPoolPreparedStatementPerConnectionSize: 20
+    # 配置监控统计拦截的filters，去掉后监控界面sql无法统计，'wall'用于防火墙
+    filters: stat,wall
+    # 通过connectProperties属性来打开mergeSql功能；慢SQL记录
+    connectionProperties: druid.stat.mergeSql=true;druid.stat.slowSqlMillis=5000
+    # 合并多个DruidDataSource的监控数据
+    useGlobalDataSourceStat: true
+  data:
+    redis:
+      host: localhost
+      port: 16379
+      password:
+      change-me-password
+      timeout: 5000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+          max-wait: -1ms
+  servlet:
+    multipart:
+      max-file-size: 2024MB
+      max-request-size: 2024MB
+
+    session:
+      timeout: 1h
+  # jackson时间格式化
+  jackson:
+    time-zone: GMT+8
+    date-format: yyyy-MM-dd HH:mm:ss
+  mvc:
+    pathmatch:
+      matching-strategy: ant_path_matcher
+
+mybatis-plus:
+  mapper-locations: classpath*:mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      id-type: auto
+
+# MinIO 配置
+minio:
+  endpoint: http://localhost:19000
+  access-key: change-me-access-key
+  secret-key: change-me-secret-key
+  bucket: documents
+
+
+
+app:
+  chat:
+    # 默认走 qwen；若显式设置 APP_CHAT_PROVIDER 或在 profile 中覆盖，则以显式配置为准。
+    # 可选值：vllm | qwen-online
+    provider: ${APP_CHAT_PROVIDER:qwen-online}
+    system-prompt: |
+      你是一个可调用工具、可使用技能完成任务的中文 AI 助手。
+
+      基本要求：
+      - 默认使用中文回答，必要时可保留英文技术术语、代码、命令、路径和接口字段名
+      - 回答必须基于实际工具结果、技能内容和可验证信息，不要凭空编造
+      - 只有在继续执行任务确实受阻时，才提出简短澄清问题
+      - 当用户请求与某个已激活技能匹配时，优先先调用 loadSkillContent(skillName) 再作答
+      - 需要技能参考资料时，调用 loadSkillReference(skillName, referenceKey)
+      - 当用户询问可用技能时，调用 listActiveSkills
+      - 使用技能时，要优先依赖技能中定义的流程、边界和工具
+
+      可用基础工具：
+      - readFile(path): 读取本地文件或聊天上传虚拟路径中的 UTF-8 文本
+      - writeFile(path, content): 将 UTF-8 文本写入本地路径
+      - runPython(scriptPath, args): 执行 Python 脚本并返回标准输出
+      - listActiveSkills(): 列出当前已激活技能及其描述
+      - loadSkillContent(skillName): 读取某个已激活技能的内容与说明
+      - loadSkillReference(skillName, referenceKey): 读取技能提供的参考资料
+
+      Markdown 输出规范：
+      - 默认使用清晰、克制、可读的 Markdown
+      - 只在有助于阅读时使用标题、列表、表格，不要滥用层级
+      - 代码、命令、路径、环境变量、接口字段、配置键请使用反引号包裹
+      - 多行代码、SQL、JSON、YAML、Shell 命令请使用 fenced code block，并尽量带上语言标记
+      - 列表格式保持统一，避免混用不同风格的列表符号
+      - 不要输出破损的 Markdown，例如未闭合的代码块、未配对的强调符号、层级混乱的列表
+      - 如果内容适合结构化表达，优先使用短段落 + 列表，而不是一整段堆叠文本
+
+      风格要求：
+      - 回答尽量简洁、结构化、可执行
+      - 结论优先，必要时补充依据、步骤和注意事项
+      - 对不确定的信息要明确说明不确定性来源
+    memory:
+      # in-memory | redis
+      type: in-memory
+      # Message window size per session
+      max-messages: 50
+  embedding:
+    dimensions: 1024
+  skills:
+    root-dir: ./skills
+    package:
+      password: ${SKILL_PACKAGE_PASSWORD:change-me-password
+    installer:
+      enable-dependency-install: true
+      python-command: python3
+      pip-args: "-m pip install -r"
+      continue-on-dependency-error: true
+  rag:
+    elasticsearch:
+      base-url: http://127.0.0.1:9200
+      api-key: change-me-api-key
+      index-name: rag_chunks
+      dimensions: ${app.embedding.dimensions}
+      similarity: cosine
+      shards: 1
+      replicas: 0
+    retrieval:
+      bm25-topk: 40
+      vector-topk: 40
+      rrf-k: 60
+      rrf-topk: 30
+      max-result-window: 20
+      rerank-input-topk: 30
+      final-topn: 8
+    rerank:
+      timeout-ms: 1200
+      fallback-rrf: true
+    qa:
+      preference-expire-rounds: 10
+      low-rerank-threshold: 0.35
+      fallback-disclaimer: "以上回答基于通用模型能力，非知识库依据。"
+  sso:
+    enabled: true
+    shared-secret: change-me-secret
+    request-expire-seconds: 300
+    nonce-expire-seconds: 300
+    allowed-source-systems: oa

@@ -1,0 +1,25 @@
+app:
+  chat:
+    provider: vllm
+    vllm:
+      base-url: http://192.168.1.153:8010
+      api-key: ${APP_CHAT_VLLM_API_KEY:change-me-api-key
+      model: qwen-chat
+      enable-thinking: false
+      temperature: ${CHAT_TEMPERATURE:0.7}
+      max-tokens: ${CHAT_MAX_TOKENS:20000}
+      read-timeout-seconds: ${CHAT_READ_TIMEOUT_SECONDS:300}
+  embedding:
+    base-url: http://192.168.1.153:8011
+    api-key: ${APP_CHAT_VLLM_API_KEY:change-me-api-key
+    model: qwen-embedding
+    embeddings-path: /v1/embeddings
+    dimensions: 0
+  rag:
+    rerank:
+      enabled: true
+      base-url: http://192.168.1.153:8013
+      api-key: ${APP_CHAT_VLLM_API_KEY:change-me-api-key
+      path: /v1/rerank
+      protocol: vllm
+      model: bge-rerank

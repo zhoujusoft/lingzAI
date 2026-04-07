@@ -1,0 +1,18 @@
+{
+    "name": "lingzhou-frontend-workspace",
+    "private": true,
+    "version": "0.1.0",
+    "description": "Frontend workspace scripts",
+    "scripts": {
+        "preinstall": "npx only-allow pnpm",
+        "clean": "rm -rf node_modules packages/*/node_modules dist",
+        "dev": "pnpm --filter @lingzhou/web dev",
+        "build": "pnpm --filter @lingzhou/web build",
+        "preview": "pnpm --filter @lingzhou/web preview",
+        "format": "prettier --write \"**/*.{js,ts,vue,css,scss,html,json,md,yml,yaml}\"",
+        "format:check": "prettier --check \"**/*.{js,ts,vue,css,scss,html,json,md,yml,yaml}\""
+    },
+    "devDependencies": {
+        "prettier": "^3.6.2"
+    }
+}

@@ -1,0 +1,10 @@
+**/.idea
+**/.DS_Store
+**/node_modules
+**/dist
+**/.git
+.cache/*
+!.cache/wheels
+!.cache/wheels/**
+data/**
+deploy/data/**
