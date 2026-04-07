@@ -14,8 +14,8 @@ import lingzhou.agent.backend.business.chat.domain.enums.ConversationSessionType
 import lingzhou.agent.backend.business.chat.service.ConversationHistoryService;
 import lingzhou.agent.backend.business.datasets.domain.KnowledgeBase;
 import lingzhou.agent.backend.business.datasets.domain.VO.RecallChunkVo;
+import lingzhou.agent.backend.capability.modelruntime.ModelRuntimeClientFactory;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.http.codec.ServerSentEvent;
@@ -40,7 +40,7 @@ public class KnowledgeQaService {
             "^(你好|您好|hello|hi|嗨|你是谁|你是什么|介绍一下你自己|在吗|谢谢|再见|早上好|晚上好)[!！。,.，?？ ]*$",
             Pattern.CASE_INSENSITIVE);
 
-    private final ChatClient chatClient;
+    private final ModelRuntimeClientFactory modelRuntimeClientFactory;
     private final ChatMemory chatMemory;
     private final KnowledgeChunkSearchService knowledgeChunkSearchService;
     private final ConversationHistoryService conversationHistoryService;
@@ -48,12 +48,12 @@ public class KnowledgeQaService {
     private final Map<String, Integer> preferKbRoundsBySession = new ConcurrentHashMap<>();
 
     public KnowledgeQaService(
-            ChatClient chatClient,
+            ModelRuntimeClientFactory modelRuntimeClientFactory,
             ChatMemory chatMemory,
             KnowledgeChunkSearchService knowledgeChunkSearchService,
             ConversationHistoryService conversationHistoryService,
             RagQaProperties qaProperties) {
-        this.chatClient = chatClient;
+        this.modelRuntimeClientFactory = modelRuntimeClientFactory;
         this.chatMemory = chatMemory;
         this.knowledgeChunkSearchService = knowledgeChunkSearchService;
         this.conversationHistoryService = conversationHistoryService;
@@ -145,11 +145,12 @@ public class KnowledgeQaService {
         AtomicBoolean finalized = new AtomicBoolean(false);
         AtomicBoolean modelFailed = new AtomicBoolean(false);
         long startedAt = System.currentTimeMillis();
+        var chatRuntimeBundle = modelRuntimeClientFactory.createChatBundle();
 
         Flux<ServerSentEvent<String>> citationStream =
                 "KB_QA".equals(answerMode) ? buildCitationStream(recalls) : Flux.empty();
 
-        Flux<ServerSentEvent<String>> answerStream = chatClient
+        Flux<ServerSentEvent<String>> answerStream = chatRuntimeBundle.chatClient()
                 .prompt()
                 .advisors(MessageChatMemoryAdvisor.builder(chatMemory)
                         .conversationId(context.sessionCode())
@@ -300,7 +301,9 @@ public class KnowledgeQaService {
 
     private IntentType classifyIntentByModel(String query, Long kbId, String sessionCode) {
         try {
-            String label = chatClient
+            String label = modelRuntimeClientFactory
+                    .createChatBundle()
+                    .chatClient()
                     .prompt()
                     .system("""
                             你是意图分类器。仅输出一个标签：SMALL_TALK 或 KB_QA。

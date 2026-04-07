@@ -8,6 +8,7 @@ export const ROUTE_PATHS = {
     adminKnowledge: '/admin/knowledge',
     adminSkillManagement: '/admin/skills',
     adminMcpManagement: '/admin/mcp',
+    adminModelLibrary: '/admin/model-library',
     adminApiLibrary: '/admin/apis',
     adminIntegrationHome: '/admin/integration',
     adminIntegrationDataSources: '/admin/integration/data-sources',

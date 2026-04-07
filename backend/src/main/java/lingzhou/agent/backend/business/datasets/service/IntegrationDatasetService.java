@@ -26,11 +26,10 @@ import lingzhou.agent.backend.business.integration.domain.IntegrationDataSource;
 import lingzhou.agent.backend.business.integration.mapper.IntegrationDataSourceMapper;
 import lingzhou.agent.backend.business.integration.service.lowcode.LowcodeDatasetBrowseService;
 import lingzhou.agent.backend.business.integration.service.support.IntegrationSchemaService;
+import lingzhou.agent.backend.capability.modelruntime.ModelRuntimeClientFactory;
 import lingzhou.agent.backend.common.lzException.TaskException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -49,7 +48,7 @@ public class IntegrationDatasetService {
     private final IntegrationDatasetPublishBindingMapper publishBindingMapper;
     private final IntegrationSchemaService integrationSchemaService;
     private final LowcodeDatasetBrowseService lowcodeDatasetBrowseService;
-    private final ChatClient plainChatClient;
+    private final ModelRuntimeClientFactory modelRuntimeClientFactory;
     private final ObjectMapper objectMapper;
 
     public IntegrationDatasetService(
@@ -61,7 +60,7 @@ public class IntegrationDatasetService {
             IntegrationDatasetPublishBindingMapper publishBindingMapper,
             IntegrationSchemaService integrationSchemaService,
             LowcodeDatasetBrowseService lowcodeDatasetBrowseService,
-            @Qualifier("plainChatClient") ChatClient plainChatClient,
+            ModelRuntimeClientFactory modelRuntimeClientFactory,
             ObjectMapper objectMapper) {
         this.integrationDatasetMapper = integrationDatasetMapper;
         this.integrationDataSourceMapper = integrationDataSourceMapper;
@@ -71,7 +70,7 @@ public class IntegrationDatasetService {
         this.publishBindingMapper = publishBindingMapper;
         this.integrationSchemaService = integrationSchemaService;
         this.lowcodeDatasetBrowseService = lowcodeDatasetBrowseService;
-        this.plainChatClient = plainChatClient;
+        this.modelRuntimeClientFactory = modelRuntimeClientFactory;
         this.objectMapper = objectMapper;
     }
 
@@ -720,7 +719,9 @@ public class IntegrationDatasetService {
             List<FieldBindingInput> fieldBindings) {
         try {
             String prompt = buildDescriptionPrompt(sourceKind, datasetName, businessLogic, promptHint, objectNames, fieldBindings);
-            String content = plainChatClient
+            String content = modelRuntimeClientFactory
+                    .createChatBundle()
+                    .chatClient()
                     .prompt()
                     .system("""
                             你是数据集建模助手，负责为 AI 查询场景生成“数据集摘要”和“关系说明”。

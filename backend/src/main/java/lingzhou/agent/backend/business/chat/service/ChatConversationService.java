@@ -13,11 +13,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
-import lingzhou.agent.backend.app.ChatModelProperties;
 import lingzhou.agent.backend.business.chat.attachment.AttachmentParseResult;
 import lingzhou.agent.backend.business.chat.attachment.AttachmentParseService;
 import lingzhou.agent.backend.business.chat.domain.enums.ConversationSessionType;
 import lingzhou.agent.backend.business.datasets.service.IntegrationDatasetService;
+import lingzhou.agent.backend.capability.modelruntime.ModelRuntimeClientFactory;
+import lingzhou.agent.backend.capability.modelruntime.ModelRuntimeConfigResolver;
 import lingzhou.agent.backend.business.skill.service.SkillCatalogService;
 import lingzhou.agent.backend.capability.dataset.runtime.IntegrationDatasetAgentToolRegistry;
 import lingzhou.agent.backend.common.lzException.TaskException;
@@ -32,9 +33,7 @@ import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.model.tool.DefaultToolCallingManager;
 import org.springframework.ai.model.tool.ToolCallingManager;
-import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.tool.ToolCallback;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
@@ -52,8 +51,7 @@ public class ChatConversationService {
 
     private static final Logger logger = LoggerFactory.getLogger(ChatConversationService.class);
 
-    private final ChatClient plainChatClient;
-    private final OpenAiChatModel plainOpenAiChatModel;
+    private final ModelRuntimeClientFactory modelRuntimeClientFactory;
     private final ChatMemory chatMemory;
     private final ConversationHistoryService conversationHistoryService;
     private final ChatFileService chatFileService;
@@ -61,12 +59,10 @@ public class ChatConversationService {
     private final SkillCatalogService skillCatalogService;
     private final IntegrationDatasetService integrationDatasetService;
     private final IntegrationDatasetAgentToolRegistry integrationDatasetAgentToolRegistry;
-    private final ChatModelProperties chatModelProperties;
     private final SkillKit skillKit;
 
     public ChatConversationService(
-            @Qualifier("plainChatClient") ChatClient plainChatClient,
-            @Qualifier("plainOpenAiChatModel") OpenAiChatModel plainOpenAiChatModel,
+            ModelRuntimeClientFactory modelRuntimeClientFactory,
             ChatMemory chatMemory,
             ConversationHistoryService conversationHistoryService,
             ChatFileService chatFileService,
@@ -74,10 +70,8 @@ public class ChatConversationService {
             SkillCatalogService skillCatalogService,
             IntegrationDatasetService integrationDatasetService,
             IntegrationDatasetAgentToolRegistry integrationDatasetAgentToolRegistry,
-            ChatModelProperties chatModelProperties,
             SkillKit skillKit) {
-        this.plainChatClient = plainChatClient;
-        this.plainOpenAiChatModel = plainOpenAiChatModel;
+        this.modelRuntimeClientFactory = modelRuntimeClientFactory;
         this.chatMemory = chatMemory;
         this.conversationHistoryService = conversationHistoryService;
         this.chatFileService = chatFileService;
@@ -85,7 +79,6 @@ public class ChatConversationService {
         this.skillCatalogService = skillCatalogService;
         this.integrationDatasetService = integrationDatasetService;
         this.integrationDatasetAgentToolRegistry = integrationDatasetAgentToolRegistry;
-        this.chatModelProperties = chatModelProperties;
         this.skillKit = skillKit;
     }
 
@@ -222,18 +215,31 @@ public class ChatConversationService {
             return meta.concatWith(buildSkillStreamingResponse(context, prepared));
         }
 
+        ModelRuntimeClientFactory.ChatRuntimeBundle chatRuntimeBundle = modelRuntimeClientFactory.createChatBundle();
         AtomicReference<String> last = new AtomicReference<>("");
         AtomicBoolean finalized = new AtomicBoolean(false);
         long startedAt = System.currentTimeMillis();
-        Flux<ServerSentEvent<String>> stream = buildGeneralStreamingResponse(context, prepared, last);
-        stream = finalizeResponse(stream, context, prepared, last, List.of(), finalized, startedAt)
+        Flux<ServerSentEvent<String>> stream =
+                buildGeneralStreamingResponse(chatRuntimeBundle.chatClient(), context, prepared, last);
+        stream = finalizeResponse(
+                        stream,
+                        context,
+                        prepared,
+                        chatRuntimeBundle.config(),
+                        last,
+                        List.of(),
+                        finalized,
+                        startedAt)
                 .concatWithValues(doneEvent());
         return meta.concatWith(stream);
     }
 
     private Flux<ServerSentEvent<String>> buildGeneralStreamingResponse(
-            ConversationHistoryService.ConversationContext context, PreparedChat prepared, AtomicReference<String> last) {
-        ChatClient.ChatClientRequestSpec spec = buildRequestSpec(plainChatClient, context, prepared);
+            ChatClient chatClient,
+            ConversationHistoryService.ConversationContext context,
+            PreparedChat prepared,
+            AtomicReference<String> last) {
+        ChatClient.ChatClientRequestSpec spec = buildRequestSpec(chatClient, context, prepared);
         return spec.stream().content().flatMap(chunk -> {
             String delta = normalizeDelta(chunk);
 //            if (!StringUtils.hasText(delta)) {
@@ -260,8 +266,8 @@ public class ChatConversationService {
         AtomicLong currentRoundStartedAt = new AtomicLong(System.currentTimeMillis());
         List<Map<String, Object>> toolEvents = Collections.synchronizedList(new ArrayList<>());
         long startedAt = System.currentTimeMillis();
-        ChatClient skillChatClient = createSkillChatClient(prepared);
-        ChatClient.ChatClientRequestSpec spec = buildRequestSpec(skillChatClient, context, prepared);
+        ModelRuntimeClientFactory.ChatRuntimeBundle skillChatBundle = createSkillChatBundle(prepared);
+        ChatClient.ChatClientRequestSpec spec = buildRequestSpec(skillChatBundle.chatClient(), context, prepared);
         Sinks.Many<ServerSentEvent<String>> toolSink = Sinks.many().unicast().onBackpressureBuffer();
         BiConsumer<String, String> publisher = (eventType, payload) -> {
             String normalizedPayload = enrichToolEventPayload(payload);
@@ -309,7 +315,7 @@ public class ChatConversationService {
                     return Flux.just(messageEvent(delta));
                 })
                 .onErrorResume(error -> {
-                    logStreamingError("skill", prepared, error);
+                    logStreamingError("skill", prepared, skillChatBundle.config(), error);
                     if (finalized.compareAndSet(false, true)) {
                         String paramsJson = mergeParamsJson(prepared.paramsJson(), toolEvents);
                         conversationHistoryService.failMessage(
@@ -374,7 +380,7 @@ public class ChatConversationService {
         return spec;
     }
 
-    private ChatClient createSkillChatClient(PreparedChat prepared) {
+    private ModelRuntimeClientFactory.ChatRuntimeBundle createSkillChatBundle(PreparedChat prepared) {
         ToolCallingManager delegate = DefaultToolCallingManager.builder()
                 .toolCallbackResolver(new DelegatingToolCallbackResolver(List.of(
                         new StaticToolCallbackResolver(prepared.toolCallbacks()),
@@ -384,23 +390,20 @@ public class ChatConversationService {
                 .skillKit(skillKit)
                 .delegate(delegate)
                 .build();
-        OpenAiChatModel requestModel =
-                plainOpenAiChatModel.mutate().toolCallingManager(toolCallingManager).build();
-        return ChatClient.builder(requestModel)
-                .defaultSystem(chatModelProperties.getSystemPrompt())
-                .build();
+        return modelRuntimeClientFactory.createChatBundle(toolCallingManager);
     }
 
     private Flux<ServerSentEvent<String>> finalizeResponse(
             Flux<ServerSentEvent<String>> stream,
             ConversationHistoryService.ConversationContext context,
             PreparedChat prepared,
+            ModelRuntimeConfigResolver.ResolvedChatModelConfig chatConfig,
             AtomicReference<String> last,
             List<Map<String, Object>> toolEvents,
             AtomicBoolean finalized,
             long startedAt) {
         return stream.onErrorResume(error -> {
-                    logStreamingError("general", prepared, error);
+                    logStreamingError("general", prepared, chatConfig, error);
                     if (finalized.compareAndSet(false, true)) {
                         String paramsJson = mergeParamsJson(prepared.paramsJson(), toolEvents);
                         conversationHistoryService.failMessage(
@@ -436,13 +439,17 @@ public class ChatConversationService {
                 });
     }
 
-    private void logStreamingError(String scene, PreparedChat prepared, Throwable error) {
+    private void logStreamingError(
+            String scene,
+            PreparedChat prepared,
+            ModelRuntimeConfigResolver.ResolvedChatModelConfig chatConfig,
+            Throwable error) {
         if (error instanceof WebClientResponseException responseException) {
             logger.error(
                     "聊天流式请求失败：scene={}, provider={}, model={}, sessionType={}, scopeId={}, status={}, responseBody={}",
                     scene,
-                    chatModelProperties.getProvider(),
-                    chatModelProperties.getModel(),
+                    chatConfig.provider(),
+                    chatConfig.model(),
                     prepared.sessionType().name(),
                     prepared.scopeId(),
                     responseException.getStatusCode().value(),
@@ -453,8 +460,8 @@ public class ChatConversationService {
         logger.error(
                 "聊天流式请求失败：scene={}, provider={}, model={}, sessionType={}, scopeId={}, error={}",
                 scene,
-                chatModelProperties.getProvider(),
-                chatModelProperties.getModel(),
+                chatConfig.provider(),
+                chatConfig.model(),
                 prepared.sessionType().name(),
                 prepared.scopeId(),
                 error.getMessage(),

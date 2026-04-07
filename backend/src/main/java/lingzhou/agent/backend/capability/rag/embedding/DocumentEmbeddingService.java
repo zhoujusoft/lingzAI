@@ -3,9 +3,9 @@ package lingzhou.agent.backend.capability.rag.embedding;
 import java.util.ArrayList;
 import java.util.List;
 import lingzhou.agent.backend.business.datasets.domain.DocumentChunk;
+import lingzhou.agent.backend.capability.modelruntime.ModelRuntimeClientFactory;
 import lingzhou.agent.backend.capability.rag.chunk.tool.TableChunkContentSupport;
 import org.springframework.ai.embedding.Embedding;
-import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.embedding.EmbeddingRequest;
 import org.springframework.ai.embedding.EmbeddingResponse;
 import org.springframework.stereotype.Service;
@@ -15,10 +15,10 @@ public class DocumentEmbeddingService {
 
     private static final int MAX_BATCH_SIZE = 10;
 
-    private final EmbeddingModel embeddingModel;
+    private final ModelRuntimeClientFactory modelRuntimeClientFactory;
 
-    public DocumentEmbeddingService(EmbeddingModel embeddingModel) {
-        this.embeddingModel = embeddingModel;
+    public DocumentEmbeddingService(ModelRuntimeClientFactory modelRuntimeClientFactory) {
+        this.modelRuntimeClientFactory = modelRuntimeClientFactory;
     }
 
     public List<VectorizedChunk> embedChunks(List<DocumentChunk> chunks) {
@@ -26,6 +26,7 @@ public class DocumentEmbeddingService {
             return List.of();
         }
 
+        var embeddingModel = modelRuntimeClientFactory.createEmbeddingModel();
         List<VectorizedChunk> vectorizedChunks = new ArrayList<>(chunks.size());
         for (int start = 0; start < chunks.size(); start += MAX_BATCH_SIZE) {
             int end = Math.min(start + MAX_BATCH_SIZE, chunks.size());
@@ -51,6 +52,7 @@ public class DocumentEmbeddingService {
             throw new IllegalArgumentException("Embedding text must not be blank.");
         }
 
+        var embeddingModel = modelRuntimeClientFactory.createEmbeddingModel();
         EmbeddingResponse response = embeddingModel.call(new EmbeddingRequest(List.of(text), null));
         List<Embedding> embeddings = response.getResults();
         if (embeddings == null || embeddings.isEmpty()) {

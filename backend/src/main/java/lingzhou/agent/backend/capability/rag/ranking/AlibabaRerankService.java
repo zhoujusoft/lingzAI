@@ -5,10 +5,9 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import lingzhou.agent.backend.app.RagRerankProperties;
+import lingzhou.agent.backend.capability.modelruntime.ModelRuntimeConfigResolver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.core.env.Environment;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
@@ -25,31 +24,29 @@ public class AlibabaRerankService {
 
     private static final Logger log = LoggerFactory.getLogger(AlibabaRerankService.class);
 
-    private final RagRerankProperties properties;
-    private final RestClient restClient;
-    private final Environment environment;
+    private final ModelRuntimeConfigResolver modelRuntimeConfigResolver;
 
-    public AlibabaRerankService(RagRerankProperties properties, Environment environment) {
-        this.properties = properties;
-        this.environment = environment;
-        this.restClient = buildClient(properties);
+    public AlibabaRerankService(ModelRuntimeConfigResolver modelRuntimeConfigResolver) {
+        this.modelRuntimeConfigResolver = modelRuntimeConfigResolver;
     }
 
     public boolean isEnabled() {
-        return Boolean.TRUE.equals(properties.getEnabled());
+        return Boolean.TRUE.equals(modelRuntimeConfigResolver.resolveRerankConfig().enabled());
     }
 
     public boolean allowFallbackToRrf() {
-        return !Boolean.FALSE.equals(properties.getFallbackRrf());
+        return !Boolean.FALSE.equals(modelRuntimeConfigResolver.resolveRerankConfig().fallbackRrf());
     }
 
     public List<RerankResult> rerank(String query, List<String> documents, int topN) {
-        if (!isEnabled()) {
+        ModelRuntimeConfigResolver.ResolvedRerankModelConfig config = modelRuntimeConfigResolver.resolveRerankConfig();
+        if (!Boolean.TRUE.equals(config.enabled())) {
             return List.of();
         }
         if (!StringUtils.hasText(query) || documents == null || documents.isEmpty()) {
             return List.of();
         }
+        RestClient restClient = buildClient(config);
         if (restClient == null) {
             throw new IllegalStateException("Rerank 配置不完整，无法调用重排序模型。");
         }
@@ -58,9 +55,9 @@ public class AlibabaRerankService {
         try {
             response = restClient
                     .post()
-                    .uri(resolvePath(properties))
+                    .uri(resolvePath(config))
                     .contentType(MediaType.APPLICATION_JSON)
-                    .body(buildRequestBody(query, documents, topN))
+                    .body(buildRequestBody(config, query, documents, topN))
                     .retrieve()
                     .body(Object.class);
         } catch (RestClientResponseException ex) {
@@ -72,27 +69,31 @@ public class AlibabaRerankService {
         return parseResults(response);
     }
 
-    private RestClient buildClient(RagRerankProperties props) {
-        String normalizedBaseUrl = normalizeBaseUrl(props.getBaseUrl());
-        if (!StringUtils.hasText(normalizedBaseUrl) || !StringUtils.hasText(props.getApiKey())) {
+    private RestClient buildClient(ModelRuntimeConfigResolver.ResolvedRerankModelConfig config) {
+        String normalizedBaseUrl = normalizeBaseUrl(config.baseUrl());
+        if (!StringUtils.hasText(normalizedBaseUrl) || !StringUtils.hasText(config.apiKey())) {
             return null;
         }
 
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory();
-        int timeoutMs = props.getTimeoutMs() == null || props.getTimeoutMs() <= 0 ? 1200 : props.getTimeoutMs();
+        int timeoutMs = config.timeoutMs() == null || config.timeoutMs() <= 0 ? 1200 : config.timeoutMs();
         requestFactory.setReadTimeout(Duration.ofMillis(timeoutMs));
         return RestClient.builder()
                 .baseUrl(normalizedBaseUrl)
-                .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + props.getApiKey())
+                .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + config.apiKey())
                 .requestFactory(requestFactory)
                 .build();
     }
 
-    Map<String, Object> buildRequestBody(String query, List<String> documents, int topN) {
+    Map<String, Object> buildRequestBody(
+            ModelRuntimeConfigResolver.ResolvedRerankModelConfig config,
+            String query,
+            List<String> documents,
+            int topN) {
         int safeTopN = Math.max(1, Math.min(topN, documents.size()));
-        RerankProtocol protocol = resolveProtocol();
+        RerankProtocol protocol = resolveProtocol(config);
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("model", properties.getModel());
+        body.put("model", config.model());
 
         if (protocol == RerankProtocol.VLLM) {
             body.put("query", query);
@@ -128,12 +129,12 @@ public class AlibabaRerankService {
         return normalized;
     }
 
-    static String resolvePath(RagRerankProperties properties) {
-        String configured = StringUtils.hasText(properties.getPath()) ? properties.getPath().trim() : DASHSCOPE_DEFAULT_PATH;
+    static String resolvePath(ModelRuntimeConfigResolver.ResolvedRerankModelConfig config) {
+        String configured = StringUtils.hasText(config.path()) ? config.path().trim() : DASHSCOPE_DEFAULT_PATH;
         if (!configured.startsWith("/")) {
             configured = "/" + configured;
         }
-        String baseUrl = normalizeBaseUrl(properties.getBaseUrl());
+        String baseUrl = normalizeBaseUrl(config.baseUrl());
         boolean dashscope = StringUtils.hasText(baseUrl) && baseUrl.contains(DASHSCOPE_HOST);
         if (dashscope && ("/v1/rerank".equals(configured) || "/v1/reranks".equals(configured))) {
             return DASHSCOPE_DEFAULT_PATH;
@@ -141,23 +142,18 @@ public class AlibabaRerankService {
         return configured;
     }
 
-    private RerankProtocol resolveProtocol() {
-        if (StringUtils.hasText(properties.getProtocol())) {
-            return RerankProtocol.from(properties.getProtocol());
+    private RerankProtocol resolveProtocol(ModelRuntimeConfigResolver.ResolvedRerankModelConfig config) {
+        if (StringUtils.hasText(config.protocol())) {
+            return RerankProtocol.from(config.protocol());
         }
-        for (String activeProfile : environment.getActiveProfiles()) {
-            if ("vllm".equalsIgnoreCase(activeProfile)) {
-                return RerankProtocol.VLLM;
-            }
-            if ("qwen".equalsIgnoreCase(activeProfile) || "qwen-online".equalsIgnoreCase(activeProfile)) {
-                return RerankProtocol.DASHSCOPE;
-            }
+        if ("VLLM".equalsIgnoreCase(config.adapterType()) || "vllm".equalsIgnoreCase(config.adapterType())) {
+            return RerankProtocol.VLLM;
         }
-        String path = resolvePath(properties);
+        String path = resolvePath(config);
         if ("/v1/rerank".equals(path) || "/v1/reranks".equals(path)) {
             return RerankProtocol.VLLM;
         }
-        log.warn("未显式配置 Rerank 协议，按 DashScope 兼容格式处理：baseUrl={}, path={}", shorten(properties.getBaseUrl(), 120), path);
+        log.warn("未显式配置 Rerank 协议，按 DashScope 兼容格式处理：baseUrl={}, path={}", shorten(config.baseUrl(), 120), path);
         return RerankProtocol.DASHSCOPE;
     }
 

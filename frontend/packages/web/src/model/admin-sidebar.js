@@ -4,6 +4,7 @@ export const ADMIN_HOME_VIEWS = Object.freeze({
     KNOWLEDGE: 'knowledge',
     SKILL_MANAGEMENT: 'skill-management',
     MCP_MANAGEMENT: 'mcp-management',
+    MODEL_LIBRARY: 'model-library',
     DATABASE: 'database',
     API_LIBRARY: 'api-library',
     TOOL_LIBRARY: 'tool-library',
@@ -36,6 +37,13 @@ export const ADMIN_SIDEBAR_ITEMS = Object.freeze([
         icon: 'hub',
         view: ADMIN_HOME_VIEWS.MCP_MANAGEMENT,
         path: ROUTE_PATHS.adminMcpManagement,
+    },
+    {
+        id: ADMIN_HOME_VIEWS.MODEL_LIBRARY,
+        label: '模型库',
+        icon: 'deployed_code',
+        view: ADMIN_HOME_VIEWS.MODEL_LIBRARY,
+        path: ROUTE_PATHS.adminModelLibrary,
     },
     {
         id: ADMIN_HOME_VIEWS.DATABASE,

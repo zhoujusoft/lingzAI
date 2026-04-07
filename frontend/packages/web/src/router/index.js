@@ -10,6 +10,7 @@ import AdminKnowledgePage from '../views/admin/pages/AdminKnowledgePage.vue';
 import AdminMcpManagementPage from '../views/admin/pages/AdminMcpManagementPage.vue';
 import AdminMcpServerDetailPage from '../views/admin/pages/AdminMcpServerDetailPage.vue';
 import AdminMcpServerFormPage from '../views/admin/pages/AdminMcpServerFormPage.vue';
+import AdminModelLibraryPage from '../views/admin/pages/AdminModelLibraryPage.vue';
 import AdminSkillManagementPage from '../views/admin/pages/AdminSkillManagementPage.vue';
 import AdminLowcodeApiLibraryPage from '../views/admin/pages/AdminLowcodeApiLibraryPage.vue';
 import AdminIntegrationDataSourcePage from '../views/admin/pages/AdminIntegrationDataSourcePage.vue';
@@ -75,6 +76,12 @@ const adminChildren = [
         path: 'mcp',
         name: 'admin-mcp-management',
         component: AdminMcpManagementPage,
+        meta: { requiresAuth: true, area: 'admin' },
+    },
+    {
+        path: 'model-library',
+        name: 'admin-model-library',
+        component: AdminModelLibraryPage,
         meta: { requiresAuth: true, area: 'admin' },
     },
     {
