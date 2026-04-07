@@ -84,7 +84,7 @@ if [ -f "$DEPLOY_DIR/.env" ]; then
   load_env_if_unset "MAVEN_MIRROR_URL" "$ENV_DOT_FILE"
 fi
 
-REGISTRY=registry.example.com:5001
+REGISTRY="${REGISTRY:-registry.example.com:5001}"
 IMAGE_TAG="${IMAGE_TAG:-}"
 FRONTEND_IMAGE_NAME="${FRONTEND_IMAGE_NAME:-lingzhou-frontend}"
 BACKEND_IMAGE_NAME="${BACKEND_IMAGE_NAME:-lingzhou-backend}"
@@ -193,7 +193,7 @@ if git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1 && [ "$AL
   fi
 fi
 
-if [ -n "${REGISTRY_USERNAME:change-me-user" ] && [ -n "${REGISTRY_PASSWORD:change-me-password" ]; then
+if [ -n "${REGISTRY_USERNAME:-}" ] && [ -n "${REGISTRY_PASSWORD:-}" ]; then
   printf '%s' "$REGISTRY_PASSWORD" | docker login "$REGISTRY" --username "$REGISTRY_USERNAME" --password-stdin
 fi
 

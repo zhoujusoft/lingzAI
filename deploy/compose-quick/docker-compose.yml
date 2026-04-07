@@ -1,7 +1,7 @@
 services:
   frontend:
     restart: unless-stopped
-    image: ${REGISTRY:registry.example.com:5001
+    image: ${REGISTRY:-registry.example.com:5001}/${FRONTEND_IMAGE_NAME:-lingzhou-frontend}:${IMAGE_TAG:-1.1.0}
     depends_on:
       - backend
     ports:
@@ -9,7 +9,7 @@ services:
 
   backend:
     restart: unless-stopped
-    image: ${REGISTRY:registry.example.com:5001
+    image: ${REGISTRY:-registry.example.com:5001}/${BACKEND_IMAGE_NAME:-lingzhou-backend}:${IMAGE_TAG:-1.1.0}
     environment:
       TZ: ${TZ:-Asia/Shanghai}
       SERVER_PORT: 5050
@@ -28,10 +28,10 @@ services:
       APP_CHAT_PROVIDER: ${APP_CHAT_PROVIDER:-qwen-online}
       APP_CHAT_MEMORY_TYPE: ${APP_CHAT_MEMORY_TYPE:-in-memory}
       APP_CHAT_VLLM_BASE_URL: ${APP_CHAT_VLLM_BASE_URL:-}
-      APP_CHAT_VLLM_API_KEY: ${APP_CHAT_VLLM_API_KEY:change-me-api-key
+      APP_CHAT_VLLM_API_KEY: ${APP_CHAT_VLLM_API_KEY:-change-me-api-key}
       APP_CHAT_VLLM_MODEL: ${APP_CHAT_VLLM_MODEL:-}
       APP_CHAT_QWEN_ONLINE_BASE_URL: ${APP_CHAT_QWEN_ONLINE_BASE_URL:-}
-      APP_CHAT_QWEN_ONLINE_API_KEY: ${APP_CHAT_QWEN_ONLINE_API_KEY:change-me-api-key
+      APP_CHAT_QWEN_ONLINE_API_KEY: ${APP_CHAT_QWEN_ONLINE_API_KEY:-change-me-api-key}
       APP_CHAT_QWEN_ONLINE_MODEL: ${APP_CHAT_QWEN_ONLINE_MODEL:-}
       APP_EMBEDDING_BASE_URL: ${APP_EMBEDDING_BASE_URL}
       APP_EMBEDDING_API_KEY: change-me-api-key

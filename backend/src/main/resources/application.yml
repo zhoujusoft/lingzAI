@@ -50,7 +50,7 @@ spring:
       host: localhost
       port: 16379
       password:
-      change-me-password
+      database: 0
       timeout: 5000ms
       lettuce:
         pool:
@@ -138,7 +138,7 @@ app:
   skills:
     root-dir: ./skills
     package:
-      password: ${SKILL_PACKAGE_PASSWORD:change-me-password
+      password: ${SKILL_PACKAGE_PASSWORD:change-me-password}
     installer:
       enable-dependency-install: true
       python-command: python3
@@ -170,7 +170,7 @@ app:
       fallback-disclaimer: "以上回答基于通用模型能力，非知识库依据。"
   sso:
     enabled: true
-    shared-secret: change-me-secret
+    shared-secret: ${APP_SSO_SHARED_SECRET:change-me-shared-secret}
     request-expire-seconds: 300
     nonce-expire-seconds: 300
     allowed-source-systems: oa

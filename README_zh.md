@@ -1,63 +1,112 @@
-# Spring AI Skill Extension
+# Lingzhou Agent
 
 [English Documentation](./README.md)
 
-一个用于构建 **Skill-Aware（技能感知）AI 应用** 的多模块项目，基于 Spring AI 实现。
-包含以下模块：
+Lingzhou Agent 是一个基于 Spring Boot、Spring AI、Vue 3 与 Docker Compose 构建的开源 AI 应用工程。
+它将聊天、技能感知工具编排、知识库 RAG、数据集管理和集成能力放在同一个仓库中，方便本地开发、二次集成和私有化部署。
 
-- `core`：可复用的技能框架
-- `backend`：Spring Boot 示例后端（聊天、技能激活、文件上传）
-- `frontend`：Vue 3 聊天与技能市场界面
+当前仓库主要包含：
 
-## 项目结构
+- `core`：可复用的技能感知扩展模块
+- `backend`：Spring Boot 后端，承载聊天、知识库、数据集、工具发布与集成能力
+- `frontend`：基于 Vue 3 的前端工作区
+- `deploy`：Docker Compose、镜像构建、环境模板与部署脚本
+
+## 核心特性
+
+- 基于 Spring AI 的技能感知聊天能力
+- 基于文件系统的技能包加载与运行时工具注入
+- 知识库文档上传、切片、检索、问答链路
+- 数据集管理与数据集发布为工具
+- 预留 MCP 与外部平台集成扩展点
+- 提供 Docker Quick 模式，便于快速体验和单机部署
+
+## 仓库结构
 
 ```text
 .
-├── core/        # 技能框架（注册、激活、懒加载、工具注入）
-├── backend/     # 基于框架的 Spring Boot 应用
-├── frontend/    # Vue3 + Vite 前端应用
-└── pom.xml      # Maven 父工程
+├── backend/                # Spring Boot 应用
+├── core/                   # 可复用的技能扩展核心模块
+├── frontend/               # pnpm workspace
+│   ├── packages/core/      # 前端共享能力
+│   └── packages/web/       # Vue 3 + Vite Web 应用
+├── deploy/                 # Docker Compose、镜像、环境模板、辅助脚本
+├── docs/                   # 设计文档与接口说明
+├── pom.xml                 # Maven 父工程
+├── README.md
+└── README_zh.md
 ```
 
-## 核心能力
+## 技术栈
 
-- 根据激活技能动态注入工具
-- 通过 `loadSkillContent(skillName)` 渐进式加载技能
-- 技能生命周期控制（activate/deactivate/evict）
-- 基于 SSE 的流式聊天响应
-- 示例后端内置文件上传与本地文件/Python 工具
+- 后端：Java 17、Spring Boot 3.4、Spring AI、MyBatis-Plus、Redis、MinIO、Elasticsearch
+- 前端：Vue 3、Vite、pnpm workspace、Tailwind CSS
+- 部署：Docker Compose
 
-## 环境要求
+## 快速开始
 
-- Java 17+
-- Maven 3.9+
-- Node.js 18+
-- pnpm 8+
+### 方案 A：使用 Docker Compose 快速体验
 
-## 快速开始（本地）
+这是最适合第一次启动项目的方式。
 
-### 1) 启动后端
+1. 复制 Quick 部署环境模板：
 
-在仓库根目录执行：
+```bash
+cp deploy/compose-quick/.env.example deploy/compose-quick/.env
+```
+
+2. 编辑 `deploy/compose-quick/.env`，至少填写以下模型相关配置：
+
+- `APP_CHAT_QWEN_ONLINE_API_KEY`
+- `APP_EMBEDDING_API_KEY`
+- `APP_RAG_RERANK_API_KEY`
+
+3. 启动整套服务：
+
+```bash
+./deploy/manage.sh quick-up
+```
+
+默认情况下：
+
+- 前端端口为 `80`
+- 后端 API 上下文路径为 `/api`
+
+相关文档：
+
+- `deploy/README.md`
+- `deploy/compose-quick/README.md`
+
+### 方案 B：本地开发模式
+
+如果你希望中间件走 Docker、本地直接运行前后端进程，可以使用这个流程。
+
+1. 启动开发用中间件：
+
+```bash
+cp deploy/.env.dev.example deploy/.env.dev
+./deploy/manage.sh dev-up
+```
+
+该流程会准备并启动：
+
+- MySQL：`3306`
+- Redis：`16379`
+- MinIO：`19000`、`19001`
+- Elasticsearch：`9200`
+
+2. 在仓库根目录启动后端：
 
 ```bash
 mvn -f backend/pom.xml spring-boot:run
 ```
 
-后端默认端口：`8080`
+后端默认信息：
 
-若你已经进入 `backend/` 目录，请改用：
+- 基础地址：`http://localhost:5050`
+- API 上下文路径：`/api`
 
-```bash
-mvn spring-boot:run
-```
-
-说明：
-
-- `mvn -pl backend -am ...` 只能在仓库根目录执行，因为它依赖根 `pom.xml` 中的 reactor modules。
-- 若在 `backend/` 子目录执行 `mvn -pl backend -am ...`，会报 `Could not find the selected project in the reactor: backend`。
-
-### 2) 启动前端
+3. 启动前端：
 
 ```bash
 cd frontend
@@ -65,130 +114,74 @@ pnpm install
 pnpm dev
 ```
 
-前端默认端口：`5173`
+前端开发服务器默认地址为 `http://localhost:5173`，并将 `/api` 代理到后端。
 
-Vite 已配置将 `/api` 代理到 `http://localhost:8080`。
+更多说明见 `deploy/README.dev.md`。
 
-## API 概览
+## 主要功能域
 
-基础路径：`/api`
+### 1. 聊天与 Agent 交互
 
-- `POST /chat`（SSE 流式）
-- `GET /skills`
-- `POST /skills/{name}/activate`
-- `POST /skills/{name}/deactivate`
-- `POST /skills/{name}/evict`
-- `POST /skills/deactivate-all`
-- `POST /files/upload`（multipart）
+- 对话接口
+- 流式响应
+- 会话管理扩展点
+- 聊天相关文件上传能力
 
-主要控制器：`backend/src/main/java/lingzhou/agent/backend/app/ClothingSkillController.java`
+### 2. 技能感知运行时
 
-## 技能加载机制
+- 基于文件系统的技能包
+- 按需加载技能内容
+- 运行时工具注册与激活
+- MCP 与自定义工具扩展能力
 
-1. 技能在后端配置中完成注册。
-2. 模型可调用框架工具：
-   - `loadSkillContent(skillName)`
-   - `loadSkillReference(skillName, referenceKey)`
-   - `listActiveSkills()`
-3. 技能激活后，其工具会并入模型可用工具定义。
-4. 工具调用与结果通过 SSE 事件回传前端。
+### 3. 知识库与 RAG
 
-核心类：
+- 知识库管理
+- 文档上传与解析
+- 文档切片与索引
+- 检索、重排与问答编排
 
-- `core/src/main/java/com/semir/spring/ai/skill/core/DefaultSkillKit.java`
-- `core/src/main/java/com/semir/spring/ai/skill/spi/SkillAwareAdvisor.java`
-- `core/src/main/java/com/semir/spring/ai/skill/spi/SkillAwareToolCallingManager.java`
+### 4. 数据集与集成管理
 
-## 构建与测试
+- 数据集实体与绑定关系
+- 数据集发布为可调用工具
+- 低代码平台浏览与接入支持
+- 平台配置与系统管理接口
 
-在仓库根目录：
+## 配置说明
 
-```bash
-mvn test
-```
+- 后端默认 profile 为 `qwen`。
+- 大多数运行参数都支持通过环境变量覆盖。
+- 开源版部署前请替换所有占位配置，不要直接使用示例值上线。
+- 如果你要启用文件系统技能，请自行提供 `./skills` 目录，或在运行时挂载该目录。
 
-前端生产构建：
+## 文档导航
 
-```bash
-cd frontend
-pnpm build
-```
+- RAG 设计资料：[`docs/rag/`](./docs/rag/)
+- SSO 换 token 接口说明：[`docs/sso-exchange-token-api.md`](./docs/sso-exchange-token-api.md)
+- 部署文档：[`deploy/README.md`](./deploy/README.md)、[`deploy/README.dev.md`](./deploy/README.dev.md)
 
-### 国内网络构建说明
+## 开源版说明
 
-仓库已提供依赖下载镜像默认值：
+面向公开发布的社区版通常会做裁剪，不会完整保留内部协作元数据、私有配置和非公开技能资源。
 
-- npm/pnpm 源：`https://registry.npmmirror.com`（通过 `frontend/.npmrc`）
-- Maven 镜像：通过 `MAVEN_MIRROR_URL` 配置（默认阿里云）
-- pip 源：通过 `PIP_INDEX_URL` 配置（默认清华 Tuna）
+如果你使用的是社区版导出包，建议注意：
 
-容器运行时，pip 相关值会通过 `docker-compose.yml` backend 的环境变量传入。
-若需切回官方源，可在 `deploy/.env`（模板：`deploy/.env.example`）中覆盖对应变量。
+- 自行准备模型 API Key 与环境变量
+- 如需技能能力，请自行创建或挂载 `skills` 目录
+- 对外部署前请重新检查默认配置、安全边界和代理规则
 
-## Docker 说明
+## 安全提示
 
-仓库的 Docker 部署文件统一放在 `deploy/` 下（`docker-compose.yml`、`docker-compose.dev.yml`、`docker/*.Dockerfile`）。
-在生产使用前，请确认镜像构建路径、技能挂载路径与运行时配置符合你的部署环境。
+- 不要提交真实 API Key、密码、Token 或私有地址
+- Docker 与应用配置文件默认只提供模板参考，不代表生产环境最佳实践
+- 对公网开放前，请补齐认证、权限控制、密钥管理和日志审计
 
-### deploy 目录部署流程
+## 贡献方式
 
-```bash
-cd deploy
-cp .env.example .env
-docker compose up -d
-```
-
-部署说明文档见：`deploy/README.md`。
-也可以在仓库根目录执行 `./deploy/manage.sh up`。
-
-### 镜像版本化构建与推送
-
-前后端使用同一个 `deploy/release.env` 版本号：
-
-- `REGISTRY=registry.example.com:5001
-- `IMAGE_TAG=1.1.0`
-- `FRONTEND_IMAGE_NAME=lingzhou-frontend`
-- `BACKEND_IMAGE_NAME=lingzhou-backend`
-
-构建后的镜像名：
-
-- `125.75.152.167:5001/lingzhou-frontend:${IMAGE_TAG}`
-- `125.75.152.167:5001/lingzhou-backend:${IMAGE_TAG}`
-
-命令：
-
-```bash
-# 可选：先更新 IMAGE_TAG
-./deploy/manage.sh release-prepare
-# 使用 deploy/release.env 的版本号构建并推送前后端镜像，完成后自动打 git tag
-./deploy/manage.sh release-publish
-# 一条命令完成发布
-./deploy/manage.sh release
-```
-
-发布逻辑：
-
-- `release-prepare.sh` 读取并更新 `deploy/release.env` 的 `IMAGE_TAG`（默认补丁号 +1，且必须是 `x.y.z`）
-- `build-and-push-images.sh` 构建并推送前后端镜像到私服
-- 推送成功后自动创建本地 release 提交（`chore(release): v${IMAGE_TAG}`）
-- 自动创建并推送 Git Tag：`v${IMAGE_TAG}` 到 `origin`
-- 分支提交不会自动推送，需要手动执行 `git push`
-
-## 安全说明
-
-- 请勿提交真实 API Key 或其他密钥。
-- `deploy/.env` 放部署敏感运行配置并保持 git 忽略。
-- `deploy/.env.dev` 放本地开发覆盖配置并保持 git 忽略。
-- `deploy/release.env` 放版本号和镜像发布配置并提交到仓库。
-- 示例后端暴露了文件/Python 工具，生产部署前应增加严格权限边界。
+欢迎提交 Issue 和 Pull Request。
+提交修改时，建议保持改动聚焦、描述清晰，并同步更新相关文档与配置说明。
 
 ## License
 
-Apache License 2.0，详见 `LICENSE`。
-
-
-请求地址：/api/IntegrationConnect/ExecuteApi/{apiCode}
-
-请求头： 同之前接口一样
-
-请求体： 
+详见 [`LICENSE`](./LICENSE)。
