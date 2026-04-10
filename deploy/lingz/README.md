@@ -130,11 +130,13 @@ sudo systemctl daemon-reload && \
 
 ## 必填配置
 
-启动前请按实际厂商需求填写 `.env` / `release.env` 中的模型参数。
-当前配置口径为：
+当前 `deploy/lingz` 部署方式不再要求在 `.env` / `release.env` 中预先填写模型 Key。
 
-- 模型表维护：`baseUrl`、`path`、`modelName`
-- 配置文件维护：`model.qwen.*`、`model.vllm.*` 对应的运行参数
+当前口径为：
+
+- 部署前只需维护基础环境配置，例如镜像、端口、数据库、Redis、MinIO、ES 等运行参数
+- 模型厂商与模型实例相关配置统一在系统内维护，不再依赖 `deploy/lingz` 侧提前写死模型 Key
+- 如果 `.env.example` 中仍保留部分模型相关项，可视为兼容保留字段；当前部署不是必填项
 
 ## 快速开始
 
@@ -181,4 +183,5 @@ docker compose --env-file .env -f docker-compose.yml down
 ## 说明
 
 - Quick 部署已改为统一配置入口，不再通过 `qwen` / `vllm` profile 切换模型配置。
+- `deploy/lingz` 当前不要求额外配置模型 Key，模型相关能力由系统内配置接管。
 - `frontend` 与 `backend` 都直接从镜像仓库拉取，不在当前 compose 中本地构建。
