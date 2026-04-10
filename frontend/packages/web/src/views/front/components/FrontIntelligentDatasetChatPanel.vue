@@ -38,10 +38,17 @@ function normalizeDatasetId(value) {
     return text;
 }
 
+function isPublishedDataset(item) {
+    return String(item?.publishStatus || '').trim().toUpperCase() === 'PUBLISHED';
+}
+
 function buildDatasetOptions(records = []) {
     const options = [];
     const seen = new Set();
     records.forEach(item => {
+        if (!isPublishedDataset(item)) {
+            return;
+        }
         const value = normalizeDatasetId(item?.id);
         const label = String(item?.name || '').trim();
         if (!value || !label || seen.has(value)) {

@@ -8,6 +8,7 @@ import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -31,6 +32,18 @@ public class IntegrationDatasetToolRuntimeService {
     private static final Pattern FROM_JOIN_PATTERN =
             Pattern.compile("(?i)\\b(?:from|join)\\s+([`\"\\w.]+)");
     private static final Pattern LIMIT_PATTERN = Pattern.compile("(?i)\\blimit\\s+\\d+");
+    private static final List<String> FORBIDDEN_SQL_KEYWORDS = List.of(
+            "insert",
+            "update",
+            "delete",
+            "drop",
+            "alter",
+            "truncate",
+            "create",
+            "grant",
+            "revoke",
+            "merge",
+            "replace");
     private static final int DEFAULT_LIMIT = 100;
     private static final int MAX_LIMIT = 200;
     private static final ObjectMapper JSON = new ObjectMapper();
@@ -160,13 +173,11 @@ public class IntegrationDatasetToolRuntimeService {
         if (catalog == null || !StringUtils.hasText(catalog.getSource()) || !catalog.getSource().startsWith("dataset:")) {
             throw new TaskException("未找到对应的数据集工具：" + toolName, TaskException.Code.UNKNOWN);
         }
-        Long datasetId;
-        try {
-            datasetId = Long.parseLong(catalog.getSource().substring("dataset:".length()).trim());
-        } catch (NumberFormatException ex) {
-            throw new TaskException("数据集工具来源无效：" + catalog.getSource(), TaskException.Code.UNKNOWN, ex);
+        String datasetCode = catalog.getSource().substring("dataset:".length()).trim();
+        if (!StringUtils.hasText(datasetCode)) {
+            throw new TaskException("数据集工具来源无效：" + catalog.getSource(), TaskException.Code.UNKNOWN);
         }
-        return new ResolvedDataset(catalog, integrationDatasetService.getDataset(datasetId));
+        return new ResolvedDataset(catalog, integrationDatasetService.getDatasetByCode(datasetCode));
     }
 
     private List<ObjectScore> rankObjects(IntegrationDatasetService.DatasetDetail detail, String question) {
@@ -248,9 +259,10 @@ public class IntegrationDatasetToolRuntimeService {
                 .collect(java.util.stream.Collectors.joining("、"));
         if ("LOWCODE_APP".equalsIgnoreCase(trimText(detail.sourceKind()))) {
             return "该数据集主要包含以下低代码对象：" + objectText
-                    + "。若存在子表字段，系统会按主表与子表结构理解字段归属。";
+                    + "。其中 objectCode 才是 SQL 中应使用的真实表名，objectName 仅用于中文说明。若存在子表字段，系统会按主表与子表结构理解字段归属。";
         }
-        return "该数据集主要包含以下对象：" + objectText + "。生成 SQL 时请优先从这些对象中选择候选表。";
+        return "该数据集主要包含以下对象：" + objectText
+                + "。其中 objectCode 才是 SQL 中应使用的真实表名，objectName 仅用于中文说明。生成 SQL 时请优先从这些对象中选择候选表。";
     }
 
     private ObjectSchema toObjectSchema(
@@ -264,13 +276,7 @@ public class IntegrationDatasetToolRuntimeService {
             if (!isSelected(field.selected())) {
                 continue;
             }
-            FieldSchema schema = new FieldSchema(
-                    field.fieldName(),
-                    firstNonBlank(field.fieldAlias(), field.fieldName()),
-                    field.fieldType(),
-                    field.fieldScope(),
-                    field.subObjectCode(),
-                    field.subObjectName());
+            FieldSchema schema = buildFieldSchema(detail, field);
             if (StringUtils.hasText(field.subObjectCode())) {
                 String key = trimText(field.subObjectCode());
                 SubObjectSchemaBuilder builder = subtableMap.computeIfAbsent(
@@ -312,6 +318,23 @@ public class IntegrationDatasetToolRuntimeService {
                 || objectNames.contains(normalizeCode(objectBinding.objectName()));
     }
 
+    private FieldSchema buildFieldSchema(
+            IntegrationDatasetService.DatasetDetail detail,
+            IntegrationDatasetService.FieldBindingView field) {
+        String fieldName = field.fieldName();
+        String fieldLabel = firstNonBlank(field.fieldAlias(), field.fieldName());
+        if ("LOWCODE_APP".equalsIgnoreCase(trimText(detail == null ? null : detail.sourceKind()))) {
+            return new FieldSchema(fieldName, fieldLabel, "", "", "", "");
+        }
+        return new FieldSchema(
+                fieldName,
+                fieldLabel,
+                field.fieldType(),
+                field.fieldScope(),
+                field.subObjectCode(),
+                field.subObjectName());
+    }
+
     private Set<String> extractReferencedObjects(String sql) {
         Set<String> objectCodes = new LinkedHashSet<>();
         Matcher matcher = FROM_JOIN_PATTERN.matcher(sql);
@@ -345,24 +368,21 @@ public class IntegrationDatasetToolRuntimeService {
         if (!(lower.startsWith("select") || lower.startsWith("with"))) {
             throw new TaskException("仅支持 SELECT / WITH 查询 SQL", TaskException.Code.UNKNOWN);
         }
-        List<String> forbiddenKeywords = List.of(
-                "insert ",
-                "update ",
-                "delete ",
-                "drop ",
-                "alter ",
-                "truncate ",
-                "create ",
-                "grant ",
-                "revoke ",
-                "merge ",
-                "replace ");
-        for (String keyword : forbiddenKeywords) {
-            if (lower.contains(keyword)) {
-                throw new TaskException("检测到不允许的 SQL 关键字：" + keyword.trim(), TaskException.Code.UNKNOWN);
+        for (String keyword : FORBIDDEN_SQL_KEYWORDS) {
+            if (containsForbiddenSqlKeyword(lower, keyword)) {
+                throw new TaskException("检测到不允许的 SQL 关键字：" + keyword, TaskException.Code.UNKNOWN);
             }
         }
         return normalized;
+    }
+
+    private boolean containsForbiddenSqlKeyword(String sql, String keyword) {
+        if (!StringUtils.hasText(sql) || !StringUtils.hasText(keyword)) {
+            return false;
+        }
+        return Arrays.stream(sql.split("[^a-z0-9_]+"))
+                .filter(StringUtils::hasText)
+                .anyMatch(token -> token.equals(keyword));
     }
 
     private String ensureLimit(String sql, Integer requestLimit) {

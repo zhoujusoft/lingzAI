@@ -16,6 +16,8 @@ public class IntegrationDatasetObjectBinding {
 
     private String objectCode;
 
+    private String formCode;
+
     private String objectName;
 
     private String objectSource;
@@ -52,6 +54,14 @@ public class IntegrationDatasetObjectBinding {
 
     public void setObjectCode(String objectCode) {
         this.objectCode = objectCode;
+    }
+
+    public String getFormCode() {
+        return formCode;
+    }
+
+    public void setFormCode(String formCode) {
+        this.formCode = formCode;
     }
 
     public String getObjectName() {

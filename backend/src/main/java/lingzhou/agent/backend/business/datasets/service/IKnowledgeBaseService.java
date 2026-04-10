@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import java.util.List;
 import lingzhou.agent.backend.business.datasets.domain.KnowledgeBase;
 import lingzhou.agent.backend.business.datasets.domain.KnowledgeDocument;
+import lingzhou.agent.backend.common.lzException.TaskException;
 import org.springframework.web.multipart.MultipartFile;
 
 /**
@@ -21,6 +22,8 @@ public interface IKnowledgeBaseService {
      */
     public KnowledgeBase selectKnowledgeBaseByKbId(Long kbId);
 
+    public KnowledgeBase selectKnowledgeBaseByKbCode(String kbCode);
+
     /**
      * 查询存储知识库基本信息列表
      *
@@ -37,7 +40,7 @@ public interface IKnowledgeBaseService {
      * @param knowledgeBase 存储知识库基本信息
      * @return 结果
      */
-    public int insertKnowledgeBase(KnowledgeBase knowledgeBase);
+    public int insertKnowledgeBase(KnowledgeBase knowledgeBase) throws TaskException;
 
     /**
      * 修改存储知识库基本信息
@@ -45,7 +48,7 @@ public interface IKnowledgeBaseService {
      * @param knowledgeBase 存储知识库基本信息
      * @return 结果
      */
-    public int updateKnowledgeBase(KnowledgeBase knowledgeBase);
+    public int updateKnowledgeBase(KnowledgeBase knowledgeBase) throws TaskException;
 
     /**
      * 批量删除存储知识库基本信息

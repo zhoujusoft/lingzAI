@@ -10,7 +10,6 @@ import lingzhou.agent.backend.business.datasets.domain.IntegrationDataset;
 import lingzhou.agent.backend.business.datasets.domain.IntegrationDatasetPublishBinding;
 import lingzhou.agent.backend.business.datasets.mapper.IntegrationDatasetMapper;
 import lingzhou.agent.backend.business.datasets.mapper.IntegrationDatasetPublishBindingMapper;
-import lingzhou.agent.backend.business.integration.service.support.IntegrationSchemaService;
 import lingzhou.agent.backend.common.lzException.TaskException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,34 +22,31 @@ public class IntegrationDatasetPublishService {
     private static final String STATUS_PUBLISHED = "PUBLISHED";
     private static final String STATUS_DISABLED = "DISABLED";
 
-    private final IntegrationSchemaService integrationSchemaService;
     private final IntegrationDatasetMapper integrationDatasetMapper;
     private final IntegrationDatasetPublishBindingMapper publishBindingMapper;
     private final DatasetToolPublishService datasetToolPublishService;
 
     public IntegrationDatasetPublishService(
-            IntegrationSchemaService integrationSchemaService,
             IntegrationDatasetMapper integrationDatasetMapper,
             IntegrationDatasetPublishBindingMapper publishBindingMapper,
             DatasetToolPublishService datasetToolPublishService) {
-        this.integrationSchemaService = integrationSchemaService;
         this.integrationDatasetMapper = integrationDatasetMapper;
         this.publishBindingMapper = publishBindingMapper;
         this.datasetToolPublishService = datasetToolPublishService;
     }
 
     public PublishStatusView getPublishStatus(Long datasetId) throws TaskException {
-        integrationSchemaService.ensureSchema();
         IntegrationDataset dataset = requireDataset(datasetId);
+        String datasetCode = requireDatasetCode(dataset);
         IntegrationDatasetPublishBinding binding = publishBindingMapper.selectByDatasetId(datasetId);
-        List<PublishedToolView> tools = toPublishedToolViews(datasetToolPublishService.loadPublishedTools(datasetId));
+        List<PublishedToolView> tools = toPublishedToolViews(datasetToolPublishService.loadPublishedTools(datasetCode));
         return toStatusView(dataset, binding, tools);
     }
 
     @Transactional(rollbackFor = Exception.class)
     public PublishStatusView publish(Long datasetId) throws TaskException {
-        integrationSchemaService.ensureSchema();
         IntegrationDataset dataset = requireDataset(datasetId);
+        requireDatasetCode(dataset);
         List<String> toolNames = datasetToolPublishService.publish(dataset);
         Date now = new Date();
 
@@ -77,8 +73,8 @@ public class IntegrationDatasetPublishService {
 
     @Transactional(rollbackFor = Exception.class)
     public PublishStatusView disable(Long datasetId) throws TaskException {
-        integrationSchemaService.ensureSchema();
         IntegrationDataset dataset = requireDataset(datasetId);
+        String datasetCode = requireDatasetCode(dataset);
         IntegrationDatasetPublishBinding binding = publishBindingMapper.selectByDatasetId(datasetId);
         Date now = new Date();
         if (binding == null) {
@@ -94,7 +90,7 @@ public class IntegrationDatasetPublishService {
         } else {
             publishBindingMapper.updateById(binding);
         }
-        datasetToolPublishService.disable(datasetId);
+        datasetToolPublishService.disable(datasetCode);
         return toStatusView(dataset, binding, List.of());
     }
 
@@ -125,6 +121,13 @@ public class IntegrationDatasetPublishService {
             throw new TaskException("数据集不存在：" + datasetId, TaskException.Code.UNKNOWN);
         }
         return dataset;
+    }
+
+    private String requireDatasetCode(IntegrationDataset dataset) throws TaskException {
+        if (dataset == null || !StringUtils.hasText(dataset.getDatasetCode())) {
+            throw new TaskException("数据集编码缺失，请先执行数据库增量脚本后重试", TaskException.Code.UNKNOWN);
+        }
+        return dataset.getDatasetCode().trim();
     }
 
     private String normalizeText(String value) {

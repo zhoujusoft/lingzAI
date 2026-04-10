@@ -43,6 +43,7 @@
                 @toggle-segment="toggleSegment"
                 @open-html-preview="openHtmlPreview"
                 @open-citation="openCitationPreview"
+                @frontend-render-action="handleFrontendRenderAction"
             />
 
             <ChatComposer
@@ -243,6 +244,48 @@ export default {
         },
     },
     methods: {
+        parseStreamErrorResponse(response) {
+            const status = Number(response?.status) || 0;
+            const payload = response && response.data !== undefined ? response.data : '';
+            const fallback = this.streamStatusFallback(status);
+            if (payload && typeof payload === 'object') {
+                return payload.message || payload?.data?.message || payload?.data?.error || fallback;
+            }
+            const text = String(payload || '').trim();
+            if (!text) {
+                return fallback;
+            }
+            try {
+                const parsed = JSON.parse(text);
+                if (parsed && typeof parsed === 'object') {
+                    return parsed.message || parsed?.data?.message || parsed?.data?.error || fallback;
+                }
+            } catch (error) {
+                // ignore and fallback to raw text below
+            }
+            return text || fallback;
+        },
+        streamStatusFallback(status) {
+            if (status === 400) {
+                return '请求参数不正确，请检查输入内容或当前配置。';
+            }
+            if (status === 401) {
+                return '登录已过期或模型服务认证失败，请重新登录或检查鉴权配置。';
+            }
+            if (status === 403) {
+                return '当前请求被拒绝，请检查权限或模型服务访问策略。';
+            }
+            if (status === 404) {
+                return '请求的接口不存在，请检查服务地址或接口路径配置。';
+            }
+            if (status === 429) {
+                return '请求过于频繁，请稍后重试。';
+            }
+            if (status >= 500) {
+                return '服务暂时不可用，请稍后重试。';
+            }
+            return '请求失败';
+        },
         getSessionStorageKey() {
             return this.sessionStorageKey || this.adapter?.sessionStorageKey || '';
         },
@@ -553,9 +596,7 @@ export default {
                 });
                 const ok = response.status >= 200 && response.status < 300;
                 if (!ok) {
-                    const payload = response && response.data !== undefined ? response.data : '';
-                    const errorText = typeof payload === 'string' ? payload : '';
-                    throw new Error(errorText || '请求失败');
+                    throw new Error(this.parseStreamErrorResponse(response));
                 }
                 await this.consumeSseStream(response, requestId);
                 this.sending = false;
@@ -612,6 +653,117 @@ export default {
             segment.open = !segment.open;
             this.shouldAutoScroll = false;
             this.touchMessages();
+        },
+        async handleFrontendRenderAction(action) {
+            const renderId = String(action?.renderId || '').trim();
+            if (!renderId) {
+                return;
+            }
+            this.updateRenderPayloadState(renderId, action?.state || {});
+            this.touchMessages();
+            if (!this.adapter || typeof this.adapter.sendStream !== 'function') {
+                return;
+            }
+            if (this.sending) {
+                return;
+            }
+            const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+            const eventMessage = this.buildFrontendActionMessage(action);
+                const userMessage = this.buildMessage(
+                    '你',
+                    eventMessage,
+                    ChatMessageRender.plain,
+                    ChatMessageKind.user,
+                    {
+                        rawText: eventMessage,
+                        messageType: 'event',
+                        eventPayload: action,
+                    }
+                );
+            this.messages.push(userMessage);
+            this.requestScrollToLatest();
+            this.chatError = '';
+            this.sending = true;
+            const assistantMessage = this.getOrCreateAssistantMessage(requestId);
+            assistantMessage.message.pending = true;
+            this.requestScrollToLatest();
+            try {
+                const response = await this.adapter.sendStream({
+                    message: String(action?.message || eventMessage),
+                    fileIds: [],
+                    sessionId: this.sessionId,
+                    selectedKnowledge: this.selectedKnowledge,
+                    messageType: String(action?.messageType || 'event'),
+                    eventPayload: action,
+                    onUnauthorized: () => this.$emit('unauthorized'),
+                });
+                const ok = response.status >= 200 && response.status < 300;
+                if (!ok) {
+                    throw new Error(this.parseStreamErrorResponse(response));
+                }
+                await this.consumeSseStream(response, requestId);
+                await this.loadConversationItems({ reloadMessages: false });
+            } catch (error) {
+                this.chatError = error?.message || '同步卡片状态失败';
+            } finally {
+                this.sending = false;
+                assistantMessage.message.pending = false;
+                delete this.activeAssistantByRequest[requestId];
+                this.touchMessages();
+            }
+        },
+        buildFrontendActionMessage(action) {
+            return String(action?.message || '').trim();
+        },
+        updateRenderPayloadState(renderId, nextState) {
+            if (!renderId) {
+                return false;
+            }
+            let updated = false;
+            this.messages.forEach(message => {
+                if (!Array.isArray(message?.segments)) {
+                    return;
+                }
+                message.segments.forEach(segment => {
+                    if (segment?.type !== ChatSegmentType.tool || !segment?.renderPayload) {
+                        return;
+                    }
+                    if (String(segment.renderPayload?.renderId || '').trim() !== renderId) {
+                        return;
+                    }
+                    segment.renderPayload = {
+                        ...segment.renderPayload,
+                        state: this.mergeRenderState(segment.renderPayload?.state, nextState),
+                    };
+                    updated = true;
+                });
+            });
+            return updated;
+        },
+        mergeRenderState(base, override) {
+            const baseValue =
+                base && typeof base === 'object' && !Array.isArray(base) ? base : {};
+            const overrideValue =
+                override && typeof override === 'object' && !Array.isArray(override)
+                    ? override
+                    : {};
+            const merged = {
+                ...baseValue,
+                ...overrideValue,
+            };
+            const baseActionStates =
+                baseValue.actionStates && typeof baseValue.actionStates === 'object'
+                    ? baseValue.actionStates
+                    : {};
+            const overrideActionStates =
+                overrideValue.actionStates && typeof overrideValue.actionStates === 'object'
+                    ? overrideValue.actionStates
+                    : {};
+            merged.actionStates = {
+                ...baseActionStates,
+                ...overrideActionStates,
+            };
+            return merged;
         },
         async consumeSseStream(response, requestId) {
             const stream = response && response.data ? response.data : response.body;
@@ -797,6 +949,7 @@ export default {
             const output = [];
             rows.forEach(row => {
                 const query = String(row?.query || '').trim();
+                const messageType = String(row?.messageType || 'normal').trim() || 'normal';
                 const answer = String(row?.answer || '').trim();
                 const status = String(row?.status || '').trim().toLowerCase();
                 const error = String(row?.error || '').trim();
@@ -820,6 +973,7 @@ export default {
                             {
                                 time: createdAt,
                                 attachments,
+                                messageType,
                             }
                         )
                     );
@@ -935,6 +1089,7 @@ export default {
                         displayName,
                         inputText,
                         response: '',
+                        renderPayload: null,
                         status: ChatToolStatus.running,
                         open: false,
                     };
@@ -950,6 +1105,10 @@ export default {
                 if (index !== undefined && segments[index]) {
                     segments[index].response = payload.response || '';
                     segments[index].inputText = inputText || segments[index].inputText;
+                    segments[index].renderPayload = this.resolveRenderPayload(
+                        payload.name || segments[index].name,
+                        payload.response
+                    );
                     segments[index].status = ChatToolStatus.done;
                     return;
                 }
@@ -962,6 +1121,7 @@ export default {
                     displayName,
                     inputText,
                     response: payload.response || '',
+                    renderPayload: this.resolveRenderPayload(name, payload.response),
                     status: ChatToolStatus.done,
                     open: false,
                 });
@@ -997,6 +1157,7 @@ export default {
                     displayName,
                     inputText,
                     response: '',
+                    renderPayload: null,
                     status: ChatToolStatus.running,
                     open: false,
                 };
@@ -1022,6 +1183,10 @@ export default {
                 if (toolBlock) {
                     toolBlock.response = payload.response || '';
                     toolBlock.inputText = inputText || toolBlock.inputText;
+                    toolBlock.renderPayload = this.resolveRenderPayload(
+                        payload.name || toolBlock.name,
+                        payload.response
+                    );
                     toolBlock.status = ChatToolStatus.done;
                 }
                 this.activeAssistantIndex = mapping.msgIndex;
@@ -1039,6 +1204,7 @@ export default {
                     displayName,
                     inputText,
                     response: payload.response || '',
+                    renderPayload: this.resolveRenderPayload(name, payload.response),
                     status: ChatToolStatus.done,
                     open: false,
                 };
@@ -1055,6 +1221,13 @@ export default {
                 this.shouldAutoScroll = true;
                 this.touchMessages();
             }
+        },
+        resolveRenderPayload(toolName, response) {
+            const payload = this.parseJsonObject(response);
+            if (String(payload?.type || '').trim() !== 'frontend_render') {
+                return null;
+            }
+            return payload;
         },
         handleCitationEvent(content, requestId) {
             let payload = content;

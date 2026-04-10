@@ -217,6 +217,7 @@ function fieldBindingMatches(fieldItem, selectedItem) {
     if (
         form.sourceKind === 'LOWCODE_APP' &&
         !selectedItem.subObjectCode &&
+        !fieldItem.subObjectCode &&
         sameCode(selectedItem.objectCode, fieldItem.objectCode)
     ) {
         return true;
@@ -247,6 +248,7 @@ function upsertSelectedObject(objectItem) {
         ...selectedObjects.value,
         {
             objectCode: objectItem.objectCode,
+            formCode: objectItem.formCode || '',
             objectName: objectItem.objectName,
             objectSource: objectItem.objectSource || '',
             appCode: objectItem.appCode || '',
@@ -275,6 +277,7 @@ function toggleField(fieldItem) {
             ...selectedObjects.value,
             {
                 objectCode: ownerCode,
+                formCode: fieldItem.formCode || '',
                 objectName: fieldItem.subObjectName || fieldItem.objectName || ownerCode,
                 objectSource: fieldItem.fieldScope?.startsWith('SUB') ? 'LOWCODE_SUBTABLE' : 'LOWCODE_MAIN',
                 appCode: fieldItem.appCode || '',
@@ -288,6 +291,7 @@ function toggleField(fieldItem) {
         ...selectedFields.value,
         {
             objectCode: ownerCode,
+            formCode: fieldItem.formCode || '',
             fieldName: fieldItem.fieldName,
             fieldAlias: fieldItem.fieldLabel || fieldItem.fieldName,
             fieldType: fieldItem.fieldType || '',
@@ -403,6 +407,7 @@ async function handleGenerateDescription() {
                 promptHint: descriptionPromptHint.value,
                 objectBindings: selectedObjects.value.map(item => ({
                     objectCode: item.objectCode,
+                    formCode: item.formCode,
                     objectName: item.objectName,
                     objectSource: item.objectSource,
                     selected: item.selected,
@@ -410,6 +415,7 @@ async function handleGenerateDescription() {
                 })),
                 fieldBindings: selectedFields.value.map(item => ({
                     objectCode: item.objectCode,
+                    formCode: item.formCode,
                     fieldName: item.fieldName,
                     fieldAlias: item.fieldAlias,
                     fieldType: item.fieldType,
@@ -452,6 +458,7 @@ function restoreSelectedObjects(objectBindings, fieldBindings) {
         existingCodes.add(normalizedFieldObjectCode);
         normalizedObjects.push({
             objectCode: field.objectCode,
+            formCode: field.formCode || '',
             objectName: field.objectName || field.objectCode,
             objectSource: field.fieldScope?.startsWith('SUB') ? 'LOWCODE_SUBTABLE' : 'TABLE',
             selected: 1,
@@ -480,6 +487,7 @@ async function loadAiSourceObjects() {
     availableObjects.value = Array.isArray(objects)
         ? objects.map(item => ({
               objectCode: item.objectCode,
+              formCode: item.formCode || '',
               objectName: item.objectName,
               objectSource: item.objectType,
               path: item.objectName,
@@ -675,12 +683,14 @@ async function loadActiveFields() {
             form.lowcodePlatformKey,
             activeObject.appCode,
             activeObjectCode.value,
+            activeObject.formCode || '',
             handleUnauthorized
         );
         availableFields.value = Array.isArray(fields)
             ? fields.map(item => ({
                   ...item,
-                  objectName: activeObjectCode.value,
+                  objectName: activeObject.objectName || activeObjectCode.value,
+                  formCode: item.formCode || activeObject.formCode || '',
                   appCode: activeObject.appCode,
                   appName: activeObject.appName || '',
               }))
@@ -749,6 +759,7 @@ async function handleSave() {
             status: 'ACTIVE',
             objectBindings: selectedObjects.value.map(item => ({
                 objectCode: item.objectCode,
+                formCode: item.formCode,
                 objectName: item.objectName,
                 objectSource: item.objectSource,
                 selected: item.selected,
@@ -756,6 +767,7 @@ async function handleSave() {
             })),
             fieldBindings: selectedFields.value.map(item => ({
                 objectCode: item.objectCode,
+                formCode: item.formCode,
                 fieldName: item.fieldName,
                 fieldAlias: item.fieldAlias,
                 fieldType: item.fieldType,
@@ -1068,8 +1080,11 @@ onMounted(async () => {
                                                     >
                                                         {{ item.objectName }}
                                                     </div>
-                                                    <div class="mt-0.5 truncate text-[10px] text-slate-400">
-                                                        {{ item.objectCode }}
+                                                    <div
+                                                        v-if="!item.folder && item.description"
+                                                        class="mt-0.5 truncate text-[10px] text-slate-500"
+                                                    >
+                                                        表名：{{ item.description }}
                                                     </div>
                                                 </div>
                                             </button>
@@ -1241,7 +1256,7 @@ onMounted(async () => {
             </div>
         </div>
 
-        <BaseModal :open="descriptionModalOpen" panel-class="max-w-[1400px]" @close="closeDescriptionModal">
+        <BaseModal :open="descriptionModalOpen" panel-class="max-w-5xl" @close="closeDescriptionModal">
             <template #header>
                 <div class="border-b border-slate-200 px-6 py-5">
                     <div class="flex items-center justify-between">
@@ -1257,7 +1272,7 @@ onMounted(async () => {
             </template>
 
             <template #content>
-                <div class="grid grid-cols-1 gap-0 xl:grid-cols-[360px_minmax(0,1fr)]">
+                <div class="grid grid-cols-1 gap-0 lg:grid-cols-[320px_minmax(0,1fr)]">
                     <section class="border-b border-slate-200 bg-slate-50/70 px-6 py-6 lg:border-b-0 lg:border-r">
                         <div class="space-y-5">
                             <div>

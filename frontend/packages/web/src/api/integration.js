@@ -125,9 +125,9 @@ export function listLowcodeIntegrationObjects(platformKey, appId, onUnauthorized
     );
 }
 
-export function listLowcodeIntegrationFields(platformKey, appId, objectCode, onUnauthorized) {
+export function listLowcodeIntegrationFields(platformKey, appId, objectCode, formCode, onUnauthorized) {
     return authedJson(
-        `/api/integration/lowcode/platforms/${platformKey}/fields${buildQuery({ appId, objectCode })}`,
+        `/api/integration/lowcode/platforms/${platformKey}/fields${buildQuery({ appId, objectCode, formCode })}`,
         { method: 'GET' },
         onUnauthorized
     );

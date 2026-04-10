@@ -18,6 +18,10 @@ public class ModelVendor {
 
     private String description;
 
+    private String defaultBaseUrl;
+
+    private String defaultApiKey;
+
     private String status;
 
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
@@ -56,6 +60,22 @@ public class ModelVendor {
 
     public void setDescription(String description) {
         this.description = description;
+    }
+
+    public String getDefaultBaseUrl() {
+        return defaultBaseUrl;
+    }
+
+    public void setDefaultBaseUrl(String defaultBaseUrl) {
+        this.defaultBaseUrl = defaultBaseUrl;
+    }
+
+    public String getDefaultApiKey() {
+        return defaultApiKey;
+    }
+
+    public void setDefaultApiKey(String defaultApiKey) {
+        this.defaultApiKey = defaultApiKey;
     }
 
     public String getStatus() {

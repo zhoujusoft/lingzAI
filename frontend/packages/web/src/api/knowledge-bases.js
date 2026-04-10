@@ -29,11 +29,14 @@ export async function createKnowledgeBase(payload, onUnauthorized) {
 }
 
 export async function createKnowledgeBaseWithDocument(
-    { kbName, description, file, chunkStrategy = 'AUTO', chunkConfig },
+    { kbName, kbCode, description, file, chunkStrategy = 'AUTO', chunkConfig },
     onUnauthorized,
 ) {
     const formData = new FormData();
     formData.append('kbName', kbName);
+    if (kbCode) {
+        formData.append('kbCode', kbCode);
+    }
     if (description) {
         formData.append('description', description);
     }
@@ -46,6 +49,16 @@ export async function createKnowledgeBaseWithDocument(
     const { data } = await doRequestJson('/api/datasets/base/upload', {
         method: 'POST',
         body: formData,
+        auth: true,
+        onUnauthorized,
+    });
+    return data;
+}
+
+export async function updateKnowledgeBase(payload, onUnauthorized) {
+    const { data } = await doRequestJson('/api/datasets/base', {
+        method: 'PUT',
+        body: payload,
         auth: true,
         onUnauthorized,
     });

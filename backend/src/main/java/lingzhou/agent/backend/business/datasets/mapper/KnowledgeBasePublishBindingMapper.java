@@ -24,4 +24,10 @@ public interface KnowledgeBasePublishBindingMapper extends BaseMapper<KnowledgeB
         wrapper.in("kb_id", kbIds);
         return this.selectList(wrapper);
     }
+
+    default int deleteByKbId(Long kbId) {
+        QueryWrapper<KnowledgeBasePublishBinding> wrapper = new QueryWrapper<>();
+        wrapper.eq("kb_id", kbId);
+        return this.delete(wrapper);
+    }
 }

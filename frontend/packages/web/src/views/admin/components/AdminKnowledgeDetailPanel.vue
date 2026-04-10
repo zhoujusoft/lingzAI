@@ -518,12 +518,23 @@ watch(currentParentId, () => {
                     <p class="text-sm text-slate-500">
                         {{ currentFolder ? currentFolder.name : props.knowledge.name }}
                     </p>
+                    <p v-if="props.knowledge.kbCode" class="mt-1 text-xs font-mono text-slate-400">
+                        Code: {{ props.knowledge.kbCode }}
+                    </p>
                 </div>
             </div>
         </template>
 
         <template #right>
             <div class="flex items-center gap-2">
+                <button
+                    type="button"
+                    class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-5 py-2 font-medium text-slate-700 shadow-sm transition-all hover:border-slate-300 hover:bg-slate-50"
+                    @click="emit('edit-knowledge', props.knowledge)"
+                >
+                    <span class="material-symbols-outlined fill-0 text-xl">edit_square</span>
+                    <span>编辑信息</span>
+                </button>
                 <button
                     type="button"
                     class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-5 py-2 font-medium text-slate-700 shadow-sm transition-all hover:border-slate-300 hover:bg-slate-50"

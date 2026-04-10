@@ -41,9 +41,10 @@ public class LowcodeDatasetBrowseController {
     public List<LowcodeDatasetBrowseService.FieldView> listFields(
             @PathVariable("platformKey") String platformKey,
             @RequestParam("appId") String appId,
-            @RequestParam("objectCode") String objectCode)
+            @RequestParam("objectCode") String objectCode,
+            @RequestParam(value = "formCode", required = false) String formCode)
             throws TaskException {
-        return lowcodeDatasetBrowseService.listFields(platformKey, appId, objectCode);
+        return lowcodeDatasetBrowseService.listFields(platformKey, appId, objectCode, formCode);
     }
 
     @GetMapping("/platforms/{platformKey}/relations")

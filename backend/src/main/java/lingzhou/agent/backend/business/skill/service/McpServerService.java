@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.spec.McpSchema;
-import jakarta.annotation.PostConstruct;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.LinkedHashMap;
@@ -28,7 +27,6 @@ import lingzhou.agent.backend.business.skill.mapper.SkillToolBindingMapper;
 import lingzhou.agent.backend.common.lzException.TaskException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -47,7 +45,6 @@ public class McpServerService {
 
     private final McpServerMapper mcpServerMapper;
     private final SkillToolBindingMapper skillToolBindingMapper;
-    private final JdbcTemplate jdbcTemplate;
     private final McpClientFactory mcpClientFactory;
     private final McpToolPublishService mcpToolPublishService;
     private final McpToolRegistryService mcpToolRegistryService;
@@ -56,23 +53,16 @@ public class McpServerService {
     public McpServerService(
             McpServerMapper mcpServerMapper,
             SkillToolBindingMapper skillToolBindingMapper,
-            JdbcTemplate jdbcTemplate,
             McpClientFactory mcpClientFactory,
             McpToolPublishService mcpToolPublishService,
             McpToolRegistryService mcpToolRegistryService,
             ExternalMcpAdapterRegistry externalMcpAdapterRegistry) {
         this.mcpServerMapper = mcpServerMapper;
         this.skillToolBindingMapper = skillToolBindingMapper;
-        this.jdbcTemplate = jdbcTemplate;
         this.mcpClientFactory = mcpClientFactory;
         this.mcpToolPublishService = mcpToolPublishService;
         this.mcpToolRegistryService = mcpToolRegistryService;
         this.externalMcpAdapterRegistry = externalMcpAdapterRegistry;
-    }
-
-    @PostConstruct
-    public void initializeSchema() {
-        ensureSchema();
     }
 
     public List<McpServerView> listServers() {
@@ -88,7 +78,6 @@ public class McpServerService {
     }
 
     public McpServerView getServer(Long serverId) throws TaskException {
-        ensureSchema();
         McpServer server = requireServer(serverId);
         return toView(server, loadToolViews(McpToolNaming.source(server.getServerKey())));
     }
@@ -102,7 +91,6 @@ public class McpServerService {
 
     @Transactional(rollbackFor = Exception.class)
     public McpServerView createServer(CreateCommand command) throws TaskException {
-        ensureSchema();
         String serverKey = normalizeServerKey(command.serverKey());
         if (mcpServerMapper.selectByServerKey(serverKey) != null) {
             throw new TaskException("MCP serverKey 已存在", TaskException.Code.UNKNOWN);
@@ -117,7 +105,6 @@ public class McpServerService {
 
     @Transactional(rollbackFor = Exception.class)
     public McpServerView updateServer(Long serverId, UpdateCommand command) throws TaskException {
-        ensureSchema();
         McpServer server = requireServer(serverId);
         applyUpdate(server, command);
         mcpServerMapper.updateById(server);
@@ -127,7 +114,6 @@ public class McpServerService {
 
     @Transactional(rollbackFor = Exception.class)
     public RefreshResult refreshServer(Long serverId) throws TaskException {
-        ensureSchema();
         McpServer server = requireServer(serverId);
         String source = McpToolNaming.source(server.getServerKey());
         try {
@@ -163,7 +149,6 @@ public class McpServerService {
 
     @Transactional(rollbackFor = Exception.class)
     public void deleteServer(Long serverId) throws TaskException {
-        ensureSchema();
         McpServer server = requireServer(serverId);
         String source = McpToolNaming.source(server.getServerKey());
         List<String> toolNames = mcpToolPublishService.listToolNamesBySource(source);
@@ -178,31 +163,6 @@ public class McpServerService {
 
     static Map<String, Object> parseJsonObject(String json) {
         return McpJsonSupport.parseJsonObject(json);
-    }
-
-    private void ensureSchema() {
-        jdbcTemplate.execute(
-                """
-                CREATE TABLE IF NOT EXISTS `mcp_server` (
-                  `id` bigint NOT NULL AUTO_INCREMENT COMMENT 'MCP server 主键',
-                  `server_key` varchar(120) NOT NULL COMMENT '稳定唯一标识，用于生成工具名前缀',
-                  `display_name` varchar(255) NOT NULL COMMENT '展示名称',
-                  `description` text COMMENT '描述',
-                  `server_scope` varchar(32) NOT NULL DEFAULT 'INTERNAL' COMMENT '服务范围：INTERNAL/EXTERNAL',
-                  `transport_type` varchar(32) NOT NULL COMMENT '传输类型：STREAMABLE_HTTP/SSE',
-                  `endpoint` varchar(500) NOT NULL COMMENT '远程 MCP endpoint 或 base URL',
-                  `auth_type` varchar(32) NOT NULL DEFAULT 'NONE' COMMENT '鉴权类型：NONE/BEARER_TOKEN',
-                  `auth_config_json` longtext COMMENT '鉴权配置 JSON',
-                  `enabled` tinyint NOT NULL DEFAULT 1 COMMENT '是否启用',
-                  `last_refresh_status` varchar(32) NOT NULL DEFAULT 'IDLE' COMMENT '最近刷新状态',
-                  `last_refresh_message` varchar(500) DEFAULT NULL COMMENT '最近刷新摘要',
-                  `last_refreshed_at` datetime DEFAULT NULL COMMENT '最近刷新时间',
-                  `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-                  `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-                  PRIMARY KEY (`id`),
-                  UNIQUE KEY `uk_mcp_server_key` (`server_key`)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='远程 MCP server 配置表'
-                """);
     }
 
     private void applyCreate(McpServer server, CreateCommand command, String serverKey) throws TaskException {

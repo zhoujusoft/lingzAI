@@ -26,7 +26,6 @@ import lingzhou.agent.spring.ai.skill.core.SkillKit;
 import lingzhou.agent.spring.ai.skill.core.SkillMetadata;
 import lingzhou.agent.spring.ai.skill.support.SimpleSkillBox;
 import org.springframework.ai.tool.ToolCallback;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -49,9 +48,6 @@ public class SkillCatalogService {
     private final KnowledgeBaseToolRegistryService knowledgeBaseToolRegistryService;
     private final McpServerService mcpServerService;
     private final SkillRecommendationService skillRecommendationService;
-    private final JdbcTemplate jdbcTemplate;
-    private final Object syncMonitor = new Object();
-    private volatile boolean bindingSchemaReady;
 
     public SkillCatalogService(
             SkillCatalogMapper skillCatalogMapper,
@@ -65,8 +61,7 @@ public class SkillCatalogService {
             DatasetToolRegistryService datasetToolRegistryService,
             KnowledgeBaseToolRegistryService knowledgeBaseToolRegistryService,
             McpServerService mcpServerService,
-            SkillRecommendationService skillRecommendationService,
-            JdbcTemplate jdbcTemplate) {
+            SkillRecommendationService skillRecommendationService) {
         this.skillCatalogMapper = skillCatalogMapper;
         this.skillToolBindingMapper = skillToolBindingMapper;
         this.toolCatalogMapper = toolCatalogMapper;
@@ -79,11 +74,6 @@ public class SkillCatalogService {
         this.knowledgeBaseToolRegistryService = knowledgeBaseToolRegistryService;
         this.mcpServerService = mcpServerService;
         this.skillRecommendationService = skillRecommendationService;
-        this.jdbcTemplate = jdbcTemplate;
-    }
-
-    public void initializeCatalogData() {
-        syncRuntimeData();
     }
 
     public List<RuntimeSkillSummary> listRuntimeSkills() {
@@ -104,10 +94,10 @@ public class SkillCatalogService {
     }
 
     public List<SkillCatalogView> listCatalogs(Long userId, boolean visibleOnly) {
-        RuntimeSnapshot snapshot = syncRuntimeData();
+        Map<String, SkillMetadata> runtimeMetadata = loadRuntimeMetadata();
         List<SkillCatalog> rows = visibleOnly ? skillCatalogMapper.selectVisibleOrdered() : skillCatalogMapper.selectAllOrdered();
         rows = rows.stream()
-                .filter(row -> snapshot.runtimeMetadata().containsKey(row.getRuntimeSkillName()))
+                .filter(row -> runtimeMetadata.containsKey(row.getRuntimeSkillName()))
                 .toList();
         Map<Long, List<String>> bindingMap = loadManualBindingMap(rows.stream().map(SkillCatalog::getId).toList());
         Map<Long, List<ToolLibraryItem>> nativeToolMap =
@@ -130,10 +120,10 @@ public class SkillCatalogService {
     }
 
     public List<ToolLibraryItem> listToolLibrary() {
-        RuntimeSnapshot snapshot = syncRuntimeData();
+        Set<String> runtimeToolNames = loadRuntimeToolNames(loadRuntimeMetadata());
         return toolCatalogMapper.selectAllOrdered().stream()
                 .filter(row ->
-                        snapshot.runtimeToolNames().contains(row.getToolName())
+                        runtimeToolNames.contains(row.getToolName())
                                 || Objects.equals(row.getToolType(), "LOWCODE_API")
                                 || Objects.equals(row.getToolType(), "DATASET_TOOL")
                                 || Objects.equals(row.getToolType(), "KNOWLEDGE_BASE_TOOL"))
@@ -143,9 +133,9 @@ public class SkillCatalogService {
 
     @Transactional(rollbackFor = Exception.class)
     public SkillCatalogView updateCatalog(Long skillId, SkillCatalogUpdateCommand command) throws TaskException {
-        RuntimeSnapshot snapshot = syncRuntimeData();
+        Map<String, SkillMetadata> runtimeMetadata = loadRuntimeMetadata();
         SkillCatalog catalog = requireCatalog(skillId);
-        ensureRuntimeSkillExists(catalog, snapshot.runtimeMetadata());
+        ensureRuntimeSkillExists(catalog, runtimeMetadata);
         String displayName = normalizeRequired(command.displayName(), "展示名称不能为空");
         String description = normalizeRequired(command.description(), "技能描述不能为空");
         String category = normalizeRequired(command.category(), "业务能力分类不能为空");
@@ -168,9 +158,9 @@ public class SkillCatalogService {
 
     @Transactional(rollbackFor = Exception.class)
     public List<String> updateBindings(Long skillId, List<String> toolNames) throws TaskException {
-        RuntimeSnapshot snapshot = syncRuntimeData();
+        Map<String, SkillMetadata> runtimeMetadata = loadRuntimeMetadata();
         SkillCatalog catalog = requireCatalog(skillId);
-        ensureRuntimeSkillExists(catalog, snapshot.runtimeMetadata());
+        ensureRuntimeSkillExists(catalog, runtimeMetadata);
         List<String> normalizedNames = normalizeToolNames(toolNames);
         for (String toolName : normalizedNames) {
             if (!isBindableToolName(toolName)) {
@@ -189,9 +179,9 @@ public class SkillCatalogService {
     }
 
     public SkillChatContext resolveSkillChatContext(Long skillId) throws TaskException {
-        RuntimeSnapshot snapshot = syncRuntimeData();
+        Map<String, SkillMetadata> runtimeMetadata = loadRuntimeMetadata();
         SkillCatalog catalog = requireCatalog(skillId);
-        ensureRuntimeSkillExists(catalog, snapshot.runtimeMetadata());
+        ensureRuntimeSkillExists(catalog, runtimeMetadata);
         if (!isVisible(catalog)) {
             throw new TaskException("技能未上架或不可用", TaskException.Code.UNKNOWN);
         }
@@ -247,132 +237,17 @@ public class SkillCatalogService {
                 .displayName();
     }
 
-    private RuntimeSnapshot syncRuntimeData() {
-        synchronized (syncMonitor) {
-            ensureSkillToolBindingSchema();
-            Map<String, SkillMetadata> runtimeMetadata = loadRuntimeMetadata();
-            syncRuntimeSkillCatalogs(runtimeMetadata);
-            List<ToolSeed> runtimeTools = collectRuntimeTools(runtimeMetadata);
-            syncRuntimeToolCatalogs(runtimeTools);
-            syncNativeToolBindings(runtimeMetadata);
-            Set<String> runtimeToolNames =
-                    runtimeTools.stream().map(ToolSeed::toolName).collect(LinkedHashSet::new, Set::add, Set::addAll);
-            runtimeToolNames.addAll(mcpServerService.listEnabledToolNames());
-            return new RuntimeSnapshot(
-                    runtimeMetadata,
-                    runtimeToolNames);
-        }
+    private Map<String, SkillMetadata> loadRuntimeMetadata() {
+        return new LinkedHashMap<>(skillBox.getAllMetadata());
     }
 
-    private void ensureSkillToolBindingSchema() {
-        if (bindingSchemaReady) {
-            return;
-        }
-        Integer count = jdbcTemplate.queryForObject(
-                """
-                SELECT COUNT(*)
-                FROM information_schema.columns
-                WHERE table_schema = DATABASE()
-                  AND table_name = 'skill_tool_binding'
-                  AND column_name = 'binding_type'
-                """,
-                Integer.class);
-        if (count == null || count == 0) {
-            jdbcTemplate.execute(
-                    """
-                    ALTER TABLE skill_tool_binding
-                    ADD COLUMN binding_type varchar(32) NOT NULL DEFAULT 'MANUAL' COMMENT '绑定类型：NATIVE/MANUAL'
-                    AFTER tool_name
-                    """);
-        }
-        jdbcTemplate.update(
-                """
-                UPDATE skill_tool_binding
-                SET binding_type = 'MANUAL'
-                WHERE binding_type IS NULL OR binding_type = ''
-                """);
-        bindingSchemaReady = true;
-    }
-
-    private void syncRuntimeSkillCatalogs(Map<String, SkillMetadata> runtimeMetadata) {
-        int index = 0;
-        for (SkillMetadata metadata : runtimeMetadata.values().stream()
-                .sorted(Comparator.comparing(SkillMetadata::getName))
-                .toList()) {
-            SkillCatalogLocalization.SkillLabel label =
-                    SkillCatalogLocalization.resolveSkill(metadata.getName(), metadata.getDescription());
-            SkillCatalog existing = skillCatalogMapper.selectByRuntimeSkillName(metadata.getName());
-            if (existing == null) {
-                SkillCatalog created = new SkillCatalog();
-                created.setRuntimeSkillName(metadata.getName());
-                created.setDisplayName(label.displayName());
-                created.setDescription(label.description());
-                created.setCategory(deriveCategory(metadata));
-                created.setSource(metadata.getSource());
-                created.setVisible(1);
-                created.setSortOrder(index * 10);
-                skillCatalogMapper.insert(created);
-            } else {
-                boolean changed = false;
-                if (shouldUseGeneratedDisplayName(existing.getDisplayName(), metadata.getName())
-                        && !Objects.equals(existing.getDisplayName(), label.displayName())) {
-                    existing.setDisplayName(label.displayName());
-                    changed = true;
-                }
-                if (shouldUseGeneratedDescription(existing.getDescription(), metadata.getDescription())
-                        && !Objects.equals(existing.getDescription(), label.description())) {
-                    existing.setDescription(label.description());
-                    changed = true;
-                }
-                String derivedCategory = deriveCategory(metadata);
-                if (shouldUseGeneratedCategory(existing.getCategory(), metadata)
-                        && !Objects.equals(existing.getCategory(), derivedCategory)) {
-                    existing.setCategory(derivedCategory);
-                    changed = true;
-                }
-                if (!Objects.equals(existing.getSource(), metadata.getSource())) {
-                    existing.setSource(metadata.getSource());
-                    changed = true;
-                }
-                if (existing.getVisible() == null) {
-                    existing.setVisible(1);
-                    changed = true;
-                }
-                if (existing.getSortOrder() == null) {
-                    existing.setSortOrder(index * 10);
-                    changed = true;
-                }
-                if (changed) {
-                    skillCatalogMapper.updateById(existing);
-                }
-            }
-            index++;
-        }
-    }
-
-    private List<ToolSeed> collectRuntimeTools(Map<String, SkillMetadata> runtimeMetadata) {
-        List<ToolSeed> runtimeTools = new ArrayList<>();
-        Set<String> seenToolNames = new LinkedHashSet<>();
-        int sortOrder = 0;
-
+    private Set<String> loadRuntimeToolNames(Map<String, SkillMetadata> runtimeMetadata) {
+        Set<String> runtimeToolNames = new LinkedHashSet<>();
         for (GlobalToolRegistry.ToolDescriptor descriptor : globalToolRegistry.getDescriptors()) {
-            if (!seenToolNames.add(descriptor.name())) {
-                continue;
+            if (StringUtils.hasText(descriptor.name())) {
+                runtimeToolNames.add(descriptor.name());
             }
-            SkillCatalogLocalization.ToolLabel label =
-                    SkillCatalogLocalization.resolveTool(descriptor.name(), descriptor.description());
-            runtimeTools.add(new ToolSeed(
-                    descriptor.name(),
-                    label.displayName(),
-                    label.description(),
-                    descriptor.description(),
-                    "GLOBAL",
-                    1,
-                    null,
-                    "runtime",
-                    sortOrder++));
         }
-
         for (SkillMetadata metadata : runtimeMetadata.values().stream()
                 .sorted(Comparator.comparing(SkillMetadata::getName))
                 .toList()) {
@@ -381,86 +256,15 @@ public class SkillCatalogService {
                 continue;
             }
             for (ToolCallback callback : safeToolCallbacks(skill.getTools())) {
-                if (callback.getToolDefinition() == null) {
-                    continue;
+                if (callback != null
+                        && callback.getToolDefinition() != null
+                        && StringUtils.hasText(callback.getToolDefinition().name())) {
+                    runtimeToolNames.add(callback.getToolDefinition().name());
                 }
-                String toolName = callback.getToolDefinition().name();
-                if (!StringUtils.hasText(toolName) || !seenToolNames.add(toolName)) {
-                    continue;
-                }
-                SkillCatalogLocalization.ToolLabel label =
-                        SkillCatalogLocalization.resolveTool(toolName, callback.getToolDefinition().description());
-                runtimeTools.add(new ToolSeed(
-                        toolName,
-                        label.displayName(),
-                        label.description(),
-                        callback.getToolDefinition().description(),
-                        "SKILL_NATIVE",
-                        0,
-                        metadata.getName(),
-                        metadata.getSource(),
-                        sortOrder++));
             }
         }
-        return runtimeTools;
-    }
-
-    private void syncRuntimeToolCatalogs(List<ToolSeed> runtimeTools) {
-        for (ToolSeed tool : runtimeTools) {
-            ToolCatalog existing = toolCatalogMapper.selectByToolName(tool.toolName());
-            if (existing == null) {
-                ToolCatalog created = new ToolCatalog();
-                created.setToolName(tool.toolName());
-                created.setDisplayName(tool.displayName());
-                created.setDescription(tool.description());
-                created.setToolType(tool.toolType());
-                created.setBindable(tool.bindable());
-                created.setOwnerSkillName(tool.ownerSkillName());
-                created.setSource(tool.source());
-                created.setSortOrder(tool.sortOrder());
-                toolCatalogMapper.insert(created);
-                continue;
-            }
-
-            boolean changed = false;
-            if (shouldUseGeneratedDisplayName(existing.getDisplayName(), tool.toolName())
-                    && !Objects.equals(existing.getDisplayName(), tool.displayName())) {
-                existing.setDisplayName(tool.displayName());
-                changed = true;
-            }
-            if (shouldUseGeneratedDescription(existing.getDescription(), tool.runtimeDescription())
-                    && !Objects.equals(existing.getDescription(), tool.description())) {
-                existing.setDescription(tool.description());
-                changed = true;
-            }
-            if (!Objects.equals(existing.getToolType(), tool.toolType())) {
-                existing.setToolType(tool.toolType());
-                changed = true;
-            }
-            if (!Objects.equals(existing.getBindable(), tool.bindable())) {
-                existing.setBindable(tool.bindable());
-                changed = true;
-            }
-            if (!Objects.equals(existing.getOwnerSkillName(), tool.ownerSkillName())) {
-                existing.setOwnerSkillName(tool.ownerSkillName());
-                changed = true;
-            }
-            if (!Objects.equals(existing.getSource(), tool.source())) {
-                existing.setSource(tool.source());
-                changed = true;
-            }
-            if (!Objects.equals(existing.getSortOrder(), tool.sortOrder())) {
-                existing.setSortOrder(tool.sortOrder());
-                changed = true;
-            }
-            if (changed) {
-                toolCatalogMapper.updateById(existing);
-            }
-        }
-    }
-
-    private Map<String, SkillMetadata> loadRuntimeMetadata() {
-        return new LinkedHashMap<>(skillBox.getAllMetadata());
+        runtimeToolNames.addAll(mcpServerService.listEnabledToolNames());
+        return runtimeToolNames;
     }
 
     private SkillCatalog requireCatalog(Long skillId) throws TaskException {
@@ -480,59 +284,6 @@ public class SkillCatalogService {
         }
         if (runtimeMetadata == null || !runtimeMetadata.containsKey(catalog.getRuntimeSkillName())) {
             throw new TaskException("运行时技能不存在：" + catalog.getRuntimeSkillName(), TaskException.Code.UNKNOWN);
-        }
-    }
-
-    private void syncNativeToolBindings(Map<String, SkillMetadata> runtimeMetadata) {
-        for (SkillMetadata metadata : runtimeMetadata.values().stream()
-                .sorted(Comparator.comparing(SkillMetadata::getName))
-                .toList()) {
-            SkillCatalog catalog = skillCatalogMapper.selectByRuntimeSkillName(metadata.getName());
-            if (catalog == null || catalog.getId() == null) {
-                continue;
-            }
-            Skill skill = skillKit.getSkill(metadata.getName());
-            if (skill == null) {
-                continue;
-            }
-
-            Set<String> nativeToolNames = safeToolCallbacks(skill.getTools()).stream()
-                    .map(callback -> callback.getToolDefinition() == null ? null : callback.getToolDefinition().name())
-                    .filter(StringUtils::hasText)
-                    .collect(LinkedHashSet::new, Set::add, Set::addAll);
-
-            List<SkillToolBinding> existing = skillToolBindingMapper.selectBySkillId(catalog.getId());
-            Map<String, SkillToolBinding> existingByToolName = new LinkedHashMap<>();
-            for (SkillToolBinding binding : existing) {
-                if (StringUtils.hasText(binding.getToolName())) {
-                    existingByToolName.put(binding.getToolName(), binding);
-                }
-            }
-
-            for (String toolName : nativeToolNames) {
-                SkillToolBinding existingBinding = existingByToolName.get(toolName);
-                if (existingBinding == null) {
-                    SkillToolBinding binding = new SkillToolBinding();
-                    binding.setSkillId(catalog.getId());
-                    binding.setToolName(toolName);
-                    binding.setBindingType(BINDING_TYPE_NATIVE);
-                    skillToolBindingMapper.insert(binding);
-                    continue;
-                }
-                if (!Objects.equals(existingBinding.getBindingType(), BINDING_TYPE_NATIVE)) {
-                    existingBinding.setBindingType(BINDING_TYPE_NATIVE);
-                    skillToolBindingMapper.updateById(existingBinding);
-                }
-            }
-
-            for (SkillToolBinding binding : existing) {
-                if (!Objects.equals(binding.getBindingType(), BINDING_TYPE_NATIVE)) {
-                    continue;
-                }
-                if (!nativeToolNames.contains(binding.getToolName())) {
-                    skillToolBindingMapper.deleteById(binding.getId());
-                }
-            }
         }
     }
 
@@ -801,35 +552,6 @@ public class SkillCatalogService {
         return catalog != null && catalog.getBindable() != null && catalog.getBindable() == 1;
     }
 
-    private boolean shouldUseGeneratedDisplayName(String currentDisplayName, String generatedKey) {
-        if (!StringUtils.hasText(currentDisplayName)) {
-            return true;
-        }
-        return currentDisplayName.trim().equals(generatedKey);
-    }
-
-    private boolean shouldUseGeneratedDescription(String currentDescription, String generatedDescription) {
-        if (!StringUtils.hasText(currentDescription)) {
-            return true;
-        }
-        if (!StringUtils.hasText(generatedDescription)) {
-            return false;
-        }
-        return currentDescription.trim().equals(generatedDescription.trim());
-    }
-
-    private String deriveCategory(SkillMetadata metadata) {
-        Object extension = metadata.getExtensions().get("category");
-        String rawCategory = extension == null ? "" : String.valueOf(extension).trim();
-        return SkillCatalogLocalization.resolveCategory(metadata.getName(), rawCategory);
-    }
-
-    private boolean shouldUseGeneratedCategory(String currentCategory, SkillMetadata metadata) {
-        Object extension = metadata.getExtensions().get("category");
-        String rawCategory = extension == null ? "" : String.valueOf(extension).trim();
-        return SkillCatalogLocalization.isLegacyCategoryValue(currentCategory, rawCategory, metadata.getSource());
-    }
-
     private String buildSkillSystemPrompt(SkillCatalog catalog, Skill skill, List<ResolvedSkillTool> resolvedTools) {
         StringBuilder builder = new StringBuilder();
         builder.append("You are operating in skill mode.\n");
@@ -871,13 +593,13 @@ public class SkillCatalogService {
     private String resolveToolUsageHint(ResolvedSkillTool tool) {
         String toolName = tool.name();
         if (toolName.endsWith(".search_dataset_summary")) {
-            return "Use this for understanding what the dataset can answer before writing SQL. Example args: {\"question\":\"近三个月报销趋势\"}.";
+            return "Use this first before writing SQL to understand candidate tables. objectCode is the real SQL table name; objectName is only a Chinese label. Example args: {\"question\":\"近三个月报销趋势\"}.";
         }
         if (toolName.endsWith(".get_dataset_schema")) {
-            return "Use this for table, field, and relationship lookup. Args must only use objectCodes/objectNames, or {} for full schema.";
+            return "Use this after summary to inspect table, field, and relationship details. SQL table names must use objectCode, not Chinese objectName, and SQL fields must come from the returned schema instead of being invented. Args must only use objectCodes/objectNames, or {} for full schema.";
         }
         if (toolName.endsWith(".execute_dataset_sql")) {
-            return "Use this only after understanding the dataset. Only run read-only SELECT/WITH queries. Example args: {\"sql\":\"select ...\",\"limit\":50}.";
+            return "Use this only after summary/schema are sufficient for writing SQL. Only run read-only SELECT/WITH queries, SQL table names must use objectCode, and SQL fields must come from get_dataset_schema results. Example args: {\"sql\":\"select ...\",\"limit\":50}.";
         }
         if (Objects.equals(tool.toolType(), "KNOWLEDGE_BASE_TOOL") || toolName.endsWith(".search")) {
             return "Use this for reimbursement policy, process, invoice, and rules lookup based on the knowledge base.";
@@ -933,19 +655,6 @@ public class SkillCatalogService {
             String systemPrompt,
             List<ToolCallback> toolCallbacks,
             boolean readFileAvailable) {}
-
-    private record RuntimeSnapshot(Map<String, SkillMetadata> runtimeMetadata, Set<String> runtimeToolNames) {}
-
-    private record ToolSeed(
-            String toolName,
-            String displayName,
-            String description,
-            String runtimeDescription,
-            String toolType,
-            Integer bindable,
-            String ownerSkillName,
-            String source,
-            Integer sortOrder) {}
 
     private record ResolvedSkillTool(
             String name,

@@ -2,15 +2,18 @@ package lingzhou.agent.backend.capability.api.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import lingzhou.agent.backend.common.security.RSAEncryptor;
 import lingzhou.agent.backend.common.security.Rsa;
 import lingzhou.agent.backend.business.system.model.PlatformAuthConfig;
 import lingzhou.agent.backend.business.system.model.PlatformEndpointItem;
 import lingzhou.agent.backend.common.lzException.TaskException;
+import lombok.AllArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
@@ -22,6 +25,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
 @Service
+@AllArgsConstructor
 public class LowcodePlatformClient {
 
     private static final Logger logger = LoggerFactory.getLogger(LowcodePlatformClient.class);
@@ -34,17 +38,20 @@ public class LowcodePlatformClient {
     private static final String ACCESS_APP_LIST_PATH = "/api/App/GetListMyAccessApps";
     private static final String API_LIST_PATH_TEMPLATE = "/api/IntegrationConnect/LoadApiList/{appId}";
     private static final String APP_MENU_PATH_TEMPLATE = "/api/App/GetAppActiveMenuByCode/{appCode}";
+    private static final String APP_ITEM_INFO_PATH_TEMPLATE = "/api/App/GetAppItemInfo/{objectCode}";
     private static final String DATA_SOURCE_NEW_PATH_TEMPLATE = "/api/DataSource/GetDataSourceNew/{formCode}/true";
     private static final String SQL_SELECT_PATH = "/api/FrontEnd/sqlSelect";
     private static final String EXECUTE_API_PATH_TEMPLATE = "/api/IntegrationConnect/ExecuteApi/{apiCode}";
     private static final int APP_LIST_PAGE_NO = 1;
     private static final int APP_LIST_PAGE_SIZE = 10000;
+    private static final String DEFAULT_USER_ID = "18f923a7-5a5e-426d-94ae-a55ad1a4b239";
+    static final String HEADER_APP_KEY = "AppKey";
+    static final String HEADER_TIMESTAMP = "Timestamp";
+    static final String HEADER_SIGN = "Sign";
 
     private final ObjectMapper objectMapper;
+    private final Clock clock = Clock.systemDefaultZone();
 
-    public LowcodePlatformClient(ObjectMapper objectMapper) {
-        this.objectMapper = objectMapper;
-    }
 
     public PlatformEnvelope getToken(PlatformEndpointItem platform) throws TaskException {
         Map<String, Object> requestBody = new LinkedHashMap<>();
@@ -138,6 +145,24 @@ public class LowcodePlatformClient {
             return extractObjectList(envelope.result(), null);
         } catch (RestClientResponseException ex) {
             throw toHttpException("获取应用菜单失败", platform, ex);
+        }
+    }
+
+    public Map<String, Object> getAppItemInfo(PlatformEndpointItem platform, String token, String objectCode)
+            throws TaskException {
+        PlatformAuthConfig authConfig = getAuthConfig(platform);
+        if (!StringUtils.hasText(objectCode)) {
+            throw new TaskException("objectCode 不能为空", TaskException.Code.UNKNOWN);
+        }
+        try {
+            RestClient.RequestHeadersSpec<?> request =
+                    buildRestClient(platform).get().uri(APP_ITEM_INFO_PATH_TEMPLATE, objectCode.trim());
+            applyCommonHeaders(request, token, authConfig);
+            Object response = request.retrieve().body(Object.class);
+            PlatformEnvelope envelope = parseEnvelope(response);
+            return extractObjectMap(envelope.result());
+        } catch (RestClientResponseException ex) {
+            throw toHttpException("获取菜单详情失败", platform, ex);
         }
     }
 
@@ -296,20 +321,53 @@ public class LowcodePlatformClient {
         return body;
     }
 
-    private void applyCommonHeaders(
-            RestClient.RequestHeadersSpec<?> request, String token, PlatformAuthConfig authConfig) {
+    private void applyCommonHeaders(RestClient.RequestHeadersSpec<?> request, String token, PlatformAuthConfig authConfig)
+            throws TaskException {
         if (request == null) {
             return;
         }
-        if (StringUtils.hasText(token)) {
+        if (!usesSignatureAuth(authConfig) && StringUtils.hasText(token)) {
             request.header(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim());
         }
         String tnCode = StringUtils.hasText(authConfig.getTncode()) ? authConfig.getTncode().trim() : "00000000";
         String userId = StringUtils.hasText(authConfig.getUserId())
                 ? authConfig.getUserId().trim()
-                : "18f923a7-5a5e-426d-94ae-a55ad1a4b239";
+                : DEFAULT_USER_ID;
         request.header("TnCode", tnCode);
         request.header("UserId", userId);
+        applyRsaHeaders(request, authConfig);
+    }
+
+    private void applyRsaHeaders(RestClient.RequestHeadersSpec<?> request, PlatformAuthConfig authConfig) throws TaskException {
+        if (request == null || authConfig == null) {
+            return;
+        }
+        String appKey = normalizeText(authConfig.getAppKey());
+        String appSecret = normalizeText(authConfig.getAppSecret());
+        String rsaPublicKey = StringUtils.hasText(authConfig.getRsaPublicKey())
+                ? authConfig.getRsaPublicKey().trim()
+                : RSAEncryptor.defaultPublicKey();
+        if (!usesSignatureAuth(authConfig)) {
+            return;
+        }
+        String timestamp = String.valueOf(clock.millis());
+        request.header(HEADER_APP_KEY, appKey);
+        request.header(HEADER_TIMESTAMP, timestamp);
+        request.header(HEADER_SIGN, buildRsaSignature(appKey, timestamp, appSecret, rsaPublicKey));
+    }
+
+    private boolean usesSignatureAuth(PlatformAuthConfig authConfig) {
+        return authConfig != null
+                && StringUtils.hasText(authConfig.getAppKey())
+                && StringUtils.hasText(authConfig.getAppSecret());
+    }
+
+    String buildRsaSignature(String appKey, String timestamp, String appSecret, String rsaPublicKey) throws TaskException {
+        try {
+            return RSAEncryptor.encryptWithPublicKey(appKey + "|" + appSecret + "|" + timestamp, rsaPublicKey);
+        } catch (Exception ex) {
+            throw new TaskException("低代码平台 RSA 请求头加密失败", TaskException.Code.UNKNOWN, ex);
+        }
     }
 
     private TaskException toHttpException(String action, PlatformEndpointItem platform, RestClientResponseException ex) {

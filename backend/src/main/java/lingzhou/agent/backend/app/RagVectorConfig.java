@@ -17,6 +17,7 @@ import org.springframework.util.StringUtils;
 
 @Configuration
 @EnableConfigurationProperties({
+    ModelProviderProperties.class,
     EmbeddingModelProperties.class,
     RagElasticsearchProperties.class,
     RagRetrievalProperties.class,

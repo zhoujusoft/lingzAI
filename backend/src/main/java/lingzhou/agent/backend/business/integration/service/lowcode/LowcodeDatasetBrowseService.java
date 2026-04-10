@@ -20,6 +20,38 @@ import org.springframework.util.StringUtils;
 @Service
 public class LowcodeDatasetBrowseService {
 
+    private static final List<String> EXCLUDED_FIELD_KEYWORDS = List.of(
+            "logo",
+            "icon",
+            "image",
+            "img",
+            "picture",
+            "avatar",
+            "file",
+            "attachment",
+            "upload");
+    private static final List<String> EXCLUDED_FIELD_TYPE_KEYWORDS = List.of(
+            "richtext",
+            "rich-text",
+            "markdown",
+            "html",
+            "editor",
+            "imageupload",
+            "pictureupload",
+            "fileupload",
+            "attachmentupload",
+            "uploader",
+            "media",
+            "富文本",
+            "图片",
+            "图像",
+            "头像",
+            "附件",
+            "文件上传",
+            "图片上传",
+            "附件上传",
+            "上传");
+
     private final LowcodePlatformConfigService lowcodePlatformConfigService;
     private final LowcodeTokenService lowcodeTokenService;
     private final LowcodePlatformClient lowcodePlatformClient;
@@ -56,20 +88,23 @@ public class LowcodeDatasetBrowseService {
     }
 
     public List<ObjectView> listObjects(String platformKey, String appId) throws TaskException {
-        return flattenMenus(loadMenus(platformKey, appId), "", 0).stream()
+        PlatformEndpointItem platform = lowcodePlatformConfigService.requirePlatform(platformKey);
+        String token = lowcodeTokenService.getTokenIfConfigured(platform);
+        return flattenMenus(platform, token, loadMenus(platform, token, appId), "", 0).stream()
                 .sorted(Comparator.comparing(ObjectView::objectName, String.CASE_INSENSITIVE_ORDER))
                 .toList();
     }
 
-    public List<FieldView> listFields(String platformKey, String appId, String objectCode) throws TaskException {
-        String normalizedFormCode = requireText(objectCode, "objectCode 不能为空");
+    public List<FieldView> listFields(String platformKey, String appId, String objectCode, String formCode) throws TaskException {
+        String normalizedObjectCode = requireText(objectCode, "objectCode 不能为空");
+        String normalizedFormCode = requireText(firstNonBlank(formCode, objectCode), "formCode 不能为空");
         PlatformEndpointItem platform = lowcodePlatformConfigService.requirePlatform(platformKey);
         String token = lowcodeTokenService.getTokenIfConfigured(platform);
         Map<String, Object> target = lowcodePlatformClient.getDataSourceNew(platform, token, normalizedFormCode);
         List<FieldView> fields = new ArrayList<>();
         Set<String> seen = new LinkedHashSet<>();
-        collectFieldGroup(target.get("SystemFields"), normalizedFormCode, "", "MAIN_SYSTEM", fields, seen);
-        collectFieldGroup(target.get("UserFields"), normalizedFormCode, "", "MAIN_USER", fields, seen);
+        collectFieldGroup(target.get("UserFields"), normalizedObjectCode, normalizedFormCode, "", "MAIN_USER", fields, seen);
+        collectFieldGroup(target.get("SystemFields"), normalizedObjectCode, normalizedFormCode, "", "MAIN_SYSTEM", fields, seen);
         Object rawSubFields = target.get("SubFields");
         if (rawSubFields instanceof List<?> subFieldList) {
             for (Object subFieldItem : subFieldList) {
@@ -85,16 +120,20 @@ public class LowcodeDatasetBrowseService {
                         item.get("Code"),
                         item.get("ChildSchemaCode"));
                 String subObjectName = firstNonBlank(item.get("FunctionName"), item.get("DisplayName"), subObjectCode);
-                collectFieldGroup(item.get("SystemFields"), normalizedFormCode, subObjectCode, "SUB_SYSTEM", fields, seen);
-                collectFieldGroup(item.get("UserFields"), normalizedFormCode, subObjectCode, "SUB_USER", fields, seen);
-                collectFieldGroup(subMap, normalizedFormCode, subObjectCode, "SUB_USER", fields, seen);
+                collectFieldGroup(item.get("UserFields"), normalizedObjectCode, normalizedFormCode, subObjectCode, "SUB_USER", fields, seen);
+                collectFieldGroup(item.get("SystemFields"), normalizedObjectCode, normalizedFormCode, subObjectCode, "SUB_SYSTEM", fields, seen);
+                collectFieldGroup(subMap, normalizedObjectCode, normalizedFormCode, subObjectCode, "SUB_USER", fields, seen);
                 List<Map<String, Object>> childFields = asList(item.get("children"));
                 int childSort = 0;
                 for (Map<String, Object> childField : childFields) {
+                    if (!shouldExposeField(childField, "SUB_CHILD")) {
+                        continue;
+                    }
                     addField(
                             fields,
                             seen,
                             new FieldView(
+                                    normalizedObjectCode,
                                     normalizedFormCode,
                                     trimText(childField.get("ItemName")),
                                     firstNonBlank(childField.get("DisplayName"), childField.get("ItemName")),
@@ -109,7 +148,7 @@ public class LowcodeDatasetBrowseService {
         }
         return fields.stream()
                 .sorted(Comparator.comparing(FieldView::subObjectCode, Comparator.nullsFirst(String.CASE_INSENSITIVE_ORDER))
-                        .thenComparing(FieldView::fieldScope)
+                        .thenComparingInt(field -> fieldScopeOrder(field.fieldScope()))
                         .thenComparingInt(FieldView::sortOrder))
                 .toList();
     }
@@ -124,7 +163,7 @@ public class LowcodeDatasetBrowseService {
             if (object.folder()) {
                 continue;
             }
-            List<FieldView> fields = listFields(platformKey, appId, object.objectCode());
+            List<FieldView> fields = listFields(platformKey, appId, object.objectCode(), object.formCode());
             Set<String> subObjectCodes = fields.stream()
                     .map(FieldView::subObjectCode)
                     .filter(StringUtils::hasText)
@@ -153,10 +192,20 @@ public class LowcodeDatasetBrowseService {
     private List<Map<String, Object>> loadMenus(String platformKey, String appId) throws TaskException {
         PlatformEndpointItem platform = lowcodePlatformConfigService.requirePlatform(platformKey);
         String token = lowcodeTokenService.getTokenIfConfigured(platform);
+        return loadMenus(platform, token, appId);
+    }
+
+    private List<Map<String, Object>> loadMenus(PlatformEndpointItem platform, String token, String appId) throws TaskException {
         return lowcodePlatformClient.getAppActiveMenus(platform, token, requireText(appId, "appId 不能为空"));
     }
 
-    private List<ObjectView> flattenMenus(List<Map<String, Object>> items, String parentCode, int depth) {
+    private List<ObjectView> flattenMenus(
+            PlatformEndpointItem platform,
+            String token,
+            List<Map<String, Object>> items,
+            String parentCode,
+            int depth)
+            throws TaskException {
         List<ObjectView> result = new ArrayList<>();
         if (items == null) {
             return result;
@@ -167,27 +216,60 @@ public class LowcodeDatasetBrowseService {
                 continue;
             }
             String objectCode = trimText(item.get("Code"));
-            String objectName = firstNonBlank(item.get("Name"), objectCode);
+            String menuName = firstNonBlank(item.get("Name"), objectCode);
             boolean folder = Boolean.parseBoolean(trimText(item.get("IsFolder")));
             String appCode = trimText(item.get("AppCode"));
-            String objectType = firstNonBlank(item.get("AppItemType"), folder ? "FOLDER" : "MENU");
-            String path = StringUtils.hasText(parentCode) ? parentCode + "/" + objectName : objectName;
-            result.add(new ObjectView(
+            String path = StringUtils.hasText(parentCode) ? parentCode + "/" + menuName : menuName;
+            List<ObjectView> childViews = flattenMenus(platform, token, asList(item.get("Children")), objectCode, depth + 1);
+            if (folder) {
+                if (!childViews.isEmpty()) {
+                    result.add(new ObjectView(
+                            objectCode,
+                            menuName,
+                            "FOLDER",
+                            "",
+                            "",
+                            appCode,
+                            parentCode,
+                            true,
+                            depth,
+                            sort++,
+                            path,
+                            item));
+                    result.addAll(childViews);
+                }
+                continue;
+            }
+            Map<String, Object> itemInfo = lowcodePlatformClient.getAppItemInfo(platform, token, objectCode);
+            String objectSource = firstNonBlank(
+                    itemInfo.get("ObjectSource"),
+                    itemInfo.get("objectSource"),
+                    item.get("ObjectSource"),
+                    item.get("objectSource"),
+                    item.get("AppItemType"),
+                    "MENU");
+            if (!"GRIDLIST".equalsIgnoreCase(objectSource)) {
+                continue;
+            }
+            Map<String, Object> raw = new LinkedHashMap<>(item);
+            if (!itemInfo.isEmpty()) {
+                raw.putAll(itemInfo);
+            }
+            String bizTableName = firstNonBlank(itemInfo.get("BizTableName"), itemInfo.get("bizTableName"));
+            ObjectView view = new ObjectView(
+                    firstNonBlank(bizTableName, menuName, objectCode),
+                    menuName,
+                    objectSource,
+                    firstNonBlank(bizTableName, objectCode),
                     objectCode,
-                    objectName,
-                    objectType,
-                    "",
                     appCode,
                     parentCode,
-                    folder,
+                    false,
                     depth,
                     sort++,
                     path,
-                    item));
-            List<Map<String, Object>> children = asList(item.get("Children"));
-            if (!children.isEmpty()) {
-                result.addAll(flattenMenus(children, objectCode, depth + 1));
-            }
+                    raw);
+            result.add(view);
         }
         return result;
     }
@@ -195,6 +277,7 @@ public class LowcodeDatasetBrowseService {
     private void collectFieldGroup(
             Object group,
             String rootObjectCode,
+            String formCode,
             String subObjectCode,
             String fieldScope,
             List<FieldView> fields,
@@ -203,12 +286,16 @@ public class LowcodeDatasetBrowseService {
         List<Map<String, Object>> items = asList(groupMap.get("Result"));
         int sort = 0;
         for (Map<String, Object> item : items) {
+            if (!shouldExposeField(item, fieldScope)) {
+                continue;
+            }
             addField(
                     fields,
                     seen,
                     new FieldView(
                             rootObjectCode,
-                            trimText(item.get("ItemName")),
+                            formCode,
+                            resolveFieldName(item, fieldScope),
                             firstNonBlank(item.get("DisplayName"), item.get("ItemName")),
                             firstNonBlank(item.get("LogicTypeName"), item.get("LogicType")),
                             fieldScope,
@@ -226,8 +313,55 @@ public class LowcodeDatasetBrowseService {
         String uniqueKey = (fieldView.fieldScope() + "|" + fieldView.subObjectCode() + "|" + fieldView.fieldName())
                 .toLowerCase(Locale.ROOT);
         if (seen.add(uniqueKey)) {
-            fields.add(fieldView);
+                fields.add(fieldView);
         }
+    }
+
+    private String resolveFieldName(Map<String, Object> item, String fieldScope) {
+        if (fieldScope != null && fieldScope.toUpperCase(Locale.ROOT).contains("SYSTEM")) {
+            return trimText(item.get("ItemName"));
+        }
+        return trimText(item.get("RelateName"));
+    }
+
+    private int fieldScopeOrder(String fieldScope) {
+        String normalized = trimText(fieldScope).toUpperCase(Locale.ROOT);
+        return switch (normalized) {
+            case "MAIN_USER" -> 0;
+            case "MAIN_SYSTEM" -> 1;
+            case "SUB_USER" -> 2;
+            case "SUB_CHILD" -> 3;
+            case "SUB_SYSTEM" -> 4;
+            default -> 9;
+        };
+    }
+
+    private boolean shouldExposeField(Map<String, Object> item, String fieldScope) {
+        if (item == null || item.isEmpty()) {
+            return false;
+        }
+        String fieldName = resolveFieldName(item, fieldScope);
+        String fieldLabel = firstNonBlank(item.get("DisplayName"), item.get("ItemName"), item.get("FieldName"));
+        String fieldType = firstNonBlank(
+                item.get("LogicTypeName"),
+                item.get("LogicType"),
+                item.get("ControlType"),
+                item.get("ControlTypeName"),
+                item.get("EditorType"),
+                item.get("Type"));
+        String nameAndLabel = (fieldName + "|" + fieldLabel).toLowerCase(Locale.ROOT);
+        String normalizedFieldType = fieldType.toLowerCase(Locale.ROOT);
+        for (String keyword : EXCLUDED_FIELD_KEYWORDS) {
+            if (nameAndLabel.contains(keyword) || normalizedFieldType.contains(keyword)) {
+                return false;
+            }
+        }
+        for (String keyword : EXCLUDED_FIELD_TYPE_KEYWORDS) {
+            if (normalizedFieldType.contains(keyword.toLowerCase(Locale.ROOT))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private Map<String, Object> asMap(Object value) {
@@ -290,6 +424,7 @@ public class LowcodeDatasetBrowseService {
             String objectName,
             String objectSource,
             String description,
+            String formCode,
             String appCode,
             String parentCode,
             boolean folder,
@@ -300,6 +435,7 @@ public class LowcodeDatasetBrowseService {
 
     public record FieldView(
             String objectCode,
+            String formCode,
             String fieldName,
             String fieldLabel,
             String fieldType,

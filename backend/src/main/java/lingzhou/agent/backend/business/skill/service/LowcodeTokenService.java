@@ -10,6 +10,7 @@ import java.util.Base64;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import lingzhou.agent.backend.capability.api.client.LowcodePlatformClient;
+import lingzhou.agent.backend.business.system.model.PlatformAuthConfig;
 import lingzhou.agent.backend.business.system.model.PlatformEndpointItem;
 import lingzhou.agent.backend.common.lzException.TaskException;
 import org.slf4j.Logger;
@@ -52,7 +53,10 @@ public class LowcodeTokenService {
     }
 
     public String getTokenIfConfigured(PlatformEndpointItem platform) throws TaskException {
-        return getToken(platform);
+        if (usesSignatureAuth(platform)) {
+            return "";
+        }
+        return "";
     }
 
     public void invalidate(String platformKey) {
@@ -134,6 +138,15 @@ public class LowcodeTokenService {
             return token;
         }
         return parts[0] + "." + parts[1] + ".";
+    }
+
+    private boolean usesSignatureAuth(PlatformEndpointItem platform) {
+        if (platform == null || platform.getAuthConfig() == null) {
+            return false;
+        }
+        PlatformAuthConfig authConfig = platform.getAuthConfig();
+        return StringUtils.hasText(authConfig.getAppKey())
+                && StringUtils.hasText(authConfig.getAppSecret());
     }
 
     private record TokenHolder(String token, long expiresAtEpochSeconds) {

@@ -17,7 +17,11 @@ import lingzhou.agent.backend.business.chat.attachment.AttachmentParseResult;
 import lingzhou.agent.backend.business.chat.attachment.AttachmentParseService;
 import lingzhou.agent.backend.business.chat.domain.enums.ConversationSessionType;
 import lingzhou.agent.backend.business.datasets.service.IntegrationDatasetService;
+import lingzhou.agent.backend.business.integration.domain.IntegrationDataSource;
+import lingzhou.agent.backend.business.integration.mapper.IntegrationDataSourceMapper;
+import lingzhou.agent.backend.app.ChatModelProperties;
 import lingzhou.agent.backend.capability.modelruntime.ModelRuntimeClientFactory;
+import lingzhou.agent.backend.capability.modelruntime.ModelRuntimeErrorMessageResolver;
 import lingzhou.agent.backend.capability.modelruntime.ModelRuntimeConfigResolver;
 import lingzhou.agent.backend.business.skill.service.SkillCatalogService;
 import lingzhou.agent.backend.capability.dataset.runtime.IntegrationDatasetAgentToolRegistry;
@@ -58,8 +62,10 @@ public class ChatConversationService {
     private final AttachmentParseService attachmentParseService;
     private final SkillCatalogService skillCatalogService;
     private final IntegrationDatasetService integrationDatasetService;
+    private final IntegrationDataSourceMapper integrationDataSourceMapper;
     private final IntegrationDatasetAgentToolRegistry integrationDatasetAgentToolRegistry;
     private final SkillKit skillKit;
+    private final ChatModelProperties chatModelProperties;
 
     public ChatConversationService(
             ModelRuntimeClientFactory modelRuntimeClientFactory,
@@ -69,8 +75,10 @@ public class ChatConversationService {
             AttachmentParseService attachmentParseService,
             SkillCatalogService skillCatalogService,
             IntegrationDatasetService integrationDatasetService,
+            IntegrationDataSourceMapper integrationDataSourceMapper,
             IntegrationDatasetAgentToolRegistry integrationDatasetAgentToolRegistry,
-            SkillKit skillKit) {
+            SkillKit skillKit,
+            ChatModelProperties chatModelProperties) {
         this.modelRuntimeClientFactory = modelRuntimeClientFactory;
         this.chatMemory = chatMemory;
         this.conversationHistoryService = conversationHistoryService;
@@ -78,8 +86,10 @@ public class ChatConversationService {
         this.attachmentParseService = attachmentParseService;
         this.skillCatalogService = skillCatalogService;
         this.integrationDatasetService = integrationDatasetService;
+        this.integrationDataSourceMapper = integrationDataSourceMapper;
         this.integrationDatasetAgentToolRegistry = integrationDatasetAgentToolRegistry;
         this.skillKit = skillKit;
+        this.chatModelProperties = chatModelProperties;
     }
 
     public Flux<ServerSentEvent<String>> streamGeneral(GeneralChatRequest request, Long userId) {
@@ -98,6 +108,7 @@ public class ChatConversationService {
                 null,
                 query,
                 chatFileService.buildUserMessage(query.equals(normalizeMessage(request.message())) ? query : "", request.fileIds(), false),
+                "normal",
                 ConversationSessionType.GENERAL_CHAT.name(),
                 JSON.toJSONString(Map.of("mode", "general")),
                 fileListJson,
@@ -108,12 +119,13 @@ public class ChatConversationService {
     }
 
     public Flux<ServerSentEvent<String>> streamSkill(SkillChatRequest request, Long userId) {
-        if (!hasRequestContent(request == null ? null : request.message(), request == null ? null : request.fileIds())) {
+        if (!hasSkillRequestContent(request)) {
             return Flux.just(errorEvent("message or file is required"));
         }
         try {
             SkillCatalogService.SkillChatContext context = skillCatalogService.resolveSkillChatContext(request.skillId());
-            String query = resolveQuery(request.message(), request.fileIds(), context.runtimeSkillName());
+            String messageType = normalizeMessageType(request == null ? null : request.messageType());
+            String query = resolveSkillQuery(request, context.runtimeSkillName(), messageType);
             String fileListJson = chatFileService.buildFileListJson(request.fileIds());
             List<AttachmentParseResult> parsedAttachments = attachmentParseService.parseUploads(request.fileIds());
             Map<String, Object> params = new LinkedHashMap<>();
@@ -121,10 +133,17 @@ public class ChatConversationService {
             params.put("runtimeSkillName", context.runtimeSkillName());
             params.put("fileIds", request.fileIds() == null ? List.of() : request.fileIds());
             params.put("parsedAttachments", attachmentParseService.toSerializablePayload(parsedAttachments));
+            params.put("messageType", messageType);
+            if (request != null && request.eventPayload() != null) {
+                params.put("eventPayload", request.eventPayload());
+            }
             String rawMessage = normalizeMessage(request.message());
-            String userMessage = chatFileService.buildUserMessage(
-                            rawMessage, request.fileIds(), context.readFileAvailable())
-                    + attachmentParseService.buildPromptContext(parsedAttachments);
+            String userMessage = buildSkillUserMessage(
+                    request,
+                    rawMessage,
+                    messageType,
+                    parsedAttachments,
+                    context.readFileAvailable());
 
             PreparedChat prepared = new PreparedChat(
                     ConversationSessionType.SKILL_CHAT,
@@ -133,6 +152,7 @@ public class ChatConversationService {
                     context.displayName(),
                     query,
                     userMessage,
+                    StringUtils.hasText(messageType) ? messageType : "normal",
                     context.runtimeSkillName(),
                     JSON.toJSONString(params),
                     fileListJson,
@@ -158,6 +178,7 @@ public class ChatConversationService {
             params.put("datasetCode", dataset.datasetCode());
             params.put("datasetName", dataset.name());
             params.put("sourceKind", dataset.sourceKind());
+            params.put("sqlDialect", resolveDatasetSqlDialect(dataset));
             PreparedChat prepared = new PreparedChat(
                     ConversationSessionType.DATASET_CHAT,
                     request == null ? null : request.sessionId(),
@@ -165,10 +186,11 @@ public class ChatConversationService {
                     dataset.name(),
                     query,
                     rawMessage,
+                    "normal",
                     ConversationSessionType.DATASET_CHAT.name(),
                     JSON.toJSONString(params),
                     null,
-                    integrationDatasetAgentToolRegistry.buildCallbacks(dataset.id()),
+                    integrationDatasetAgentToolRegistry.buildCallbacks(dataset.datasetCode()),
                     buildDatasetSystemPrompt(dataset),
                     null);
             return streamPrepared(prepared, userId);
@@ -199,6 +221,7 @@ public class ChatConversationService {
                     prepared.scopeId(),
                     prepared.scopeDisplayName(),
                     prepared.query(),
+                    prepared.messageType(),
                     prepared.query(),
                     prepared.questionType(),
                     prepared.paramsJson(),
@@ -215,7 +238,8 @@ public class ChatConversationService {
             return meta.concatWith(buildSkillStreamingResponse(context, prepared));
         }
 
-        ModelRuntimeClientFactory.ChatRuntimeBundle chatRuntimeBundle = modelRuntimeClientFactory.createChatBundle();
+        ModelRuntimeClientFactory.ChatRuntimeBundle chatRuntimeBundle =
+                modelRuntimeClientFactory.createChatBundleWithSystemPrompt(chatModelProperties.getGeneralSystemPrompt());
         AtomicReference<String> last = new AtomicReference<>("");
         AtomicBoolean finalized = new AtomicBoolean(false);
         long startedAt = System.currentTimeMillis();
@@ -306,26 +330,27 @@ public class ChatConversationService {
 //                    }
                     last.updateAndGet(existing -> existing + delta);
                     currentRoundOutputLength.addAndGet(safeLength(delta));
-                    logger.info(
-                            "SSE skill chat chunk length={}, sessionType={}, scopeId={}, hasToolCalls={}",
-                            current.length(),
-                            prepared.sessionType().name(),
-                            prepared.scopeId(),
-                            output.hasToolCalls());
+//                    logger.info(
+//                            "SSE skill chat chunk length={}, sessionType={}, scopeId={}, hasToolCalls={}",
+//                            current.length(),
+//                            prepared.sessionType().name(),
+//                            prepared.scopeId(),
+//                            output.hasToolCalls());
                     return Flux.just(messageEvent(delta));
                 })
                 .onErrorResume(error -> {
+                    String friendlyMessage = ModelRuntimeErrorMessageResolver.resolve(error);
                     logStreamingError("skill", prepared, skillChatBundle.config(), error);
                     if (finalized.compareAndSet(false, true)) {
                         String paramsJson = mergeParamsJson(prepared.paramsJson(), toolEvents);
                         conversationHistoryService.failMessage(
                                 context,
-                                error.getMessage(),
+                                friendlyMessage,
                                 last.get(),
                                 paramsJson,
                                 System.currentTimeMillis() - startedAt);
                     }
-                    return Flux.just(errorEvent(error.getMessage()));
+                    return Flux.just(errorEvent(friendlyMessage));
                 })
                 .doOnComplete(() -> {
                     if (finalized.compareAndSet(false, true)) {
@@ -403,17 +428,18 @@ public class ChatConversationService {
             AtomicBoolean finalized,
             long startedAt) {
         return stream.onErrorResume(error -> {
+                    String friendlyMessage = ModelRuntimeErrorMessageResolver.resolve(error);
                     logStreamingError("general", prepared, chatConfig, error);
                     if (finalized.compareAndSet(false, true)) {
                         String paramsJson = mergeParamsJson(prepared.paramsJson(), toolEvents);
                         conversationHistoryService.failMessage(
                                 context,
-                                error.getMessage(),
+                                friendlyMessage,
                                 last.get(),
                                 paramsJson,
                                 System.currentTimeMillis() - startedAt);
                     }
-                    return Flux.just(errorEvent(error.getMessage()));
+                    return Flux.just(errorEvent(friendlyMessage));
                 })
                 .doOnComplete(() -> {
                     if (finalized.compareAndSet(false, true)) {
@@ -618,6 +644,46 @@ public class ChatConversationService {
         return StringUtils.hasText(message) || (fileIds != null && !fileIds.isEmpty());
     }
 
+    private boolean hasSkillRequestContent(SkillChatRequest request) {
+        if (request == null) {
+            return false;
+        }
+        if (hasRequestContent(request.message(), request.fileIds())) {
+            return true;
+        }
+        return StringUtils.hasText(normalizeMessageType(request.messageType())) && request.eventPayload() != null;
+    }
+
+    private String normalizeMessageType(String messageType) {
+        return StringUtils.hasText(messageType) ? messageType.trim() : "";
+    }
+
+    private String resolveSkillQuery(SkillChatRequest request, String runtimeSkillName, String messageType) {
+        String rawMessage = normalizeMessage(request == null ? null : request.message());
+        if (StringUtils.hasText(rawMessage)) {
+            return rawMessage;
+        }
+        if ("event".equals(messageType) && request != null && request.eventPayload() != null) {
+            return JSON.toJSONString(request.eventPayload());
+        }
+        return resolveQuery(request == null ? null : request.message(), request == null ? null : request.fileIds(), runtimeSkillName);
+    }
+
+    private String buildSkillUserMessage(
+            SkillChatRequest request,
+            String rawMessage,
+            String messageType,
+            List<AttachmentParseResult> parsedAttachments,
+            boolean readFileAvailable) {
+        if ("event".equals(messageType)) {
+            return StringUtils.hasText(rawMessage)
+                    ? rawMessage
+                    : (request != null && request.eventPayload() != null ? JSON.toJSONString(request.eventPayload()) : "");
+        }
+        return chatFileService.buildUserMessage(rawMessage, request == null ? null : request.fileIds(), readFileAvailable)
+                + attachmentParseService.buildPromptContext(parsedAttachments);
+    }
+
     private String resolveQuery(String message, List<String> fileIds, String runtimeSkillName) {
         String normalized = normalizeMessage(message);
         if (StringUtils.hasText(normalized)) {
@@ -655,20 +721,41 @@ public class ChatConversationService {
     }
 
     private String buildDatasetSystemPrompt(IntegrationDatasetService.DatasetDetail dataset) {
+        String sqlDialect = resolveDatasetSqlDialect(dataset);
         return "你是数据集智能问数助手。你的任务是基于当前选中的数据集完成统计分析、指标计算和结果解释。"
                 + "你可以按需多次调用工具，先理解数据集，再查询数据，最后给出结论。\n\n"
+
                 + "工作规则：\n"
-                + "1. 遇到业务口径不明确、对象不明确、字段不明确时，先调用 search_dataset_summary 或 get_dataset_schema，不要直接猜测。\n"
-                + "2. 需要统计结果时，先确认对象、字段和关联关系，再调用 execute_dataset_sql。必要时可以多次修正 SQL。\n"
-                + "3. 只能基于工具返回的数据和当前数据集信息作答，禁止编造不存在的字段、表、结果或业务规则。\n"
-                + "4. 如果 SQL 执行失败，要根据错误信息调整查询，而不是直接放弃。\n"
-                + "5. 如果用户请求超出当前数据集能力或数据不足，必须明确说明原因。\n"
-                + "6. 最终回答尽量包含：核心结论、统计口径、过滤条件、时间范围、分组方式，以及必要的限制说明。\n"
-                + "7. 除非问题非常简单且上下文已足够，否则优先先看摘要或结构，再做 SQL 查询。\n\n"
-                + buildDatasetPromptContext(dataset);
+                + "1. 固定流程必须遵守：先调用 search_dataset_summary，先分析可能会用到哪些对象/表，再决定是否调用 get_dataset_schema，确认结构足够支撑 SQL 后，最后才调用 execute_dataset_sql。\n"
+                + "2. 遇到业务口径不明确、对象不明确、字段不明确时，不要直接猜测，必须先看摘要，再按需要看结构。\n"
+                + "3. search_dataset_summary、get_dataset_schema 返回结果中的 objectCode 才是 SQL 里可直接使用的真实表名；objectName 只是中文说明，绝对不能把中文对象名直接写进 SQL。\n"
+                + "4. 当前数据集要求使用 MySQL 方言处理，不能混用其他数据库语法。\n"
+                + "5. SQL 中出现的字段，必须来自 get_dataset_schema 返回的字段列表；不能凭经验、中文语义或历史习惯自行想象字段名。\n"
+                + "6. 需要统计结果时，先确认对象、字段和关联关系，并确认现有信息已经足够写 SQL；如果还不够，就继续调用 get_dataset_schema，而不是硬写 SQL。\n"
+                + "7. 只能基于工具返回的数据和当前数据集信息作答，禁止编造不存在的字段、表、结果或业务规则。\n"
+                + "8. 如果 SQL 执行失败，要根据错误信息调整查询，而不是直接放弃。\n"
+                + "9. 如果用户请求超出当前数据集能力或数据不足，必须明确说明原因。\n"
+
+                + "10. 回答风格要求（非常重要）：\n"
+                + "   - 默认优先给出【简洁直接的核心结论】，用自然语言回答问题。\n"
+                + "   - 非必要不要展开详细的SQL过程、字段说明或分析步骤。\n"
+                + "   - 只有在以下情况才补充说明：\n"
+                + "     a）用户明确追问计算方式或口径\n"
+                + "     b）结果存在歧义或容易误解\n"
+                + "     c）统计依赖重要过滤条件（如时间范围、状态）\n"
+                + "   - 补充信息应简洁表达，不要写成长报告。\n"
+
+                + "11. 输出结构建议：\n"
+                + "   - 第一行：直接回答问题（核心结果）\n"
+                + "   - 可选第二行：简要补充关键口径（如时间范围、筛选条件）\n"
+                + "   - 除非用户要求，不要列出完整统计说明或SQL细节。\n"
+
+                + "12. 除非问题非常复杂，否则不要先输出分析过程再给结论，应优先“结论先行”。\n\n"
+
+                + buildDatasetPromptContext(dataset, sqlDialect);
     }
 
-    private String buildDatasetPromptContext(IntegrationDatasetService.DatasetDetail dataset) {
+    private String buildDatasetPromptContext(IntegrationDatasetService.DatasetDetail dataset, String sqlDialect) {
         if (dataset == null) {
             return "当前未提供数据集上下文。";
         }
@@ -677,6 +764,7 @@ public class ChatConversationService {
         builder.append("- 名称：").append(defaultText(dataset.name())).append("\n");
         builder.append("- 编码：").append(defaultText(dataset.datasetCode())).append("\n");
         builder.append("- 来源类型：").append(defaultText(dataset.sourceKind())).append("\n");
+        builder.append("- SQL 方言：").append(defaultText(sqlDialect)).append("\n");
         builder.append("- 描述：").append(defaultText(dataset.description())).append("\n");
         builder.append("- 业务说明：").append(defaultText(dataset.businessLogic())).append("\n");
         builder.append("- 对象数量：").append(dataset.objectCount()).append("\n");
@@ -686,6 +774,7 @@ public class ChatConversationService {
                 : dataset.objectBindings();
         if (!objects.isEmpty()) {
             builder.append("对象列表：\n");
+            builder.append("- 重要：SQL 中必须使用 objectCode 作为表名，不能使用中文 objectName。\n");
             objects.stream().limit(10).forEach(item -> builder.append("- ")
                     .append(defaultText(item.objectName()))
                     .append(" (")
@@ -699,6 +788,7 @@ public class ChatConversationService {
                 : dataset.fieldBindings();
         if (!fields.isEmpty()) {
             builder.append("字段列表：\n");
+            builder.append("- 重要：SQL 中使用的字段必须来自这里或 get_dataset_schema 工具返回结果，不能自行想象字段。\n");
             fields.stream().limit(30).forEach(item -> builder.append("- ")
                     .append(defaultText(item.objectName()))
                     .append(".")
@@ -724,6 +814,24 @@ public class ChatConversationService {
                     .append("\n"));
         }
         return builder.toString().trim();
+    }
+
+    private String resolveDatasetSqlDialect(IntegrationDatasetService.DatasetDetail dataset) {
+        if (dataset == null) {
+            return "MYSQL";
+        }
+        String sourceKind = StringUtils.hasText(dataset.sourceKind()) ? dataset.sourceKind().trim() : "";
+        if ("LOWCODE_APP".equalsIgnoreCase(sourceKind)) {
+            return "MYSQL";
+        }
+        if (!"AI_SOURCE".equalsIgnoreCase(sourceKind) || dataset.aiDataSourceId() == null) {
+            return "MYSQL";
+        }
+        IntegrationDataSource dataSource = integrationDataSourceMapper.selectById(dataset.aiDataSourceId());
+        if (dataSource == null || !StringUtils.hasText(dataSource.getDbType())) {
+            return "MYSQL";
+        }
+        return dataSource.getDbType().trim().toUpperCase();
     }
 
     private String defaultText(String value) {
@@ -760,6 +868,7 @@ public class ChatConversationService {
             String scopeDisplayName,
             String query,
             String userMessage,
+            String messageType,
             String questionType,
             String paramsJson,
             String fileListJson,
@@ -769,7 +878,13 @@ public class ChatConversationService {
 
     public record GeneralChatRequest(String message, List<String> fileIds, String sessionId) {}
 
-    public record SkillChatRequest(Long skillId, String message, List<String> fileIds, String sessionId) {}
+    public record SkillChatRequest(
+            Long skillId,
+            String message,
+            List<String> fileIds,
+            String sessionId,
+            String messageType,
+            Map<String, Object> eventPayload) {}
 
     public record DatasetChatRequest(String message, String sessionId) {}
 }

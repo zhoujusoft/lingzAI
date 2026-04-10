@@ -7,10 +7,6 @@ if [ -d /app/default-skills ] && [ -z "$(find /app/skills -mindepth 1 -print -qu
     cp -R /app/default-skills/. /app/skills/
 fi
 
-if [ "${PYTHON_BOOTSTRAP_ENABLED:-true}" != "false" ] && [ "${PYTHON_BOOTSTRAP_ENABLED:-true}" != "0" ]; then
-    /app/bootstrap-python-runtime.sh &
-fi
-
 endpoint="$(printf '%s' "${MINIO_ENDPOINT:-}" | tr -d '[:space:]')"
 if [ -n "$endpoint" ]; then
     url="${endpoint%/}/minio/health/ready"

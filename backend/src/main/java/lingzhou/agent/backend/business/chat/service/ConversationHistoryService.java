@@ -32,6 +32,7 @@ public class ConversationHistoryService {
     private static final String MESSAGE_STATUS_NORMAL = "normal";
     private static final String MESSAGE_STATUS_ERROR = "error";
     private static final String MESSAGE_STATUS_INTERRUPTED = "interrupted";
+    private static final String MESSAGE_TYPE_NORMAL = "normal";
     private static final String DEFAULT_SESSION_NAME = "新会话";
     private static final int MAX_LAST_MESSAGE_LENGTH = 120;
     private static final int MAX_AUTO_SESSION_NAME_LENGTH = 24;
@@ -67,6 +68,7 @@ public class ConversationHistoryService {
             Long scopeId,
             String scopeDisplayName,
             String query,
+            String messageType,
             String finalQuery,
             String questionType,
             String paramsJson,
@@ -84,6 +86,7 @@ public class ConversationHistoryService {
         ChatMessage message = new ChatMessage();
         message.setSessionId(session.getId());
         message.setQuery(query);
+        message.setMessageType(normalizeMessageType(messageType));
         message.setFinalQuery(StringUtils.hasText(finalQuery) ? finalQuery : query);
         message.setQuestionType(questionType);
         message.setParamsJson(paramsJson);
@@ -249,6 +252,7 @@ public class ConversationHistoryService {
             ChatMessageVo item = new ChatMessageVo();
             item.setId(row.getId());
             item.setQuery(row.getQuery());
+            item.setMessageType(row.getMessageType());
             item.setAnswer(row.getAnswer());
             item.setStatus(row.getStatus());
             item.setError(row.getError());
@@ -375,6 +379,15 @@ public class ConversationHistoryService {
             return "";
         }
         return value.trim();
+    }
+
+    private String normalizeMessageType(String value) {
+        String normalized = normalizeText(value);
+        return StringUtils.hasText(normalized) ? normalized : MESSAGE_TYPE_NORMAL;
+    }
+
+    private String normalizeTextValue(Object value) {
+        return value == null ? "" : normalizeText(String.valueOf(value));
     }
 
     private String resolveScopeDisplayName(String sessionType, Long scopeId) {

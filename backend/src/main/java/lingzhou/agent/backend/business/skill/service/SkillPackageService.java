@@ -3,7 +3,6 @@ package lingzhou.agent.backend.business.skill.service;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import jakarta.annotation.PostConstruct;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -54,7 +53,6 @@ import net.lingala.zip4j.model.enums.CompressionMethod;
 import net.lingala.zip4j.model.enums.EncryptionMethod;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -81,7 +79,6 @@ public class SkillPackageService {
     private final SkillPackageFileMapper skillPackageFileMapper;
     private final SkillRuntimeRegistry skillRuntimeRegistry;
     private final SkillProperties skillProperties;
-    private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final GlobalToolRegistry globalToolRegistry;
     private final SkillKit skillKit;
@@ -96,7 +93,6 @@ public class SkillPackageService {
             SkillPackageFileMapper skillPackageFileMapper,
             SkillRuntimeRegistry skillRuntimeRegistry,
             SkillProperties skillProperties,
-            JdbcTemplate jdbcTemplate,
             ObjectMapper objectMapper,
             GlobalToolRegistry globalToolRegistry,
             SkillKit skillKit,
@@ -109,7 +105,6 @@ public class SkillPackageService {
         this.skillPackageFileMapper = skillPackageFileMapper;
         this.skillRuntimeRegistry = skillRuntimeRegistry;
         this.skillProperties = skillProperties;
-        this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper.copy()
                 .setSerializationInclusion(JsonInclude.Include.NON_NULL)
                 .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
@@ -120,13 +115,7 @@ public class SkillPackageService {
         this.skillCatalogService = skillCatalogService;
     }
 
-    @PostConstruct
-    public void initializeSchema() {
-        ensurePackageSchema();
-    }
-
     public ExportedPackage exportSkillPackage(Long skillId, Long userId) throws TaskException {
-        ensurePackageSchema();
         SkillCatalog catalog = skillCatalogMapper.selectById(skillId);
         if (catalog == null) {
             throw new TaskException("技能不存在", TaskException.Code.UNKNOWN);
@@ -205,7 +194,6 @@ public class SkillPackageService {
     }
 
     public PreviewResult previewImport(MultipartFile file) throws TaskException {
-        ensurePackageSchema();
         PreparedImport prepared = prepareImport(file);
         try {
             return buildPreview(prepared);
@@ -216,7 +204,6 @@ public class SkillPackageService {
 
     @Transactional(rollbackFor = Exception.class)
     public ImportResult confirmImport(MultipartFile file, boolean confirmDowngrade, Long userId) throws TaskException {
-        ensurePackageSchema();
         PreparedImport prepared = prepareImport(file);
         try {
             PreviewResult preview = buildPreview(prepared);
@@ -283,9 +270,7 @@ public class SkillPackageService {
     }
 
     public RefreshResult refreshSkillRuntime() {
-        ensurePackageSchema();
         skillRuntimeRegistry.reload(skillKit, skillPoolManager, skillBox);
-        skillCatalogService.initializeCatalogData();
         List<SkillRuntimeRegistry.FilesystemSkillDescriptor> filesystemSkills = skillRuntimeRegistry.listFilesystemSkills();
         return new RefreshResult(
                 filesystemSkills.size(),
@@ -789,47 +774,6 @@ public class SkillPackageService {
         if (!StringUtils.hasText(skillProperties.getPackageConfig().getPassword())) {
             throw new TaskException("未配置技能包密码", TaskException.Code.UNKNOWN);
         }
-    }
-
-    private void ensurePackageSchema() {
-        jdbcTemplate.execute(
-                """
-                CREATE TABLE IF NOT EXISTS skill_package_install (
-                  id BIGINT NOT NULL AUTO_INCREMENT COMMENT '技能包安装主键',
-                  package_id varchar(120) NOT NULL COMMENT '包唯一标识',
-                  runtime_skill_name varchar(120) NOT NULL COMMENT '运行时技能名称',
-                  package_version varchar(120) NOT NULL COMMENT '包版本',
-                  package_format_version int DEFAULT 1 COMMENT '包格式版本',
-                  source_filename varchar(255) DEFAULT NULL COMMENT '上传文件名',
-                  package_sha256 varchar(64) DEFAULT NULL COMMENT '包文件 SHA-256',
-                  install_mode varchar(32) NOT NULL COMMENT '安装模式',
-                  install_status varchar(32) NOT NULL COMMENT '安装状态',
-                  dependency_status varchar(32) DEFAULT NULL COMMENT '依赖安装状态',
-                  installed_by bigint DEFAULT NULL COMMENT '安装用户',
-                  installed_at datetime DEFAULT CURRENT_TIMESTAMP COMMENT '安装时间',
-                  summary_json longtext COMMENT '安装摘要 JSON',
-                  PRIMARY KEY (id),
-                  KEY idx_skill_package_install_package (package_id, id)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='技能包安装记录表'
-                """);
-        jdbcTemplate.execute(
-                """
-                CREATE TABLE IF NOT EXISTS skill_package_file (
-                  id BIGINT NOT NULL AUTO_INCREMENT COMMENT '技能包文件主键',
-                  install_id BIGINT NOT NULL COMMENT '所属安装记录 ID',
-                  package_id varchar(120) NOT NULL COMMENT '包唯一标识',
-                  relative_path varchar(500) NOT NULL COMMENT '相对技能目录路径',
-                  file_sha256 varchar(64) DEFAULT NULL COMMENT '文件 SHA-256',
-                  file_size bigint DEFAULT NULL COMMENT '文件大小',
-                  file_role varchar(32) DEFAULT NULL COMMENT '文件角色',
-                  operation varchar(32) DEFAULT NULL COMMENT '本次安装操作类型',
-                  managed tinyint DEFAULT 1 COMMENT '是否受管',
-                  created_at datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-                  PRIMARY KEY (id),
-                  KEY idx_skill_package_file_install (install_id),
-                  KEY idx_skill_package_file_package (package_id, relative_path)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='技能包受管文件记录表'
-                """);
     }
 
     private static void copyFile(Path source, Path target) throws IOException {

@@ -1,6 +1,8 @@
 package lingzhou.agent.backend.common.api;
 
+import lingzhou.agent.backend.capability.modelruntime.ModelRuntimeErrorMessageResolver;
 import lingzhou.agent.backend.common.lzException.LZException;
+import lingzhou.agent.backend.common.lzException.TaskException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -20,6 +22,12 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.fail(code, ex.getMessage()));
     }
 
+    @ExceptionHandler(TaskException.class)
+    public ResponseEntity<ApiResponse<Void>> handleTaskException(TaskException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ApiResponse.fail(HttpStatus.BAD_REQUEST.value(), ex.getMessage()));
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiResponse<Void>> handleValidationException(MethodArgumentNotValidException ex) {
         String message = ex.getBindingResult().getFieldError() != null
@@ -27,6 +35,15 @@ public class GlobalExceptionHandler {
                 : "参数校验失败";
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(ApiResponse.fail(HttpStatus.BAD_REQUEST.value(), message));
+    }
+
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<ApiResponse<Void>> handleIllegalStateException(IllegalStateException ex) {
+        logger.warn("Illegal state", ex);
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(ApiResponse.fail(
+                        HttpStatus.INTERNAL_SERVER_ERROR.value(),
+                        ModelRuntimeErrorMessageResolver.resolve(ex)));
     }
 
     @ExceptionHandler(Exception.class)

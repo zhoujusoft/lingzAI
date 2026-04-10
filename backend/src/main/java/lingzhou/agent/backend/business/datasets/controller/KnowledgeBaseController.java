@@ -59,14 +59,23 @@ public class KnowledgeBaseController {
     }
 
     @PostMapping
-    public Map<String, Object> add(@RequestBody KnowledgeBase knowledgeBase) {
+    public Map<String, Object> add(@RequestBody KnowledgeBase knowledgeBase) throws TaskException {
         int rows = knowledgeBaseService.insertKnowledgeBase(knowledgeBase);
-        return Map.of("affected", rows, "kbId", knowledgeBase.getKbId());
+        return Map.of(
+                "affected",
+                rows,
+                "kbId",
+                knowledgeBase.getKbId(),
+                "kbCode",
+                knowledgeBase.getKbCode(),
+                "kbName",
+                knowledgeBase.getKbName());
     }
 
     @PostMapping("/upload")
     public Map<String, Object> createWithDocument(
             @RequestParam("kbName") String kbName,
+            @RequestParam(value = "kbCode", required = false) String kbCode,
             @RequestParam(value = "description", required = false) String description,
             @RequestParam("file") MultipartFile file,
             @RequestParam(value = "chunkStrategy", defaultValue = "AUTO") String chunkStrategy,
@@ -75,6 +84,7 @@ public class KnowledgeBaseController {
         validateFileType(file);
         KnowledgeBase knowledgeBase = new KnowledgeBase();
         knowledgeBase.setKbName(kbName);
+        knowledgeBase.setKbCode(kbCode);
         knowledgeBase.setDescription(description);
         KnowledgeDocument document =
                 knowledgeBaseService.createKnowledgeBaseWithDocument(knowledgeBase, file, chunkStrategy, chunkConfig);
@@ -83,6 +93,10 @@ public class KnowledgeBaseController {
                 1,
                 "kbId",
                 knowledgeBase.getKbId(),
+                "kbCode",
+                knowledgeBase.getKbCode(),
+                "kbName",
+                knowledgeBase.getKbName(),
                 "docId",
                 document.getDocId(),
                 "status",
@@ -92,8 +106,17 @@ public class KnowledgeBaseController {
     }
 
     @PutMapping
-    public Map<String, Object> edit(@RequestBody KnowledgeBase knowledgeBase) {
-        return Map.of("affected", knowledgeBaseService.updateKnowledgeBase(knowledgeBase));
+    public Map<String, Object> edit(@RequestBody KnowledgeBase knowledgeBase) throws TaskException {
+        int affected = knowledgeBaseService.updateKnowledgeBase(knowledgeBase);
+        return Map.of(
+                "affected",
+                affected,
+                "kbId",
+                knowledgeBase.getKbId(),
+                "kbCode",
+                knowledgeBase.getKbCode(),
+                "kbName",
+                knowledgeBase.getKbName());
     }
 
     @PostMapping("/{kbId}/recall-test")

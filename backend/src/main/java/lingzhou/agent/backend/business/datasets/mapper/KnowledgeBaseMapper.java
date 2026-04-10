@@ -17,6 +17,15 @@ public interface KnowledgeBaseMapper extends BaseMapper<KnowledgeBase> {
         return this.selectById(kbId);
     }
 
+    default KnowledgeBase selectKnowledgeBaseByKbCode(String kbCode) {
+        if (StringUtils.isBlank(kbCode)) {
+            return null;
+        }
+        QueryWrapper<KnowledgeBase> wrapper = new QueryWrapper<>();
+        wrapper.eq("kb_code", kbCode.trim()).last("limit 1");
+        return this.selectOne(wrapper);
+    }
+
     default List<KnowledgeBase> selectKnowledgeBaseList(KnowledgeBase knowledgeBase) {
         QueryWrapper<KnowledgeBase> wrapper = buildQuery(knowledgeBase);
         wrapper.orderByDesc("kb_id");
@@ -57,6 +66,18 @@ public interface KnowledgeBaseMapper extends BaseMapper<KnowledgeBase> {
         return Math.toIntExact(this.selectCount(wrapper));
     }
 
+    default int checkKbCodeUnique(KnowledgeBase knowledgeBase) {
+        if (knowledgeBase == null || StringUtils.isBlank(knowledgeBase.getKbCode())) {
+            return 0;
+        }
+        QueryWrapper<KnowledgeBase> wrapper = new QueryWrapper<>();
+        wrapper.eq("kb_code", knowledgeBase.getKbCode().trim());
+        if (knowledgeBase.getKbId() != null) {
+            wrapper.ne("kb_id", knowledgeBase.getKbId());
+        }
+        return Math.toIntExact(this.selectCount(wrapper));
+    }
+
     default String selectKbName(String categoryName) {
         QueryWrapper<KnowledgeBase> wrapper = new QueryWrapper<>();
         wrapper.select("kb_name").eq("kb_name", categoryName).last("limit 1");
@@ -71,6 +92,9 @@ public interface KnowledgeBaseMapper extends BaseMapper<KnowledgeBase> {
         }
         if (StringUtils.isNotBlank(knowledgeBase.getKbName())) {
             wrapper.like("kb_name", knowledgeBase.getKbName());
+        }
+        if (StringUtils.isNotBlank(knowledgeBase.getKbCode())) {
+            wrapper.like("kb_code", knowledgeBase.getKbCode());
         }
         if (StringUtils.isNotBlank(knowledgeBase.getDescription())) {
             wrapper.like("description", knowledgeBase.getDescription());

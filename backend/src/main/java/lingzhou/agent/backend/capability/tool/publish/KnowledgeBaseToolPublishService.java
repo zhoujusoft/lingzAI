@@ -2,6 +2,7 @@ package lingzhou.agent.backend.capability.tool.publish;
 
 import java.util.List;
 import lingzhou.agent.backend.business.datasets.domain.KnowledgeBase;
+import lingzhou.agent.backend.business.skill.mapper.SkillToolBindingMapper;
 import lingzhou.agent.backend.business.tool.domain.ToolCatalog;
 import lingzhou.agent.backend.business.tool.mapper.ToolCatalogMapper;
 import org.springframework.stereotype.Service;
@@ -13,13 +14,16 @@ public class KnowledgeBaseToolPublishService {
     private static final String TOOL_TYPE_KNOWLEDGE_BASE = "KNOWLEDGE_BASE_TOOL";
 
     private final ToolCatalogMapper toolCatalogMapper;
+    private final SkillToolBindingMapper skillToolBindingMapper;
 
-    public KnowledgeBaseToolPublishService(ToolCatalogMapper toolCatalogMapper) {
+    public KnowledgeBaseToolPublishService(
+            ToolCatalogMapper toolCatalogMapper, SkillToolBindingMapper skillToolBindingMapper) {
         this.toolCatalogMapper = toolCatalogMapper;
+        this.skillToolBindingMapper = skillToolBindingMapper;
     }
 
-    public List<PublishedToolView> loadPublishedTools(Long kbId) {
-        return toolCatalogMapper.selectBySource(buildSource(kbId)).stream()
+    public List<PublishedToolView> loadPublishedTools(String kbCode) {
+        return toolCatalogMapper.selectBySource(buildSource(kbCode)).stream()
                 .map(item -> new PublishedToolView(
                         item.getToolName(),
                         item.getDisplayName(),
@@ -29,6 +33,7 @@ public class KnowledgeBaseToolPublishService {
     }
 
     public List<String> publish(KnowledgeBase knowledgeBase) {
+        String kbCode = normalizeCode(knowledgeBase == null ? null : knowledgeBase.getKbCode());
         PublishedToolSeed seed = buildToolSeed(knowledgeBase);
         ToolCatalog toolCatalog = toolCatalogMapper.selectByToolName(seed.toolName());
         if (toolCatalog == null) {
@@ -41,7 +46,7 @@ public class KnowledgeBaseToolPublishService {
         toolCatalog.setToolType(TOOL_TYPE_KNOWLEDGE_BASE);
         toolCatalog.setBindable(1);
         toolCatalog.setOwnerSkillName(null);
-        toolCatalog.setSource(buildSource(knowledgeBase.getKbId()));
+        toolCatalog.setSource(buildSource(kbCode));
         if (toolCatalog.getId() == null) {
             toolCatalogMapper.insert(toolCatalog);
         } else {
@@ -50,8 +55,20 @@ public class KnowledgeBaseToolPublishService {
         return List.of(seed.toolName());
     }
 
-    public void disable(Long kbId) {
-        toolCatalogMapper.deleteBySource(buildSource(kbId));
+    public void disable(String kbCode) {
+        List<String> toolNames = listToolNames(kbCode);
+        if (!toolNames.isEmpty()) {
+            skillToolBindingMapper.deleteByToolNames(toolNames);
+        }
+        toolCatalogMapper.deleteBySource(buildSource(kbCode));
+    }
+
+    public List<String> listToolNames(String kbCode) {
+        return toolCatalogMapper.selectBySource(buildSource(kbCode)).stream()
+                .map(ToolCatalog::getToolName)
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .toList();
     }
 
     private PublishedToolSeed buildToolSeed(KnowledgeBase knowledgeBase) {
@@ -61,14 +78,21 @@ public class KnowledgeBaseToolPublishService {
             description = description + " " + knowledgeBase.getDescription().trim();
         }
         return new PublishedToolSeed(
-                "knowledge_base." + knowledgeBase.getKbId() + ".search",
+                "knowledge_base." + normalizeCode(knowledgeBase.getKbCode()) + ".search",
                 kbName + " / 内容检索",
                 description,
                 72000);
     }
 
-    private String buildSource(Long kbId) {
-        return "knowledge_base:" + kbId;
+    private String buildSource(String kbCode) {
+        return "knowledge_base:" + normalizeCode(kbCode);
+    }
+
+    private String normalizeCode(String value) {
+        if (!StringUtils.hasText(value)) {
+            throw new IllegalStateException("kbCode 不能为空，无法发布知识库工具");
+        }
+        return value.trim();
     }
 
     private String normalizeText(String value) {

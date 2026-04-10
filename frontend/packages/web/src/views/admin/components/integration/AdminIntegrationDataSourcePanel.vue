@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import AppSelect from '@/components/AppSelect.vue';
 import BaseModal from '@/components/feedback/BaseModal.vue';
@@ -24,6 +24,7 @@ const saveError = ref('');
 const testMessage = ref('');
 const testStatus = ref('');
 const editingId = ref(null);
+const connectionParamsOpen = ref(false);
 
 const filters = reactive({
     keyword: '',
@@ -35,10 +36,15 @@ const form = reactive({
     name: '',
     alias: '',
     dbType: 'MYSQL',
-    connectionUri: '',
+    host: '',
+    port: '',
+    databaseName: '',
+    connectionParams: '',
     authType: 'USERNAME_PASSWORD',
     username: '',
     password: '',
+    passwordDirty: false,
+    passwordConfigured: false,
     status: 'ACTIVE',
 });
 
@@ -59,6 +65,155 @@ const statusOptions = [
 ];
 
 const pageTitle = computed(() => (editingId.value ? '编辑数据库' : '创建数据库'));
+
+function connectionDefaults(dbType) {
+    const normalized = String(dbType || 'MYSQL').trim().toUpperCase();
+    if (normalized === 'POSTGRESQL') {
+        return {
+            port: '5432',
+            connectionParams: 'sslmode=disable',
+        };
+    }
+    if (normalized === 'SQLSERVER') {
+        return {
+            port: '1433',
+            connectionParams: 'encrypt=false;trustServerCertificate=true',
+        };
+    }
+    if (normalized === 'ORACLE') {
+        return {
+            port: '1521',
+            connectionParams: '',
+        };
+    }
+    return {
+        port: '3306',
+        connectionParams:
+            'useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false',
+    };
+}
+
+function buildConnectionUri({ dbType, host, port, databaseName, connectionParams }) {
+    const normalizedDbType = String(dbType || 'MYSQL').trim().toUpperCase();
+    const normalizedHost = String(host || '').trim();
+    const normalizedPort = String(port || '').trim();
+    const normalizedDatabaseName = String(databaseName || '').trim();
+    const normalizedParams = String(connectionParams || '').trim();
+    if (!normalizedHost || !normalizedPort || !normalizedDatabaseName) {
+        return '';
+    }
+    if (normalizedDbType === 'POSTGRESQL') {
+        return `jdbc:postgresql://${normalizedHost}:${normalizedPort}/${normalizedDatabaseName}${normalizedParams ? `?${normalizedParams}` : ''}`;
+    }
+    if (normalizedDbType === 'SQLSERVER') {
+        return `jdbc:sqlserver://${normalizedHost}:${normalizedPort};databaseName=${normalizedDatabaseName}${normalizedParams ? `;${normalizedParams}` : ''}`;
+    }
+    if (normalizedDbType === 'ORACLE') {
+        return `jdbc:oracle:thin:@${normalizedHost}:${normalizedPort}/${normalizedDatabaseName}${normalizedParams ? `?${normalizedParams}` : ''}`;
+    }
+    return `jdbc:mysql://${normalizedHost}:${normalizedPort}/${normalizedDatabaseName}${normalizedParams ? `?${normalizedParams}` : ''}`;
+}
+
+function parseConnectionUri(connectionUri, dbType) {
+    const text = String(connectionUri || '').trim();
+    const defaults = connectionDefaults(dbType);
+    if (!text) {
+        return {
+            host: '',
+            port: defaults.port,
+            databaseName: '',
+            connectionParams: defaults.connectionParams,
+        };
+    }
+
+    let match = text.match(/^jdbc:mysql:\/\/([^/:?#;]+)(?::(\d+))?\/([^?;]+)(?:\?(.*))?$/i);
+    if (match) {
+        return {
+            host: match[1] || '',
+            port: match[2] || '3306',
+            databaseName: match[3] || '',
+            connectionParams: match[4] || defaults.connectionParams,
+        };
+    }
+
+    match = text.match(/^jdbc:postgresql:\/\/([^/:?#;]+)(?::(\d+))?\/([^?;]+)(?:\?(.*))?$/i);
+    if (match) {
+        return {
+            host: match[1] || '',
+            port: match[2] || '5432',
+            databaseName: match[3] || '',
+            connectionParams: match[4] || defaults.connectionParams,
+        };
+    }
+
+    match = text.match(/^jdbc:sqlserver:\/\/([^/:?#;]+)(?::(\d+))?;databaseName=([^;?]+)(?:;(.*))?$/i);
+    if (match) {
+        return {
+            host: match[1] || '',
+            port: match[2] || '1433',
+            databaseName: match[3] || '',
+            connectionParams: match[4] || defaults.connectionParams,
+        };
+    }
+
+    match = text.match(/^jdbc:oracle:thin:@([^/:?#;]+)(?::(\d+))?\/([^?;]+)(?:\?(.*))?$/i);
+    if (match) {
+        return {
+            host: match[1] || '',
+            port: match[2] || '1521',
+            databaseName: match[3] || '',
+            connectionParams: match[4] || defaults.connectionParams,
+        };
+    }
+
+    return {
+        host: '',
+        port: defaults.port,
+        databaseName: '',
+        connectionParams: defaults.connectionParams,
+    };
+}
+
+function applyConnectionDefaults(dbType, force = false) {
+    const defaults = connectionDefaults(dbType);
+    if (force || !String(form.port || '').trim()) {
+        form.port = defaults.port;
+    }
+    if (force || !String(form.connectionParams || '').trim()) {
+        form.connectionParams = defaults.connectionParams;
+    }
+}
+
+function buildPayload() {
+    return {
+        id: editingId.value || null,
+        name: form.name,
+        alias: form.alias,
+        dbType: form.dbType,
+        connectionUri: buildConnectionUri({
+            dbType: form.dbType,
+            host: form.host,
+            port: form.port,
+            databaseName: form.databaseName,
+            connectionParams: form.connectionParams,
+        }),
+        authType: form.authType,
+        username: form.username,
+        password: form.passwordDirty ? form.password : '',
+        status: form.status,
+    };
+}
+
+function handlePasswordFocus() {
+    if (form.passwordConfigured && !form.passwordDirty) {
+        form.password = '';
+    }
+}
+
+function handlePasswordInput(event) {
+    form.passwordDirty = true;
+    form.password = event?.target?.value || '';
+}
 
 function handleUnauthorized() {
     clearUserSession();
@@ -84,16 +239,23 @@ function openCreateModal() {
     saveError.value = '';
     testMessage.value = '';
     testStatus.value = '';
+    connectionParamsOpen.value = false;
     Object.assign(form, {
         name: '',
         alias: '',
         dbType: 'MYSQL',
-        connectionUri: '',
+        host: '',
+        port: '',
+        databaseName: '',
+        connectionParams: '',
         authType: 'USERNAME_PASSWORD',
         username: '',
         password: '',
+        passwordDirty: false,
+        passwordConfigured: false,
         status: 'ACTIVE',
     });
+    applyConnectionDefaults('MYSQL', true);
     modalOpen.value = true;
 }
 
@@ -102,14 +264,21 @@ function openEditModal(item) {
     saveError.value = '';
     testMessage.value = '';
     testStatus.value = '';
+    connectionParamsOpen.value = false;
+    const parsedConnection = parseConnectionUri(item?.connectionUri || '', item?.dbType || 'MYSQL');
     Object.assign(form, {
         name: item?.name || '',
         alias: item?.alias || '',
         dbType: item?.dbType || 'MYSQL',
-        connectionUri: item?.connectionUri || '',
+        host: parsedConnection.host,
+        port: parsedConnection.port,
+        databaseName: parsedConnection.databaseName,
+        connectionParams: parsedConnection.connectionParams,
         authType: item?.authType || 'USERNAME_PASSWORD',
         username: item?.username || '',
-        password: '',
+        password: item?.passwordConfigured ? '••••••••••••' : '',
+        passwordDirty: false,
+        passwordConfigured: Boolean(item?.passwordConfigured),
         status: item?.status || 'ACTIVE',
     });
     modalOpen.value = true;
@@ -134,7 +303,7 @@ async function handleTestConnection() {
     testMessage.value = '';
     testStatus.value = '';
     try {
-        const result = await testIntegrationDataSource({ ...form }, handleUnauthorized);
+        const result = await testIntegrationDataSource(buildPayload(), handleUnauthorized);
         testMessage.value = result?.message || '连接成功';
         testStatus.value = 'success';
     } catch (error) {
@@ -147,11 +316,23 @@ async function handleTestConnection() {
 
 async function handleSave() {
     saveError.value = '';
+    if (
+        !buildConnectionUri({
+            dbType: form.dbType,
+            host: form.host,
+            port: form.port,
+            databaseName: form.databaseName,
+            connectionParams: form.connectionParams,
+        })
+    ) {
+        saveError.value = '请填写 IP、端口和数据库名';
+        return;
+    }
     try {
         if (editingId.value) {
-            await updateIntegrationDataSource(editingId.value, { ...form }, handleUnauthorized);
+            await updateIntegrationDataSource(editingId.value, buildPayload(), handleUnauthorized);
         } else {
-            await createIntegrationDataSource({ ...form }, handleUnauthorized);
+            await createIntegrationDataSource(buildPayload(), handleUnauthorized);
         }
         modalOpen.value = false;
         await loadDataSources();
@@ -173,6 +354,16 @@ function statusLabel(status) {
 function statusDot(status) {
     return status === 'ACTIVE' ? 'bg-emerald-500' : 'bg-slate-300';
 }
+
+watch(
+    () => form.dbType,
+    (nextValue, previousValue) => {
+        if (!nextValue || nextValue === previousValue) {
+            return;
+        }
+        applyConnectionDefaults(nextValue, false);
+    }
+);
 
 onMounted(loadDataSources);
 </script>
@@ -301,7 +492,7 @@ onMounted(loadDataSources);
             </div>
         </section>
 
-        <BaseModal :open="modalOpen" panel-class="max-w-4xl" @close="modalOpen = false">
+        <BaseModal :open="modalOpen" panel-class="max-w-5xl" @close="modalOpen = false">
             <template #header>
                 <div class="border-b border-slate-200 px-6 py-5">
                     <div class="flex items-center justify-between">
@@ -351,10 +542,63 @@ onMounted(loadDataSources);
                             />
                         </label>
                     </div>
-                    <label class="space-y-2">
-                        <span class="text-sm font-semibold text-slate-500">连接字符串</span>
-                        <input v-model="form.connectionUri" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10" placeholder="例如：jdbc:mysql://host:3306/dbname" />
-                    </label>
+                    <div class="grid grid-cols-1 gap-5 md:grid-cols-3">
+                        <label class="space-y-2">
+                            <span class="text-sm font-semibold text-slate-500">服务器 IP</span>
+                            <input
+                                v-model.trim="form.host"
+                                class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
+                                placeholder="例如：127.0.0.1"
+                            />
+                        </label>
+                        <label class="space-y-2">
+                            <span class="text-sm font-semibold text-slate-500">端口</span>
+                            <input
+                                v-model.trim="form.port"
+                                class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
+                                placeholder="例如：3306"
+                            />
+                        </label>
+                        <label class="space-y-2">
+                            <span class="text-sm font-semibold text-slate-500">数据库名</span>
+                            <input
+                                v-model.trim="form.databaseName"
+                                class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
+                                placeholder="例如：lingzhou"
+                            />
+                        </label>
+                    </div>
+                    <section class="rounded-2xl border border-slate-200 bg-slate-50/80">
+                        <button
+                            type="button"
+                            class="flex w-full items-center justify-between px-4 py-3 text-left"
+                            @click="connectionParamsOpen = !connectionParamsOpen"
+                        >
+                            <div>
+                                <p class="text-sm font-semibold text-slate-900">连接参数</p>
+                                <p class="mt-1 text-xs text-slate-500">
+                                    系统已自动填好常用参数，通常无需修改。
+                                </p>
+                            </div>
+                            <span class="material-symbols-outlined text-slate-400">
+                                {{ connectionParamsOpen ? 'expand_less' : 'expand_more' }}
+                            </span>
+                        </button>
+
+                        <div v-if="connectionParamsOpen" class="border-t border-slate-200 px-4 py-4">
+                            <label class="space-y-2">
+                                <span class="text-sm font-semibold text-slate-500">附加连接参数</span>
+                                <input
+                                    v-model.trim="form.connectionParams"
+                                    class="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
+                                    placeholder="可选；系统已自动填好常用参数"
+                                />
+                                <p class="text-xs leading-5 text-slate-400">
+                                    可按实际驱动要求继续补充或调整，不填写时使用当前默认参数。
+                                </p>
+                            </label>
+                        </div>
+                    </section>
                     <div class="grid grid-cols-1 gap-5 md:grid-cols-2">
                         <label class="space-y-2">
                             <span class="text-sm font-semibold text-slate-500">用户名</span>
@@ -362,7 +606,14 @@ onMounted(loadDataSources);
                         </label>
                         <label class="space-y-2">
                             <span class="text-sm font-semibold text-slate-500">密码</span>
-                            <input v-model="form.password" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10" type="password" placeholder="编辑时留空表示不修改" />
+                            <input
+                                type="password"
+                                class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
+                                :placeholder="form.passwordConfigured ? '已配置，重新输入后将覆盖当前值' : '请输入数据库密码'"
+                                :value="form.password"
+                                @focus="handlePasswordFocus"
+                                @input="handlePasswordInput"
+                            />
                         </label>
                     </div>
                     <div class="min-h-[96px] rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-4 py-3.5 transition-all">

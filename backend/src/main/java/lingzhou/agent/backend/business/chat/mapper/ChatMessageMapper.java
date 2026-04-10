@@ -72,4 +72,5 @@ public interface ChatMessageMapper extends BaseMapper<ChatMessage> {
         update.setParamsJson(paramsJson);
         return this.updateById(update);
     }
+
 }

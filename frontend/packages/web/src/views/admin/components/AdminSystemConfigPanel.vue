@@ -36,6 +36,10 @@ function createEmptyPlatform() {
         key: '',
         name: '',
         apiUrl: '',
+        appKey: '',
+        appSecret: '',
+        appSecretDirty: false,
+        signatureConfigured: false,
     };
 }
 
@@ -45,6 +49,10 @@ function normalizePlatformList(platforms) {
               key: item?.key || '',
               name: item?.name || '',
               apiUrl: item?.apiUrl || '',
+              appKey: item?.authConfig?.appKey || '',
+              appSecret: item?.authConfig?.signatureConfigured ? '••••••••••••••••' : '',
+              appSecretDirty: false,
+              signatureConfigured: Boolean(item?.authConfig?.signatureConfigured),
           }))
         : [];
     return normalized.length ? normalized : [createEmptyPlatform()];
@@ -90,6 +98,23 @@ function removePlatform(index) {
     form.platforms.splice(index, 1);
 }
 
+function handlePlatformSecretFocus(platform) {
+    if (!platform) {
+        return;
+    }
+    if (platform.signatureConfigured && !platform.appSecretDirty) {
+        platform.appSecret = '';
+    }
+}
+
+function handlePlatformSecretInput(platform, event) {
+    if (!platform) {
+        return;
+    }
+    platform.appSecretDirty = true;
+    platform.appSecret = event?.target?.value || '';
+}
+
 async function handleSave() {
     if (saving.value) {
         return;
@@ -103,6 +128,10 @@ async function handleSave() {
                     key: item.key,
                     name: item.name,
                     apiUrl: item.apiUrl,
+                    authConfig: {
+                        appKey: item.appKey,
+                        appSecret: item.appSecretDirty ? item.appSecret : '',
+                    },
                 })),
             },
             handleUnauthorized
@@ -186,7 +215,7 @@ onMounted(() => {
                         <h3 class="mt-2 text-xl font-bold text-slate-900">低代码平台配置</h3>
                         <p class="mt-1 max-w-3xl text-sm leading-6 text-slate-500">
                             平台配置整体存成一个配置项，值是平台数组 JSON。当前维护平台
-                            key、平台名称和 API URL。
+                            key、平台名称、API URL，以及低代码签名鉴权所需的 AppKey 与密钥。
                         </p>
                     </div>
 
@@ -223,7 +252,7 @@ onMounted(() => {
                                     平台列表配置项
                                 </h4>
                                 <p class="mt-1 text-sm text-slate-500">
-                                    每项包含平台 key、平台名称和 API URL。
+                                    每项包含平台 key、平台名称、API URL、AppKey 和密钥。
                                 </p>
                             </div>
 
@@ -276,6 +305,44 @@ onMounted(() => {
                                         placeholder="https://platform.example.com/api"
                                         class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-700 transition focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15"
                                     />
+                                </label>
+                            </div>
+
+                            <div class="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+                                <label class="block min-w-0">
+                                    <span class="mb-2 block text-sm font-semibold text-slate-700">
+                                        AppKey
+                                    </span>
+                                    <input
+                                        v-model.trim="platform.appKey"
+                                        type="text"
+                                        placeholder="请输入低代码平台 AppKey"
+                                        class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-700 transition focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15"
+                                    />
+                                </label>
+
+                                <label class="block min-w-0">
+                                    <span class="mb-2 block text-sm font-semibold text-slate-700">
+                                        密钥
+                                    </span>
+                                    <input
+                                        type="password"
+                                        :placeholder="
+                                            platform.signatureConfigured
+                                                ? '已配置，留空则保持原值'
+                                                : '请输入低代码平台密钥'
+                                        "
+                                        :value="platform.appSecret"
+                                        class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-700 transition focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15"
+                                        @focus="handlePlatformSecretFocus(platform)"
+                                        @input="handlePlatformSecretInput(platform, $event)"
+                                    />
+                                    <p
+                                        v-if="platform.signatureConfigured && !platform.appSecret"
+                                        class="mt-2 text-xs text-slate-500"
+                                    >
+                                        已保存密钥；留空表示继续使用原值。
+                                    </p>
                                 </label>
 
                                 <div class="flex items-end lg:pt-7">

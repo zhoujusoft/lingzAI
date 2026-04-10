@@ -1,5 +1,6 @@
 package lingzhou.agent.backend.common.security;
 
+import java.nio.charset.StandardCharsets;
 import java.security.KeyFactory;
 import java.security.KeyPair;
 import java.security.PrivateKey;
@@ -11,6 +12,7 @@ import java.util.Base64;
 import javax.crypto.Cipher;
 import javax.crypto.spec.OAEPParameterSpec;
 import javax.crypto.spec.PSource;
+import org.springframework.util.StringUtils;
 
 public class RSAEncryptor {
 
@@ -27,6 +29,10 @@ public class RSAEncryptor {
 
     private static final int KEY_SIZE = 2048;
 
+    public static String defaultPublicKey() {
+        return publicKeyStr;
+    }
+
     public static String RsaDecrypt(String encryptStr) throws Exception {
         RSAEncryptor _rsaEncrytor = new RSAEncryptor(privateKeyStr, publicKeyStr);
         return _rsaEncrytor.decrypt(encryptStr);
@@ -40,6 +46,23 @@ public class RSAEncryptor {
     public static String RsaPasswordNew(String plainText) throws Exception {
         RSAEncryptor rsaEncryptor = new RSAEncryptor(privateKeyStr, publicKeyStr);
         return rsaEncryptor.encrypt(plainText);
+    }
+
+    public static String encryptWithPublicKey(String plainText, String publicKey) throws Exception {
+        if (!StringUtils.hasText(publicKey)) {
+            throw new IllegalArgumentException("publicKey 不能为空");
+        }
+        byte[] encrypted = encryptBytes(plainText.getBytes(StandardCharsets.UTF_8), publicKey.trim());
+        return Base64.getEncoder().encodeToString(encrypted);
+    }
+
+    private static byte[] encryptBytes(byte[] content, String publicKey) throws Exception {
+        byte[] publicKeyBytes = Base64.getDecoder().decode(publicKey);
+        PublicKey rsaPublicKey =
+                KeyFactory.getInstance(RSA).generatePublic(new X509EncodedKeySpec(publicKeyBytes));
+        Cipher cipher = Cipher.getInstance(RSA);
+        cipher.init(Cipher.ENCRYPT_MODE, rsaPublicKey);
+        return cipher.doFinal(content);
     }
 
     public RSAEncryptor(String privateKey, String publicKey) throws Exception {

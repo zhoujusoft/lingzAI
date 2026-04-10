@@ -4,7 +4,7 @@
             v-if="!selectedKnowledge && knowledgePageMode === 'detail'"
             @create-knowledge="openCreateKnowledge"
             @open-knowledge="openKnowledgeDetail"
-            @open-edit-knowledge="openKnowledgeDetail"
+            @open-edit-knowledge="openKnowledgeEdit"
             @open-recall-test="openKnowledgeRecallTest"
         />
         <AdminKnowledgeDetailPanel
@@ -94,6 +94,7 @@ function openKnowledgeRecallTest(item) {
 function openCreateKnowledge() {
     selectedKnowledge.value = {
         name: '',
+        kbCode: '',
     };
     selectedDocument.value = null;
     knowledgePageMode.value = 'upload';

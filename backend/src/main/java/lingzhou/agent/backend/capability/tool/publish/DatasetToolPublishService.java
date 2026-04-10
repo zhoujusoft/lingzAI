@@ -3,6 +3,7 @@ package lingzhou.agent.backend.capability.tool.publish;
 import java.util.ArrayList;
 import java.util.List;
 import lingzhou.agent.backend.business.datasets.domain.IntegrationDataset;
+import lingzhou.agent.backend.business.skill.mapper.SkillToolBindingMapper;
 import lingzhou.agent.backend.business.tool.domain.ToolCatalog;
 import lingzhou.agent.backend.business.tool.mapper.ToolCatalogMapper;
 import org.springframework.stereotype.Service;
@@ -14,13 +15,15 @@ public class DatasetToolPublishService {
     private static final String TOOL_TYPE_DATASET = "DATASET_TOOL";
 
     private final ToolCatalogMapper toolCatalogMapper;
+    private final SkillToolBindingMapper skillToolBindingMapper;
 
-    public DatasetToolPublishService(ToolCatalogMapper toolCatalogMapper) {
+    public DatasetToolPublishService(ToolCatalogMapper toolCatalogMapper, SkillToolBindingMapper skillToolBindingMapper) {
         this.toolCatalogMapper = toolCatalogMapper;
+        this.skillToolBindingMapper = skillToolBindingMapper;
     }
 
-    public List<PublishedToolView> loadPublishedTools(Long datasetId) {
-        return toolCatalogMapper.selectBySource(buildSource(datasetId)).stream()
+    public List<PublishedToolView> loadPublishedTools(String datasetCode) {
+        return toolCatalogMapper.selectBySource(buildSource(datasetCode)).stream()
                 .map(item -> new PublishedToolView(
                         item.getToolName(),
                         item.getDisplayName(),
@@ -30,6 +33,7 @@ public class DatasetToolPublishService {
     }
 
     public List<String> publish(IntegrationDataset dataset) {
+        String datasetCode = normalizeCode(dataset == null ? null : dataset.getDatasetCode());
         List<PublishedToolSeed> toolSeeds = buildToolSeeds(dataset);
         for (PublishedToolSeed seed : toolSeeds) {
             ToolCatalog toolCatalog = toolCatalogMapper.selectByToolName(seed.toolName());
@@ -43,7 +47,7 @@ public class DatasetToolPublishService {
             toolCatalog.setToolType(TOOL_TYPE_DATASET);
             toolCatalog.setBindable(1);
             toolCatalog.setOwnerSkillName(null);
-            toolCatalog.setSource(buildSource(dataset.getId()));
+            toolCatalog.setSource(buildSource(datasetCode));
             if (toolCatalog.getId() == null) {
                 toolCatalogMapper.insert(toolCatalog);
             } else {
@@ -53,12 +57,25 @@ public class DatasetToolPublishService {
         return toolSeeds.stream().map(PublishedToolSeed::toolName).toList();
     }
 
-    public void disable(Long datasetId) {
-        toolCatalogMapper.deleteBySource(buildSource(datasetId));
+    public void disable(String datasetCode) {
+        List<String> toolNames = listToolNames(datasetCode);
+        if (!toolNames.isEmpty()) {
+            skillToolBindingMapper.deleteByToolNames(toolNames);
+        }
+        toolCatalogMapper.deleteBySource(buildSource(datasetCode));
+    }
+
+    public List<String> listToolNames(String datasetCode) {
+        return toolCatalogMapper.selectBySource(buildSource(datasetCode)).stream()
+                .map(ToolCatalog::getToolName)
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .toList();
     }
 
     private List<PublishedToolSeed> buildToolSeeds(IntegrationDataset dataset) {
-        String baseName = "dataset." + dataset.getId();
+        String datasetCode = normalizeCode(dataset == null ? null : dataset.getDatasetCode());
+        String baseName = "dataset." + datasetCode;
         String datasetName = normalizeText(dataset.getName());
         String summaryText = StringUtils.hasText(dataset.getBusinessLogic())
                 ? dataset.getBusinessLogic().trim()
@@ -67,24 +84,31 @@ public class DatasetToolPublishService {
         seeds.add(new PublishedToolSeed(
                 baseName + ".search_dataset_summary",
                 datasetName + " / 摘要检索",
-                "基于数据集“" + datasetName + "”返回摘要说明、关系说明和候选对象。"
+                "基于数据集“" + datasetName + "”返回摘要说明、关系说明和候选对象。返回结果中的 objectCode 才是 SQL 可直接使用的真实表名，objectName 仅用于中文说明。"
                         + (StringUtils.hasText(summaryText) ? " " + summaryText : ""),
                 71000));
         seeds.add(new PublishedToolSeed(
                 baseName + ".get_dataset_schema",
                 datasetName + " / 结构获取",
-                "基于数据集“" + datasetName + "”按需返回对象、字段、别名和结构说明。",
+                "基于数据集“" + datasetName + "”按需返回对象、字段、别名和结构说明。写 SQL 时请使用 objectCode 作为表名，不要使用中文对象名。",
                 71001));
         seeds.add(new PublishedToolSeed(
                 baseName + ".execute_dataset_sql",
                 datasetName + " / SQL 执行",
-                "在数据集“" + datasetName + "”允许范围内执行查询 SQL 并返回结果。",
+                "在数据集“" + datasetName + "”允许范围内执行查询 SQL 并返回结果。SQL 中表名必须使用 objectCode，不要使用中文对象名。",
                 71002));
         return List.copyOf(seeds);
     }
 
-    private String buildSource(Long datasetId) {
-        return "dataset:" + datasetId;
+    private String buildSource(String datasetCode) {
+        return "dataset:" + normalizeCode(datasetCode);
+    }
+
+    private String normalizeCode(String value) {
+        if (!StringUtils.hasText(value)) {
+            throw new IllegalStateException("datasetCode 不能为空，无法发布数据集工具");
+        }
+        return value.trim();
     }
 
     private String normalizeText(String value) {

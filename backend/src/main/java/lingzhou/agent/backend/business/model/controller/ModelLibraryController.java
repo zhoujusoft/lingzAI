@@ -28,14 +28,6 @@ public class ModelLibraryController {
         return modelLibraryService.listVendors(resolveCurrentUserId(request));
     }
 
-    @PostMapping("/vendors")
-    public ModelLibraryService.VendorView createVendor(
-            @RequestBody ModelLibraryService.UpsertVendorRequest request,
-            HttpServletRequest httpRequest)
-            throws TaskException {
-        return modelLibraryService.createVendor(resolveCurrentUserId(httpRequest), request);
-    }
-
     @PutMapping("/vendors/{id}")
     public ModelLibraryService.VendorView updateVendor(
             @PathVariable("id") Long id,
@@ -43,6 +35,15 @@ public class ModelLibraryController {
             HttpServletRequest httpRequest)
             throws TaskException {
         return modelLibraryService.updateVendor(resolveCurrentUserId(httpRequest), id, request);
+    }
+
+    @PostMapping("/vendors/{id}/validate")
+    public ModelLibraryService.VendorValidationView validateVendor(
+            @PathVariable("id") Long id,
+            @RequestBody ModelLibraryService.UpsertVendorRequest request,
+            HttpServletRequest httpRequest)
+            throws TaskException {
+        return modelLibraryService.validateVendor(resolveCurrentUserId(httpRequest), id, request);
     }
 
     @GetMapping("/models")

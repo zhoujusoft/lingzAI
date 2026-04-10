@@ -1,11 +1,17 @@
 package lingzhou.agent.backend.business.datasets.service.impl;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Function;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import lingzhou.agent.backend.capability.tool.publish.KnowledgeBaseToolPublishService;
 import lingzhou.agent.backend.business.datasets.domain.KnowledgeBase;
 import lingzhou.agent.backend.business.datasets.domain.KnowledgeBasePublishBinding;
 import lingzhou.agent.backend.business.datasets.domain.KnowledgeDocument;
@@ -16,12 +22,17 @@ import lingzhou.agent.backend.business.datasets.mapper.KnowledgeBasePublishBindi
 import lingzhou.agent.backend.business.datasets.mapper.KnowledgeDocumentMapper;
 import lingzhou.agent.backend.business.datasets.service.IKnowledgeBaseService;
 import lingzhou.agent.backend.business.datasets.service.IKnowledgeDocumentService;
+import lingzhou.agent.backend.common.lzException.TaskException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 @Service
 public class KnowledgeBaseServiceImpl implements IKnowledgeBaseService {
+
+    private static final DateTimeFormatter KB_CODE_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
+    private static final Pattern KB_CODE_PATTERN = Pattern.compile("^[A-Za-z0-9._-]+$");
 
     private final KnowledgeBaseMapper knowledgeBaseMapper;
     private final DocumentMetadataMapper documentMetadataMapper;
@@ -29,6 +40,7 @@ public class KnowledgeBaseServiceImpl implements IKnowledgeBaseService {
     private final KnowledgeDocumentMapper knowledgeDocumentMapper;
     private final DocumentChunkMapper documentChunkMapper;
     private final KnowledgeBasePublishBindingMapper knowledgeBasePublishBindingMapper;
+    private final KnowledgeBaseToolPublishService knowledgeBaseToolPublishService;
 
     public KnowledgeBaseServiceImpl(
             KnowledgeBaseMapper knowledgeBaseMapper,
@@ -36,18 +48,26 @@ public class KnowledgeBaseServiceImpl implements IKnowledgeBaseService {
             IKnowledgeDocumentService knowledgeDocumentService,
             KnowledgeDocumentMapper knowledgeDocumentMapper,
             DocumentChunkMapper documentChunkMapper,
-            KnowledgeBasePublishBindingMapper knowledgeBasePublishBindingMapper) {
+            KnowledgeBasePublishBindingMapper knowledgeBasePublishBindingMapper,
+            KnowledgeBaseToolPublishService knowledgeBaseToolPublishService) {
         this.knowledgeBaseMapper = knowledgeBaseMapper;
         this.documentMetadataMapper = documentMetadataMapper;
         this.knowledgeDocumentService = knowledgeDocumentService;
         this.knowledgeDocumentMapper = knowledgeDocumentMapper;
         this.documentChunkMapper = documentChunkMapper;
         this.knowledgeBasePublishBindingMapper = knowledgeBasePublishBindingMapper;
+        this.knowledgeBaseToolPublishService = knowledgeBaseToolPublishService;
     }
 
     @Override
     public KnowledgeBase selectKnowledgeBaseByKbId(Long kbId) {
         KnowledgeBase knowledgeBase = knowledgeBaseMapper.selectKnowledgeBaseByKbId(kbId);
+        return enrichKnowledgeBaseStats(knowledgeBase);
+    }
+
+    @Override
+    public KnowledgeBase selectKnowledgeBaseByKbCode(String kbCode) {
+        KnowledgeBase knowledgeBase = knowledgeBaseMapper.selectKnowledgeBaseByKbCode(kbCode);
         return enrichKnowledgeBaseStats(knowledgeBase);
     }
 
@@ -71,10 +91,15 @@ public class KnowledgeBaseServiceImpl implements IKnowledgeBaseService {
     }
 
     @Override
-    public int insertKnowledgeBase(KnowledgeBase knowledgeBase) {
-        if (knowledgeBaseMapper.checkKbNameUnique(knowledgeBase) > 0) {
-            return 0;
+    public int insertKnowledgeBase(KnowledgeBase knowledgeBase) throws TaskException {
+        if (knowledgeBase == null) {
+            throw new TaskException("知识库参数不能为空", TaskException.Code.UNKNOWN);
         }
+        knowledgeBase.setKbName(requireName(knowledgeBase.getKbName()));
+        knowledgeBase.setKbCode(resolveCreateKbCode(knowledgeBase.getKbCode()));
+        knowledgeBase.setDescription(normalizeDescription(knowledgeBase.getDescription()));
+        ensureUniqueName(knowledgeBase);
+        ensureUniqueCode(knowledgeBase);
         Date now = new Date();
         knowledgeBase.setCreatedAt(now);
         knowledgeBase.setUpdatedAt(now);
@@ -86,10 +111,20 @@ public class KnowledgeBaseServiceImpl implements IKnowledgeBaseService {
     }
 
     @Override
-    public int updateKnowledgeBase(KnowledgeBase knowledgeBase) {
-        if (knowledgeBaseMapper.checkKbNameUnique(knowledgeBase) > 0) {
-            return 0;
+    public int updateKnowledgeBase(KnowledgeBase knowledgeBase) throws TaskException {
+        if (knowledgeBase == null || knowledgeBase.getKbId() == null) {
+            throw new TaskException("kbId 不能为空", TaskException.Code.UNKNOWN);
         }
+        KnowledgeBase existing = knowledgeBaseMapper.selectKnowledgeBaseByKbId(knowledgeBase.getKbId());
+        if (existing == null) {
+            throw new TaskException("知识库不存在：" + knowledgeBase.getKbId(), TaskException.Code.UNKNOWN);
+        }
+        knowledgeBase.setKbName(resolveUpdatedName(knowledgeBase, existing));
+        knowledgeBase.setKbCode(resolveUpdatedKbCode(knowledgeBase, existing));
+        knowledgeBase.setDescription(resolveUpdatedDescription(knowledgeBase, existing));
+        ensureUniqueName(knowledgeBase);
+        ensureUniqueCode(knowledgeBase);
+        resetPublishedStateIfCodeChanged(existing, knowledgeBase);
         knowledgeBase.setUpdatedAt(new Date());
         return knowledgeBaseMapper.updateKnowledgeBase(knowledgeBase);
     }
@@ -110,10 +145,15 @@ public class KnowledgeBaseServiceImpl implements IKnowledgeBaseService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public int deleteKnowledgeBaseByKbId(Long kbId) throws Exception {
+        KnowledgeBase knowledgeBase = knowledgeBaseMapper.selectKnowledgeBaseByKbId(kbId);
         List<String> docIds = knowledgeDocumentMapper.selectRootDocIdByKbId(kbId);
         for (String docId : docIds) {
             knowledgeDocumentService.deleteKnowledgeDocumentByDocId(kbId, Long.valueOf(docId));
         }
+        if (knowledgeBase != null && StringUtils.hasText(knowledgeBase.getKbCode())) {
+            knowledgeBaseToolPublishService.disable(knowledgeBase.getKbCode());
+        }
+        knowledgeBasePublishBindingMapper.deleteByKbId(kbId);
         documentMetadataMapper.deleteDocumentMetadataByKbId(kbId);
         return knowledgeBaseMapper.deleteKnowledgeBaseByKbId(kbId);
     }
@@ -148,6 +188,103 @@ public class KnowledgeBaseServiceImpl implements IKnowledgeBaseService {
             }
         } catch (Exception ignored) {
         }
+    }
+
+    private String generateUniqueKbCode() {
+        for (int attempt = 0; attempt < 20; attempt++) {
+            String candidate = "KB" + LocalDateTime.now().format(KB_CODE_FORMATTER) + randomAlphaNumeric(4);
+            if (knowledgeBaseMapper.selectKnowledgeBaseByKbCode(candidate) == null) {
+                return candidate;
+            }
+        }
+        return "KB" + System.currentTimeMillis() + randomAlphaNumeric(6);
+    }
+
+    private void ensureUniqueName(KnowledgeBase knowledgeBase) throws TaskException {
+        if (knowledgeBaseMapper.checkKbNameUnique(knowledgeBase) > 0) {
+            throw new TaskException("知识库名称已存在：" + knowledgeBase.getKbName(), TaskException.Code.UNKNOWN);
+        }
+    }
+
+    private void ensureUniqueCode(KnowledgeBase knowledgeBase) throws TaskException {
+        if (knowledgeBaseMapper.checkKbCodeUnique(knowledgeBase) > 0) {
+            throw new TaskException("知识库编码已存在：" + knowledgeBase.getKbCode(), TaskException.Code.UNKNOWN);
+        }
+    }
+
+    private String resolveCreateKbCode(String value) throws TaskException {
+        String normalized = normalizeKbCode(value);
+        if (StringUtils.hasText(normalized)) {
+            return normalized;
+        }
+        return generateUniqueKbCode();
+    }
+
+    private String resolveUpdatedKbCode(KnowledgeBase incoming, KnowledgeBase existing) throws TaskException {
+        String normalized = normalizeKbCode(incoming.getKbCode());
+        if (StringUtils.hasText(normalized)) {
+            return normalized;
+        }
+        return normalizeKbCode(existing.getKbCode());
+    }
+
+    private String resolveUpdatedName(KnowledgeBase incoming, KnowledgeBase existing) throws TaskException {
+        if (StringUtils.hasText(incoming.getKbName())) {
+            return requireName(incoming.getKbName());
+        }
+        return requireName(existing.getKbName());
+    }
+
+    private String resolveUpdatedDescription(KnowledgeBase incoming, KnowledgeBase existing) {
+        if (incoming.getDescription() != null) {
+            return normalizeDescription(incoming.getDescription());
+        }
+        return normalizeDescription(existing.getDescription());
+    }
+
+    private void resetPublishedStateIfCodeChanged(KnowledgeBase existing, KnowledgeBase updated) {
+        String existingCode = normalizeText(existing == null ? null : existing.getKbCode());
+        String updatedCode = normalizeText(updated == null ? null : updated.getKbCode());
+        if (!StringUtils.hasText(existingCode) || Objects.equals(existingCode, updatedCode)) {
+            return;
+        }
+        knowledgeBaseToolPublishService.disable(existingCode);
+        knowledgeBasePublishBindingMapper.deleteByKbId(existing.getKbId());
+    }
+
+    private String requireName(String value) throws TaskException {
+        if (!StringUtils.hasText(value)) {
+            throw new TaskException("知识库名称不能为空", TaskException.Code.UNKNOWN);
+        }
+        return value.trim();
+    }
+
+    private String normalizeKbCode(String value) throws TaskException {
+        if (!StringUtils.hasText(value)) {
+            return "";
+        }
+        String normalized = value.trim();
+        if (!KB_CODE_PATTERN.matcher(normalized).matches()) {
+            throw new TaskException("知识库编码仅支持字母、数字、点、下划线和中划线", TaskException.Code.UNKNOWN);
+        }
+        return normalized;
+    }
+
+    private String normalizeDescription(String value) {
+        return normalizeText(value);
+    }
+
+    private String normalizeText(String value) {
+        return StringUtils.hasText(value) ? value.trim() : "";
+    }
+
+    private String randomAlphaNumeric(int length) {
+        String chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+        StringBuilder builder = new StringBuilder(length);
+        for (int index = 0; index < length; index++) {
+            builder.append(chars.charAt(ThreadLocalRandom.current().nextInt(chars.length())));
+        }
+        return builder.toString();
     }
 
     private KnowledgeBase enrichKnowledgeBaseStats(KnowledgeBase knowledgeBase) {

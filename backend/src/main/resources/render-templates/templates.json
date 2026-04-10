@@ -1,0 +1,115 @@
+[
+  {
+    "templateCode": "expense_form_fill_v1",
+    "templateName": "报销表单填报",
+    "componentCode": "StructuredFormCard",
+    "dataSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    },
+    "componentSchema": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "subtitle": {
+          "type": "string"
+        },
+        "editable": {
+          "type": "boolean"
+        },
+        "fields": {
+          "type": "array"
+        },
+        "confirmText": {
+          "type": "string"
+        },
+        "cancelText": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "defaultData": {},
+    "defaultComponentProps": {
+      "title": "智能填报草稿",
+      "subtitle": "请确认表单信息后继续后续操作",
+      "editable": true,
+      "fields": [],
+      "confirmText": "确认",
+      "cancelText": "取消"
+    },
+    "actions": [
+      {
+        "code": "confirm",
+        "label": "确认",
+        "messageType": "event",
+        "messageTemplate": "用户已确认提交个人信息。以下是最终确认后的结构化数据，请直接继续处理：\n{{dataJson}}"
+      },
+      {
+        "code": "cancel",
+        "label": "取消",
+        "messageType": "event",
+        "messageTemplate": "用户已取消本次个人信息提交。无需继续调用提交类工具。"
+      }
+    ],
+    "templateConfig": {
+      "sourceType": "api_input"
+    }
+  },
+  {
+    "templateCode": "expense_rank_list_v1",
+    "templateName": "报销排行榜",
+    "componentCode": "RankingListCard",
+    "dataSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "description": "排行榜条目列表"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "additionalProperties": false
+    },
+    "componentSchema": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "subtitle": {
+          "type": "string"
+        },
+        "unit": {
+          "type": "string"
+        },
+        "showRankBadge": {
+          "type": "boolean"
+        },
+        "highlightTop": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": true
+    },
+    "defaultData": {
+      "items": []
+    },
+    "defaultComponentProps": {
+      "title": "报销排行榜",
+      "subtitle": "",
+      "unit": "元",
+      "showRankBadge": true,
+      "highlightTop": 3
+    },
+    "actions": [],
+    "templateConfig": {
+      "sourceType": "custom"
+    }
+  }
+]

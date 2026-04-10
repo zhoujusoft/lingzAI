@@ -26,10 +26,21 @@ public class ModelRuntimeClientFactory {
     }
 
     public ChatRuntimeBundle createChatBundle() {
-        return createChatBundle(null);
+        return createChatBundle(null, null, false);
     }
 
     public ChatRuntimeBundle createChatBundle(ToolCallingManager toolCallingManager) {
+        return createChatBundle(toolCallingManager, null, false);
+    }
+
+    public ChatRuntimeBundle createChatBundleWithSystemPrompt(String systemPrompt) {
+        return createChatBundle(null, systemPrompt, true);
+    }
+
+    private ChatRuntimeBundle createChatBundle(
+            ToolCallingManager toolCallingManager,
+            String systemPrompt,
+            boolean overrideResolvedSystemPrompt) {
         ModelRuntimeConfigResolver.ResolvedChatModelConfig config = modelRuntimeConfigResolver.resolveChatConfig();
         OpenAiChatModel.Builder builder = OpenAiChatModel.builder()
                 .openAiApi(buildChatOpenAiApi(config.baseUrl(), config.apiKey(), config.completionsPath()))
@@ -39,8 +50,9 @@ public class ModelRuntimeClientFactory {
         }
         OpenAiChatModel chatModel = builder.build();
         ChatClient.Builder chatClientBuilder = ChatClient.builder(chatModel);
-        if (StringUtils.hasText(config.systemPrompt())) {
-            chatClientBuilder.defaultSystem(config.systemPrompt());
+        String defaultSystemPrompt = overrideResolvedSystemPrompt ? systemPrompt : config.systemPrompt();
+        if (StringUtils.hasText(defaultSystemPrompt)) {
+            chatClientBuilder.defaultSystem(defaultSystemPrompt);
         }
         return new ChatRuntimeBundle(chatClientBuilder.build(), chatModel, config);
     }
@@ -48,7 +60,6 @@ public class ModelRuntimeClientFactory {
     public EmbeddingModel createEmbeddingModel() {
         ModelRuntimeConfigResolver.ResolvedEmbeddingModelConfig config = modelRuntimeConfigResolver.resolveEmbeddingConfig();
         if (!StringUtils.hasText(config.baseUrl())
-                || !StringUtils.hasText(config.apiKey())
                 || !StringUtils.hasText(config.model())) {
             throw new IllegalStateException("Embedding model configuration is incomplete.");
         }
@@ -64,10 +75,12 @@ public class ModelRuntimeClientFactory {
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory();
         requestFactory.setReadTimeout(Duration.ofSeconds(120));
         RestClient.Builder builder = RestClient.builder().requestFactory(requestFactory);
-        OpenAiApi.Builder apiBuilder = OpenAiApi.builder()
-                .baseUrl(baseUrl)
-                .apiKey(apiKey)
-                .restClientBuilder(builder);
+        OpenAiApi.Builder apiBuilder = OpenAiApi.builder().baseUrl(baseUrl).restClientBuilder(builder);
+        if (StringUtils.hasText(apiKey)) {
+            apiBuilder.apiKey(apiKey);
+        }else{
+            apiBuilder.apiKey("");
+        }
         if (StringUtils.hasText(completionsPath)) {
             apiBuilder.completionsPath(completionsPath);
         }
@@ -78,10 +91,12 @@ public class ModelRuntimeClientFactory {
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory();
         requestFactory.setReadTimeout(Duration.ofSeconds(120));
         RestClient.Builder builder = RestClient.builder().requestFactory(requestFactory);
-        OpenAiApi.Builder apiBuilder = OpenAiApi.builder()
-                .baseUrl(baseUrl)
-                .apiKey(apiKey)
-                .restClientBuilder(builder);
+        OpenAiApi.Builder apiBuilder = OpenAiApi.builder().baseUrl(baseUrl).restClientBuilder(builder);
+        if (StringUtils.hasText(apiKey)) {
+            apiBuilder.apiKey(apiKey);
+        }else{
+            apiBuilder.apiKey("");
+        }
         if (StringUtils.hasText(embeddingsPath)) {
             apiBuilder.embeddingsPath(embeddingsPath);
         }

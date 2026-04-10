@@ -48,17 +48,15 @@ public class KnowledgeBaseToolRuntimeService {
         if (catalog == null || !StringUtils.hasText(catalog.getSource()) || !catalog.getSource().startsWith("knowledge_base:")) {
             throw new TaskException("未找到对应的知识库工具：" + toolName, TaskException.Code.UNKNOWN);
         }
-        Long kbId;
-        try {
-            kbId = Long.parseLong(catalog.getSource().substring("knowledge_base:".length()).trim());
-        } catch (NumberFormatException ex) {
-            throw new TaskException("知识库工具来源无效：" + catalog.getSource(), TaskException.Code.UNKNOWN, ex);
+        String kbCode = catalog.getSource().substring("knowledge_base:".length()).trim();
+        if (!StringUtils.hasText(kbCode)) {
+            throw new TaskException("知识库工具来源无效：" + catalog.getSource(), TaskException.Code.UNKNOWN);
         }
-        KnowledgeBase knowledgeBase = knowledgeBaseService.selectKnowledgeBaseByKbId(kbId);
+        KnowledgeBase knowledgeBase = knowledgeBaseService.selectKnowledgeBaseByKbCode(kbCode);
         if (knowledgeBase == null) {
-            throw new TaskException("知识库不存在：" + kbId, TaskException.Code.UNKNOWN);
+            throw new TaskException("知识库不存在：" + kbCode, TaskException.Code.UNKNOWN);
         }
-        return new ResolvedKnowledgeBase(kbId, knowledgeBase.getKbName());
+        return new ResolvedKnowledgeBase(knowledgeBase.getKbId(), knowledgeBase.getKbName());
     }
 
     private ChunkHit toChunkHit(RecallChunkVo item) {

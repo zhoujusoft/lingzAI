@@ -40,8 +40,9 @@ const filteredKnowledgeCards = computed(() => {
 
     return knowledgeCards.value.filter(item => {
         const name = (item.name || '').toLowerCase();
+        const kbCode = (item.kbCode || '').toLowerCase();
         const description = (item.description || '').toLowerCase();
-        return name.includes(keyword) || description.includes(keyword);
+        return name.includes(keyword) || kbCode.includes(keyword) || description.includes(keyword);
     });
 });
 
@@ -272,9 +273,10 @@ onMounted(() => {
                     <span class="shrink-0 rounded px-2 py-1 text-[11px]" :class="publishStatusClass(item)">
                         {{ publishStatusLabel(item) }}
                     </span>
-                    <span v-if="item.publishedVersion > 0" class="shrink-0 rounded bg-slate-100 px-2 py-1 text-[11px] text-slate-500">
-                        v{{ item.publishedVersion }}
-                    </span>
+                </div>
+                <div class="mb-3 flex items-center gap-2 text-xs text-slate-500">
+                    <span class="rounded-md bg-slate-100 px-2 py-1 font-medium text-slate-600">Code</span>
+                    <span class="font-mono text-slate-600">{{ item.kbCode || '-' }}</span>
                 </div>
                 <div class="mb-4 flex items-center gap-3 text-xs text-slate-400">
                     <span>{{ formatCount(item.docCount, '文档') }}</span>

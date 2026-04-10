@@ -7,6 +7,7 @@ import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.function.FunctionToolCallback;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 @Service
 public class IntegrationDatasetAgentToolRegistry {
@@ -21,8 +22,9 @@ public class IntegrationDatasetAgentToolRegistry {
         this.runtimeService = runtimeService;
     }
 
-    public List<ToolCallback> buildCallbacks(Long datasetId) {
-        String datasetToolPrefix = "dataset." + datasetId + ".";
+    public List<ToolCallback> buildCallbacks(String datasetCode) {
+        String normalizedDatasetCode = normalizeDatasetCode(datasetCode);
+        String datasetToolPrefix = "dataset." + normalizedDatasetCode + ".";
         return List.of(
                 FunctionToolCallback.builder(
                                 SUMMARY_TOOL,
@@ -32,7 +34,7 @@ public class IntegrationDatasetAgentToolRegistry {
                                                 new IntegrationDatasetToolRuntimeService.SearchDatasetSummaryRequest(
                                                         stringValue(arguments.get("question")),
                                                         integerValue(arguments.get("maxObjects"))))))
-                        .description("返回当前数据集的业务摘要、候选对象与关系说明，适合在开始分析前先理解数据集。")
+                        .description("返回当前数据集的业务摘要、候选对象与关系说明，适合在开始分析前先理解数据集。注意：结果中的 objectCode 才是 SQL 里可直接使用的真实表名，objectName 只是中文说明。")
                         .inputType(new ParameterizedTypeReference<Map<String, Object>>() {})
                         .inputSchema("""
                                 {
@@ -52,7 +54,7 @@ public class IntegrationDatasetAgentToolRegistry {
                                                 new IntegrationDatasetToolRuntimeService.GetDatasetSchemaRequest(
                                                         stringList(arguments.get("objectCodes")),
                                                         stringList(arguments.get("objectNames"))))))
-                        .description("返回当前数据集的对象、字段、子对象和关系结构，可按对象编码或名称过滤。")
+                        .description("返回当前数据集的对象、字段、子对象和关系结构，可按对象编码或名称过滤。写 SQL 时请使用 objectCode 作为表名，不要使用中文对象名；SQL 字段也必须来自这里返回的结构。")
                         .inputType(new ParameterizedTypeReference<Map<String, Object>>() {})
                         .inputSchema("""
                                 {
@@ -72,7 +74,7 @@ public class IntegrationDatasetAgentToolRegistry {
                                                 new IntegrationDatasetToolRuntimeService.ExecuteDatasetSqlRequest(
                                                         stringValue(arguments.get("sql")),
                                                         integerValue(arguments.get("limit"))))))
-                        .description("在当前数据集允许范围内执行只读 SQL 查询并返回结果。仅支持单条只读查询，禁止修改数据。")
+                        .description("在当前数据集允许范围内执行只读 SQL 查询并返回结果。仅支持单条只读查询，禁止修改数据。SQL 中表名必须使用 objectCode，不要使用中文对象名；SQL 字段必须来自 get_dataset_schema 返回结果，不能自行想象。")
                         .inputType(new ParameterizedTypeReference<Map<String, Object>>() {})
                         .inputSchema("""
                                 {
@@ -85,6 +87,13 @@ public class IntegrationDatasetAgentToolRegistry {
                                 }
                                 """)
                         .build());
+    }
+
+    private String normalizeDatasetCode(String datasetCode) {
+        if (!StringUtils.hasText(datasetCode)) {
+            throw new IllegalArgumentException("datasetCode 不能为空");
+        }
+        return datasetCode.trim();
     }
 
     private <T> T invoke(TaskSupplier<T> supplier) {

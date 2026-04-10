@@ -17,7 +17,6 @@ import java.util.Map;
 import java.util.Objects;
 import lingzhou.agent.backend.business.integration.domain.IntegrationDataSource;
 import lingzhou.agent.backend.business.integration.mapper.IntegrationDataSourceMapper;
-import lingzhou.agent.backend.business.integration.service.support.IntegrationSchemaService;
 import lingzhou.agent.backend.common.lzException.TaskException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,30 +28,24 @@ public class IntegrationDataSourceService {
     private static final ObjectMapper JSON = new ObjectMapper();
 
     private final IntegrationDataSourceMapper integrationDataSourceMapper;
-    private final IntegrationSchemaService integrationSchemaService;
 
-    public IntegrationDataSourceService(
-            IntegrationDataSourceMapper integrationDataSourceMapper, IntegrationSchemaService integrationSchemaService) {
+    public IntegrationDataSourceService(IntegrationDataSourceMapper integrationDataSourceMapper) {
         this.integrationDataSourceMapper = integrationDataSourceMapper;
-        this.integrationSchemaService = integrationSchemaService;
     }
 
     public List<DataSourceSummary> listDataSources(String keyword, String dbType, String status) {
-        integrationSchemaService.ensureSchema();
         return integrationDataSourceMapper.search(keyword, dbType, status).stream()
                 .map(this::toSummary)
                 .toList();
     }
 
     public DataSourceDetail getDataSource(Long id) throws TaskException {
-        integrationSchemaService.ensureSchema();
         IntegrationDataSource dataSource = requireDataSource(id);
         return toDetail(dataSource);
     }
 
     @Transactional(rollbackFor = Exception.class)
     public DataSourceDetail create(CreateOrUpdateDataSourceRequest request) throws TaskException {
-        integrationSchemaService.ensureSchema();
         NormalizedDataSource normalized = normalizeRequest(request, null);
         if (integrationDataSourceMapper.selectByName(normalized.name()) != null) {
             throw new TaskException("数据源名称已存在：" + normalized.name(), TaskException.Code.UNKNOWN);
@@ -65,7 +58,6 @@ public class IntegrationDataSourceService {
 
     @Transactional(rollbackFor = Exception.class)
     public DataSourceDetail update(Long id, CreateOrUpdateDataSourceRequest request) throws TaskException {
-        integrationSchemaService.ensureSchema();
         IntegrationDataSource existing = requireDataSource(id);
         NormalizedDataSource normalized = normalizeRequest(request, existing);
         IntegrationDataSource sameName = integrationDataSourceMapper.selectByName(normalized.name());
@@ -78,7 +70,9 @@ public class IntegrationDataSourceService {
     }
 
     public ConnectionTestResult testConnection(ConnectionTestRequest request) throws TaskException {
-        integrationSchemaService.ensureSchema();
+        IntegrationDataSource existing = request == null || request.id() == null
+                ? null
+                : requireDataSource(request.id());
         NormalizedDataSource normalized = normalizeRequest(
                 new CreateOrUpdateDataSourceRequest(
                         request.name(),
@@ -89,7 +83,7 @@ public class IntegrationDataSourceService {
                         request.username(),
                         request.password(),
                         request.status()),
-                null);
+                existing);
         try (Connection ignored = openConnection(normalized)) {
             return new ConnectionTestResult(true, "连接成功");
         } catch (SQLException ex) {
@@ -98,7 +92,6 @@ public class IntegrationDataSourceService {
     }
 
     public List<ObjectView> listObjects(Long dataSourceId) throws TaskException {
-        integrationSchemaService.ensureSchema();
         IntegrationDataSource dataSource = requireDataSource(dataSourceId);
         try (Connection connection = openConnection(toNormalized(dataSource))) {
             DatabaseMetaData metaData = connection.getMetaData();
@@ -133,7 +126,6 @@ public class IntegrationDataSourceService {
     }
 
     public List<FieldView> listFields(Long dataSourceId, String objectCode) throws TaskException {
-        integrationSchemaService.ensureSchema();
         String normalizedObjectCode = requireText(objectCode, "objectCode 不能为空");
         IntegrationDataSource dataSource = requireDataSource(dataSourceId);
         try (Connection connection = openConnection(toNormalized(dataSource))) {
@@ -165,7 +157,6 @@ public class IntegrationDataSourceService {
     }
 
     public List<RelationView> listRelations(Long dataSourceId, List<String> objectCodes) throws TaskException {
-        integrationSchemaService.ensureSchema();
         IntegrationDataSource dataSource = requireDataSource(dataSourceId);
         List<String> normalizedObjectCodes = objectCodes == null
                 ? List.of()
@@ -202,7 +193,6 @@ public class IntegrationDataSourceService {
     }
 
     private IntegrationDataSource requireDataSource(Long id) throws TaskException {
-        integrationSchemaService.ensureSchema();
         if (id == null) {
             throw new TaskException("数据源 id 不能为空", TaskException.Code.UNKNOWN);
         }
@@ -485,6 +475,7 @@ public class IntegrationDataSourceService {
             String status) {}
 
     public record ConnectionTestRequest(
+            Long id,
             String name,
             String alias,
             String dbType,
@@ -498,7 +489,6 @@ public class IntegrationDataSourceService {
 
     @Transactional(rollbackFor = Exception.class)
     public void delete(Long id) throws TaskException {
-        integrationSchemaService.ensureSchema();
         IntegrationDataSource existing = requireDataSource(id);
         integrationDataSourceMapper.deleteById(existing.getId());
     }

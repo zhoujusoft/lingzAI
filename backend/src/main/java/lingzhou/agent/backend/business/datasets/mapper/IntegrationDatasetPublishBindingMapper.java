@@ -24,4 +24,10 @@ public interface IntegrationDatasetPublishBindingMapper extends BaseMapper<Integ
         wrapper.in("dataset_id", datasetIds);
         return this.selectList(wrapper);
     }
+
+    default int deleteByDatasetId(Long datasetId) {
+        QueryWrapper<IntegrationDatasetPublishBinding> wrapper = new QueryWrapper<>();
+        wrapper.eq("dataset_id", datasetId);
+        return this.delete(wrapper);
+    }
 }

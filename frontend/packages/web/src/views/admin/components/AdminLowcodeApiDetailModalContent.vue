@@ -75,7 +75,24 @@ function normalizeRows(value) {
             id: item?.id || item?.name || item?.field || item?.code || `row-${index}`,
             name: item?.name || item?.field || item?.code || item?.paramName || '-',
             type: getTypeLabel(item?.type || item?.dataType || item?.valueType || item?.paramType),
-            description: item?.description || item?.remark || item?.label || item?.title || '',
+            description:
+                item?.description ||
+                item?.desc ||
+                item?.remark ||
+                item?.comment ||
+                item?.memo ||
+                item?.fieldDesc ||
+                item?.fieldRemark ||
+                item?.fieldDescription ||
+                item?.paramDesc ||
+                item?.paramRemark ||
+                item?.helpText ||
+                item?.tips ||
+                item?.placeholder ||
+                item?.label ||
+                item?.title ||
+                item?.displayName ||
+                '',
         }));
     }
     if (raw && typeof raw === 'object') {
@@ -87,7 +104,25 @@ function normalizeRows(value) {
                     ? getTypeLabel(item.type || item.dataType || item.valueType)
                     : getTypeLabel(typeof item),
             description:
-                item && typeof item === 'object' ? item.description || item.remark || '' : '',
+                item && typeof item === 'object'
+                    ? item.description ||
+                      item.desc ||
+                      item.remark ||
+                      item.comment ||
+                      item.memo ||
+                      item.fieldDesc ||
+                      item.fieldRemark ||
+                      item.fieldDescription ||
+                      item.paramDesc ||
+                      item.paramRemark ||
+                      item.helpText ||
+                      item.tips ||
+                      item.placeholder ||
+                      item.label ||
+                      item.title ||
+                      item.displayName ||
+                      ''
+                    : '',
         }));
     }
     return [];

@@ -2,217 +2,196 @@ package lingzhou.agent.backend.capability.modelruntime;
 
 import lingzhou.agent.backend.app.ChatModelProperties;
 import lingzhou.agent.backend.app.EmbeddingModelProperties;
+import lingzhou.agent.backend.app.ModelProviderProperties;
 import lingzhou.agent.backend.app.RagRerankProperties;
 import lingzhou.agent.backend.business.model.domain.ModelAdapterType;
 import lingzhou.agent.backend.business.model.domain.ModelCapabilityType;
 import lingzhou.agent.backend.business.model.domain.ModelDefaultBinding;
 import lingzhou.agent.backend.business.model.domain.ModelDefinition;
+import lingzhou.agent.backend.business.model.domain.ModelVendor;
 import lingzhou.agent.backend.business.model.mapper.ModelDefaultBindingMapper;
 import lingzhou.agent.backend.business.model.mapper.ModelDefinitionMapper;
-import lingzhou.agent.backend.business.model.service.ModelLibraryService;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lingzhou.agent.backend.business.model.mapper.ModelVendorMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 @Service
 public class ModelRuntimeConfigResolver {
 
-    private static final Logger logger = LoggerFactory.getLogger(ModelRuntimeConfigResolver.class);
-
     private final ModelDefaultBindingMapper modelDefaultBindingMapper;
     private final ModelDefinitionMapper modelDefinitionMapper;
+    private final ModelVendorMapper modelVendorMapper;
     private final ChatModelProperties chatProperties;
     private final EmbeddingModelProperties embeddingProperties;
+    private final ModelProviderProperties modelProviderProperties;
     private final RagRerankProperties rerankProperties;
 
     public ModelRuntimeConfigResolver(
             ModelDefaultBindingMapper modelDefaultBindingMapper,
             ModelDefinitionMapper modelDefinitionMapper,
+            ModelVendorMapper modelVendorMapper,
             ChatModelProperties chatProperties,
             EmbeddingModelProperties embeddingProperties,
+            ModelProviderProperties modelProviderProperties,
             RagRerankProperties rerankProperties) {
         this.modelDefaultBindingMapper = modelDefaultBindingMapper;
         this.modelDefinitionMapper = modelDefinitionMapper;
+        this.modelVendorMapper = modelVendorMapper;
         this.chatProperties = chatProperties;
         this.embeddingProperties = embeddingProperties;
+        this.modelProviderProperties = modelProviderProperties;
         this.rerankProperties = rerankProperties;
     }
 
     public ResolvedChatModelConfig resolveChatConfig() {
-        try {
-            ModelDefinition model = loadActiveDefaultModel(ModelCapabilityType.CHAT);
-            if (model != null) {
-                return toChatConfig(model);
-            }
-        } catch (Exception ex) {
-            logFallback(ModelCapabilityType.CHAT, ex);
-        }
-        return fallbackChatConfig();
+        return toChatConfig(requireActiveDefaultModel(ModelCapabilityType.CHAT));
     }
 
     public ResolvedEmbeddingModelConfig resolveEmbeddingConfig() {
-        try {
-            ModelDefinition model = loadActiveDefaultModel(ModelCapabilityType.EMBEDDING);
-            if (model != null) {
-                return toEmbeddingConfig(model);
-            }
-        } catch (Exception ex) {
-            logFallback(ModelCapabilityType.EMBEDDING, ex);
-        }
-        return fallbackEmbeddingConfig();
+        return toEmbeddingConfig(requireActiveDefaultModel(ModelCapabilityType.EMBEDDING));
     }
 
     public ResolvedRerankModelConfig resolveRerankConfig() {
-        try {
-            ModelDefinition model = loadActiveDefaultModel(ModelCapabilityType.RERANK);
-            if (model != null) {
-                return toRerankConfig(model);
-            }
-        } catch (Exception ex) {
-            logFallback(ModelCapabilityType.RERANK, ex);
-        }
-        return fallbackRerankConfig();
+        return toRerankConfig(requireActiveDefaultModel(ModelCapabilityType.RERANK));
     }
 
-    private ModelDefinition loadActiveDefaultModel(ModelCapabilityType capabilityType) {
+    private ModelDefinition requireActiveDefaultModel(ModelCapabilityType capabilityType) {
         ModelDefaultBinding binding = modelDefaultBindingMapper.selectByCapabilityType(capabilityType.name());
         if (binding == null || binding.getModelId() == null) {
-            return null;
+            throw new IllegalStateException("未设置默认" + capabilityLabel(capabilityType) + "模型");
         }
         ModelDefinition model = modelDefinitionMapper.selectById(binding.getModelId());
         if (model == null) {
-            throw new IllegalStateException("默认模型不存在：" + binding.getModelId());
+            throw new IllegalStateException("默认" + capabilityLabel(capabilityType) + "模型不存在：" + binding.getModelId());
         }
         if (!capabilityType.name().equalsIgnoreCase(model.getCapabilityType())) {
-            throw new IllegalStateException("默认模型能力类型不匹配：" + capabilityType.name());
+            throw new IllegalStateException("默认" + capabilityLabel(capabilityType) + "模型能力类型不匹配");
         }
-        if (!ModelLibraryService.STATUS_ACTIVE.equalsIgnoreCase(model.getStatus())) {
-            throw new IllegalStateException("默认模型未启用：" + model.getId());
+        if (!"ACTIVE".equalsIgnoreCase(model.getStatus())) {
+            throw new IllegalStateException("默认" + capabilityLabel(capabilityType) + "模型未启用：" + model.getId());
         }
         return model;
     }
 
     private ResolvedChatModelConfig toChatConfig(ModelDefinition model) {
-        requireRuntimeFields(model, "对话模型");
-        String adapterType = normalizeAdapterType(model.getAdapterType());
+        ModelVendor vendor = requireVendor(model);
+        String adapterType = resolveAdapterType(model, vendor);
+        ModelProviderProperties.VendorProperties providerProperties = modelProviderProperties.resolve(adapterType);
+        ModelProviderProperties.ChatProperties providerChat = providerProperties.getChat();
+        String baseUrl = resolveBaseUrl(model, vendor);
+        String apiKey = resolveApiKey(model, vendor);
+        requireRuntimeFields(baseUrl, apiKey, model.getModelName(), adapterType, "对话模型");
         return new ResolvedChatModelConfig(
                 "DATABASE",
                 ModelAdapterType.toChatProvider(adapterType),
                 firstNonBlank(model.getDisplayName(), model.getModelCode()),
                 model.getId(),
-                model.getBaseUrl(),
-                model.getApiKey(),
+                baseUrl,
+                apiKey,
                 normalizePath(defaultChatPath(adapterType, model.getPath())),
                 model.getModelName(),
-                model.getTemperature() != null ? model.getTemperature() : chatProperties.getTemperature(),
-                model.getMaxTokens() != null ? model.getMaxTokens() : chatProperties.getMaxTokens(),
-                StringUtils.hasText(model.getSystemPrompt()) ? model.getSystemPrompt().trim() : chatProperties.getSystemPrompt(),
-                model.getEnableThinking() != null ? model.getEnableThinking() : chatProperties.getEnableThinking());
+                providerChat.getTemperature(),
+                providerChat.getMaxTokens(),
+                trimToEmpty(providerChat.getSystemPrompt()),
+                providerChat.getEnableThinking());
     }
 
     private ResolvedEmbeddingModelConfig toEmbeddingConfig(ModelDefinition model) {
-        requireRuntimeFields(model, "向量模型");
-        String adapterType = normalizeAdapterType(model.getAdapterType());
+        ModelVendor vendor = requireVendor(model);
+        String adapterType = resolveAdapterType(model, vendor);
+        ModelProviderProperties.VendorProperties providerProperties = modelProviderProperties.resolve(adapterType);
+        String baseUrl = resolveBaseUrl(model, vendor);
+        String apiKey = resolveApiKey(model, vendor);
+        requireRuntimeFields(baseUrl, apiKey, model.getModelName(), adapterType, "向量模型");
         return new ResolvedEmbeddingModelConfig(
                 "DATABASE",
                 adapterType,
                 firstNonBlank(model.getDisplayName(), model.getModelCode()),
                 model.getId(),
-                model.getBaseUrl(),
-                model.getApiKey(),
+                baseUrl,
+                apiKey,
                 normalizePath(defaultEmbeddingsPath(model.getPath())),
                 model.getModelName(),
-                model.getDimensions() != null ? model.getDimensions() : embeddingProperties.getDimensions());
+                providerProperties.getEmbedding().getDimensions() != null
+                        ? providerProperties.getEmbedding().getDimensions()
+                        : embeddingProperties.getDimensions());
     }
 
     private ResolvedRerankModelConfig toRerankConfig(ModelDefinition model) {
-        requireRuntimeFields(model, "重排序模型");
-        String adapterType = normalizeAdapterType(model.getAdapterType());
+        ModelVendor vendor = requireVendor(model);
+        String adapterType = resolveAdapterType(model, vendor);
+        ModelProviderProperties.VendorProperties providerProperties = modelProviderProperties.resolve(adapterType);
+        ModelProviderProperties.RerankProperties providerRerank = providerProperties.getRerank();
+        String baseUrl = resolveBaseUrl(model, vendor);
+        String apiKey = resolveApiKey(model, vendor);
+        requireRuntimeFields(baseUrl, apiKey, model.getModelName(), adapterType, "重排序模型");
         return new ResolvedRerankModelConfig(
                 "DATABASE",
                 adapterType,
                 firstNonBlank(model.getDisplayName(), model.getModelCode()),
                 model.getId(),
                 Boolean.TRUE,
-                model.getBaseUrl(),
-                model.getApiKey(),
-                normalizePath(defaultRerankPath(adapterType, model.getPath())),
-                model.getModelName(),
-                StringUtils.hasText(model.getProtocol())
-                        ? model.getProtocol().trim()
-                        : (ModelAdapterType.VLLM.name().equals(adapterType) ? "vllm" : "dashscope"),
-                model.getTimeoutMs() != null ? model.getTimeoutMs() : rerankProperties.getTimeoutMs(),
-                model.getFallbackRrf() != null ? model.getFallbackRrf() : rerankProperties.getFallbackRrf());
-    }
-
-    private ResolvedChatModelConfig fallbackChatConfig() {
-        return new ResolvedChatModelConfig(
-                "YAML",
-                chatProperties.getProvider(),
-                "YAML Chat",
-                null,
-                chatProperties.getBaseUrl(),
-                chatProperties.getApiKey(),
-                chatProperties.getCompletionsPath(),
-                chatProperties.getModel(),
-                chatProperties.getTemperature(),
-                chatProperties.getMaxTokens(),
-                chatProperties.getSystemPrompt(),
-                chatProperties.getEnableThinking());
-    }
-
-    private ResolvedEmbeddingModelConfig fallbackEmbeddingConfig() {
-        String baseUrl = StringUtils.hasText(embeddingProperties.getBaseUrl())
-                ? embeddingProperties.getBaseUrl()
-                : chatProperties.getBaseUrl();
-        String apiKey = StringUtils.hasText(embeddingProperties.getApiKey())
-                ? embeddingProperties.getApiKey()
-                : chatProperties.getApiKey();
-        String model = StringUtils.hasText(embeddingProperties.getModel())
-                ? embeddingProperties.getModel()
-                : chatProperties.getModel();
-        return new ResolvedEmbeddingModelConfig(
-                "YAML",
-                chatProperties.getProvider(),
-                "YAML Embedding",
-                null,
                 baseUrl,
                 apiKey,
-                normalizePath(defaultEmbeddingsPath(embeddingProperties.getEmbeddingsPath())),
-                model,
-                embeddingProperties.getDimensions());
+                normalizePath(defaultRerankPath(adapterType, model.getPath())),
+                model.getModelName(),
+                StringUtils.hasText(providerRerank.getProtocol())
+                        ? providerRerank.getProtocol().trim()
+                        : defaultRerankProtocol(adapterType),
+                providerRerank.getTimeoutMs() != null ? providerRerank.getTimeoutMs() : rerankProperties.getTimeoutMs(),
+                providerRerank.getFallbackRrf() != null ? providerRerank.getFallbackRrf() : rerankProperties.getFallbackRrf());
     }
 
-    private ResolvedRerankModelConfig fallbackRerankConfig() {
-        return new ResolvedRerankModelConfig(
-                "YAML",
-                chatProperties.getProvider(),
-                "YAML Rerank",
-                null,
-                rerankProperties.getEnabled(),
-                rerankProperties.getBaseUrl(),
-                rerankProperties.getApiKey(),
-                normalizePath(defaultRerankPath(chatProperties.getProvider(), rerankProperties.getPath())),
-                rerankProperties.getModel(),
-                rerankProperties.getProtocol(),
-                rerankProperties.getTimeoutMs(),
-                rerankProperties.getFallbackRrf());
-    }
-
-    private void requireRuntimeFields(ModelDefinition model, String label) {
-        if (!StringUtils.hasText(model.getBaseUrl())
-                || !StringUtils.hasText(model.getApiKey())
-                || !StringUtils.hasText(model.getModelName())) {
+    private void requireRuntimeFields(String baseUrl, String apiKey, String modelName, String adapterType, String label) {
+        boolean apiKeyRequired = !ModelAdapterType.VLLM.name().equalsIgnoreCase(trimToEmpty(adapterType));
+        if (!StringUtils.hasText(baseUrl)
+                || !StringUtils.hasText(modelName)
+                || (apiKeyRequired && !StringUtils.hasText(apiKey))) {
             throw new IllegalStateException(label + "配置不完整");
         }
     }
 
-    private void logFallback(ModelCapabilityType capabilityType, Exception ex) {
-        logger.warn(
-                "默认模型解析失败，回退 YAML：capabilityType={}, error={}",
-                capabilityType.name(),
-                ex.getMessage());
+    private ModelVendor requireVendor(ModelDefinition model) {
+        if (model == null || model.getVendorId() == null) {
+            throw new IllegalStateException("模型厂商不存在");
+        }
+        ModelVendor vendor = modelVendorMapper.selectById(model.getVendorId());
+        if (vendor == null) {
+            throw new IllegalStateException("模型厂商不存在：" + model.getVendorId());
+        }
+        if (!"ACTIVE".equalsIgnoreCase(vendor.getStatus())) {
+            throw new IllegalStateException("模型厂商未启用：" + model.getVendorId());
+        }
+        return vendor;
+    }
+
+    private String resolveBaseUrl(ModelDefinition model, ModelVendor vendor) {
+        return firstNonBlank(model.getBaseUrl(), vendor == null ? "" : vendor.getDefaultBaseUrl());
+    }
+
+    private String resolveApiKey(ModelDefinition model, ModelVendor vendor) {
+        return firstNonBlank(model.getApiKey(), vendor == null ? "" : vendor.getDefaultApiKey());
+    }
+
+    private String resolveAdapterType(ModelDefinition model, ModelVendor vendor) {
+        if (StringUtils.hasText(model.getAdapterType())) {
+            return normalizeAdapterType(model.getAdapterType());
+        }
+        if (vendor != null && "VLLM".equalsIgnoreCase(vendor.getVendorCode())) {
+            return ModelAdapterType.VLLM.name();
+        }
+        return ModelAdapterType.QWEN_ONLINE.name();
+    }
+
+    private String capabilityLabel(ModelCapabilityType capabilityType) {
+        if (capabilityType == null) {
+            return "模型";
+        }
+        return switch (capabilityType) {
+            case CHAT -> "对话";
+            case EMBEDDING -> "向量";
+            case RERANK -> "重排序";
+        };
     }
 
     private String defaultChatPath(String adapterType, String path) {
@@ -235,6 +214,10 @@ public class ModelRuntimeConfigResolver {
                 : "/api/v1/services/rerank/text-rerank/text-rerank";
     }
 
+    private String defaultRerankProtocol(String adapterType) {
+        return ModelAdapterType.VLLM.name().equalsIgnoreCase(adapterType) ? "vllm" : "dashscope";
+    }
+
     private String normalizePath(String path) {
         if (!StringUtils.hasText(path)) {
             return "";
@@ -251,6 +234,10 @@ public class ModelRuntimeConfigResolver {
             return first.trim();
         }
         return StringUtils.hasText(second) ? second.trim() : "";
+    }
+
+    private String trimToEmpty(String value) {
+        return StringUtils.hasText(value) ? value.trim() : "";
     }
 
     private String normalizeAdapterType(String value) {

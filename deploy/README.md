@@ -59,13 +59,11 @@ cp ../.env ./.env
 
 适合单机快速体验、联调和演示环境。
 
-启动前至少需要填写这些变量：
+启动前请按实际厂商需求填写 `deploy/release.env` 中的模型参数。
+当前配置口径为：
 
-- `APP_CHAT_QWEN_ONLINE_API_KEY`
-- `APP_EMBEDDING_API_KEY`
-- `APP_RAG_RERANK_API_KEY`
-
-若三者使用同一个 DashScope Key，也可以填成同一个值。
+- 模型表维护：`baseUrl`、`path`、`modelName`
+- 配置文件维护：`model.qwen.*`、`model.vllm.*` 对应的运行参数
 
 ## 发布流程
 
@@ -76,6 +74,7 @@ cp ../.env ./.env
 ```
 
 发布版本文件为：`deploy/release.env`。
+该文件中仅保留仍在配置文件中的模型运行参数，不再按 `qwen/vllm profile` 切换。
 
 若需分步发布：
 

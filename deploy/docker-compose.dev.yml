@@ -4,10 +4,10 @@ services:
     restart: unless-stopped
     environment:
       TZ: Asia/Shanghai
-      MYSQL_ROOT_PASSWORD: change-me-password
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ${MYSQL_DATABASE}
-      MYSQL_USER: change-me-user
-      MYSQL_PASSWORD: change-me-password
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
@@ -46,8 +46,8 @@ services:
     restart: unless-stopped
     environment:
       TZ: Asia/Shanghai
-      MINIO_ROOT_USER: change-me-user
-      MINIO_ROOT_PASSWORD: change-me-password
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     command: server /data --console-address ":9001"
     volumes:
       - ./data/dev/minio:/data
@@ -58,7 +58,7 @@ services:
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
     restart: unless-stopped
-    user: "change-me-user"
+    user: "0:0"
     environment:
       TZ: Asia/Shanghai
       discovery.type: single-node

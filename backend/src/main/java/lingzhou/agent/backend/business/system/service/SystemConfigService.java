@@ -3,7 +3,6 @@ package lingzhou.agent.backend.business.system.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import jakarta.annotation.PostConstruct;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -25,7 +24,6 @@ import lingzhou.agent.backend.common.lzException.TaskException;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -42,30 +40,18 @@ public class SystemConfigService {
 
     private final SystemConfigMapper systemConfigMapper;
     private final SysUserMapper sysUserMapper;
-    private final JdbcTemplate jdbcTemplate;
-    private final Object schemaMonitor = new Object();
-    private volatile boolean schemaReady;
 
-    public SystemConfigService(
-            SystemConfigMapper systemConfigMapper, SysUserMapper sysUserMapper, JdbcTemplate jdbcTemplate) {
+    public SystemConfigService(SystemConfigMapper systemConfigMapper, SysUserMapper sysUserMapper) {
         this.systemConfigMapper = systemConfigMapper;
         this.sysUserMapper = sysUserMapper;
-        this.jdbcTemplate = jdbcTemplate;
-    }
-
-    @PostConstruct
-    public void initializeSchema() {
-        ensureSchema();
     }
 
     public PlatformSettingsDto getPlatformSettings(Long operatorUserId) throws TaskException {
-        ensureSchema();
         requireAdmin(operatorUserId);
         return buildPlatformSettingsDto(systemConfigMapper.selectByConfigKey(CONFIG_KEY_SELF_HOSTED_PLATFORMS), true);
     }
 
     public List<PlatformEndpointItem> getEnabledPlatformItems() {
-        ensureSchema();
         SystemConfigModel config = systemConfigMapper.selectByConfigKey(CONFIG_KEY_SELF_HOSTED_PLATFORMS);
         if (config == null || config.getStatus() == null || config.getStatus() != 1) {
             return List.of();
@@ -88,7 +74,6 @@ public class SystemConfigService {
     @Transactional(rollbackFor = Exception.class)
     public PlatformSettingsDto savePlatformSettings(Long operatorUserId, UpdatePlatformSettingsInput input)
             throws TaskException {
-        ensureSchema();
         SysUserModel operator = requireAdmin(operatorUserId);
         if (input == null) {
             throw new TaskException("请求参数不能为空", TaskException.Code.UNKNOWN);
@@ -116,31 +101,6 @@ public class SystemConfigService {
                 operator.getId(),
                 creating);
         return buildPlatformSettingsDto(systemConfigMapper.selectByConfigKey(CONFIG_KEY_SELF_HOSTED_PLATFORMS), true);
-    }
-
-    private void ensureSchema() {
-        if (schemaReady) {
-            return;
-        }
-        synchronized (schemaMonitor) {
-            if (schemaReady) {
-                return;
-            }
-            jdbcTemplate.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS `system_config` (
-                      `id` bigint NOT NULL AUTO_INCREMENT COMMENT '配置主键',
-                      `config_key` varchar(120) NOT NULL COMMENT '配置唯一标识',
-                      `config_value` longtext COMMENT '配置值，支持 JSON 或普通字符串',
-                      `status` tinyint NOT NULL DEFAULT 1 COMMENT '状态：1=启用，0=停用',
-                      `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-                      `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-                      PRIMARY KEY (`id`),
-                      UNIQUE KEY `uk_system_config_key` (`config_key`)
-                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='系统配置表'
-                    """);
-            schemaReady = true;
-        }
     }
 
     private SysUserModel requireAdmin(Long operatorUserId) throws TaskException {
@@ -269,6 +229,9 @@ public class SystemConfigService {
         PlatformAuthConfig normalized = new PlatformAuthConfig();
         normalized.setUsername(StringUtils.trimToEmpty(incoming.getUsername()));
         normalized.setPassword(StringUtils.trimToEmpty(incoming.getPassword()));
+        normalized.setAppKey(StringUtils.trimToEmpty(incoming.getAppKey()));
+        normalized.setAppSecret(StringUtils.trimToEmpty(incoming.getAppSecret()));
+        normalized.setRsaPublicKey(StringUtils.trimToEmpty(incoming.getRsaPublicKey()));
         normalized.setTncode(StringUtils.trimToEmpty(incoming.getTncode()));
         normalized.setUserId(StringUtils.trimToEmpty(incoming.getUserId()));
 
@@ -279,6 +242,15 @@ public class SystemConfigService {
             }
             if (StringUtils.isBlank(normalized.getPassword())) {
                 normalized.setPassword(StringUtils.trimToEmpty(existingAuth.getPassword()));
+            }
+            if (StringUtils.isBlank(normalized.getAppKey())) {
+                normalized.setAppKey(StringUtils.trimToEmpty(existingAuth.getAppKey()));
+            }
+            if (StringUtils.isBlank(normalized.getAppSecret())) {
+                normalized.setAppSecret(StringUtils.trimToEmpty(existingAuth.getAppSecret()));
+            }
+            if (StringUtils.isBlank(normalized.getRsaPublicKey())) {
+                normalized.setRsaPublicKey(StringUtils.trimToEmpty(existingAuth.getRsaPublicKey()));
             }
             if (StringUtils.isBlank(normalized.getTncode())) {
                 normalized.setTncode(StringUtils.trimToEmpty(existingAuth.getTncode()));
@@ -291,6 +263,9 @@ public class SystemConfigService {
         boolean credentialConfigured =
                 StringUtils.isNotBlank(normalized.getUsername()) && StringUtils.isNotBlank(normalized.getPassword());
         normalized.setCredentialConfigured(credentialConfigured);
+        boolean signatureConfigured =
+                StringUtils.isNotBlank(normalized.getAppKey()) && StringUtils.isNotBlank(normalized.getAppSecret());
+        normalized.setSignatureConfigured(signatureConfigured);
         return normalized;
     }
 
@@ -301,12 +276,21 @@ public class SystemConfigService {
         result.setUserId(StringUtils.trimToEmpty(source.getUserId()));
         boolean configured = StringUtils.isNotBlank(source.getUsername()) && StringUtils.isNotBlank(source.getPassword());
         result.setCredentialConfigured(configured);
+        boolean signatureConfigured =
+                StringUtils.isNotBlank(source.getAppKey()) && StringUtils.isNotBlank(source.getAppSecret());
+        result.setSignatureConfigured(signatureConfigured);
         if (maskSecrets) {
             result.setUsername("");
             result.setPassword("");
+            result.setAppKey(StringUtils.trimToEmpty(source.getAppKey()));
+            result.setAppSecret("");
+            result.setRsaPublicKey("");
         } else {
             result.setUsername(StringUtils.trimToEmpty(source.getUsername()));
             result.setPassword(StringUtils.trimToEmpty(source.getPassword()));
+            result.setAppKey(StringUtils.trimToEmpty(source.getAppKey()));
+            result.setAppSecret(StringUtils.trimToEmpty(source.getAppSecret()));
+            result.setRsaPublicKey(StringUtils.trimToEmpty(source.getRsaPublicKey()));
         }
         return result;
     }
@@ -315,6 +299,9 @@ public class SystemConfigService {
         return authConfig == null
                 || (StringUtils.isBlank(authConfig.getUsername())
                         && StringUtils.isBlank(authConfig.getPassword())
+                        && StringUtils.isBlank(authConfig.getAppKey())
+                        && StringUtils.isBlank(authConfig.getAppSecret())
+                        && StringUtils.isBlank(authConfig.getRsaPublicKey())
                         && StringUtils.isBlank(authConfig.getTncode())
                         && StringUtils.isBlank(authConfig.getUserId()));
     }

@@ -30,7 +30,15 @@ const SESSION_TYPE = 'SKILL_CHAT';
 export const skillChatAdapter = {
     sessionStorageKey: SKILL_CHAT_SESSION_STORAGE_KEY,
 
-    async sendStream({ message, fileIds, sessionId, selectedKnowledge, onUnauthorized }) {
+    async sendStream({
+        message,
+        fileIds,
+        sessionId,
+        selectedKnowledge,
+        messageType,
+        eventPayload,
+        onUnauthorized,
+    }) {
         const skillId = normalizeSkillId(selectedKnowledge);
         if (skillId == null) {
             throw new Error('未选择技能，请先从技能市场进入或在当前页面选择技能。');
@@ -47,6 +55,8 @@ export const skillChatAdapter = {
                         message,
                         fileIds,
                         sessionId,
+                        messageType: messageType || '',
+                        eventPayload: eventPayload || null,
                     },
                 },
                 onUnauthorized,

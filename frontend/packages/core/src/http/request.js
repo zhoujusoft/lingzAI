@@ -59,6 +59,28 @@ function parseApiMessage(payload, fallback = '请求失败') {
     return fallback;
 }
 
+function fallbackMessageByStatus(status) {
+    if (status === 400) {
+        return '请求参数不正确';
+    }
+    if (status === 401) {
+        return '登录已过期或无权限，请重新登录';
+    }
+    if (status === 403) {
+        return '当前无权限执行该操作';
+    }
+    if (status === 404) {
+        return '请求的资源不存在';
+    }
+    if (status === 429) {
+        return '请求过于频繁，请稍后重试';
+    }
+    if (status >= 500) {
+        return '服务暂时不可用，请稍后重试';
+    }
+    return '请求失败';
+}
+
 function normalizeBody(body, headers) {
     if (body == null) {
         return body;
@@ -242,7 +264,7 @@ export async function requestJson(url, options = {}) {
     const ok = response.status >= HTTP_STATUS_OK_MIN && response.status < HTTP_STATUS_OK_MAX;
 
     if (!ok || code !== 0) {
-        throw new RequestError(parseApiMessage(payload), {
+        throw new RequestError(parseApiMessage(payload, fallbackMessageByStatus(response.status)), {
             status: response.status,
             code,
             payload,

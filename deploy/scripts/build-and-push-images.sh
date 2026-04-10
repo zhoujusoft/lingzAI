@@ -81,10 +81,9 @@ if [ -f "$DEPLOY_DIR/.env" ]; then
   load_env_if_unset "PNPM_REGISTRY" "$ENV_DOT_FILE"
   load_env_if_unset "VITE_BASE_PATH" "$ENV_DOT_FILE"
   load_env_if_unset "VITE_BASE_URL" "$ENV_DOT_FILE"
-  load_env_if_unset "MAVEN_MIRROR_URL" "$ENV_DOT_FILE"
 fi
 
-REGISTRY="${REGISTRY:-registry.example.com:5001}"
+REGISTRY="${REGISTRY:-125.75.152.167:5001}"
 IMAGE_TAG="${IMAGE_TAG:-}"
 FRONTEND_IMAGE_NAME="${FRONTEND_IMAGE_NAME:-lingzhou-frontend}"
 BACKEND_IMAGE_NAME="${BACKEND_IMAGE_NAME:-lingzhou-backend}"
@@ -98,6 +97,13 @@ fi
 
 if ! echo "$IMAGE_TAG" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
   echo "IMAGE_TAG must be semantic version x.y.z, got: $IMAGE_TAG" >&2
+  exit 1
+fi
+
+BACKEND_JAR_PATH="$REPO_ROOT/backend/target/backend.jar"
+if [ ! -f "$BACKEND_JAR_PATH" ]; then
+  echo "Backend jar not found: $BACKEND_JAR_PATH" >&2
+  echo "Please build it first, for example: mvn -pl backend -am -DskipTests package" >&2
   exit 1
 fi
 
@@ -237,7 +243,6 @@ if [ "$BUILDER_MODE" = "buildx" ]; then
         --builder "$BUILDX_BUILDER" \
         -f deploy/docker/backend.Dockerfile \
         -t "$BACKEND_IMAGE" \
-        --build-arg "MAVEN_MIRROR_URL=${MAVEN_MIRROR_URL:-https://maven.aliyun.com/repository/public}" \
         --cache-from "type=registry,ref=${BACKEND_CACHE_REF}" \
         --cache-to "type=registry,ref=${BACKEND_CACHE_REF},mode=max" \
         --provenance=false \
@@ -248,7 +253,6 @@ if [ "$BUILDER_MODE" = "buildx" ]; then
       docker buildx build \
         -f deploy/docker/backend.Dockerfile \
         -t "$BACKEND_IMAGE" \
-        --build-arg "MAVEN_MIRROR_URL=${MAVEN_MIRROR_URL:-https://maven.aliyun.com/repository/public}" \
         --cache-from "type=registry,ref=${BACKEND_CACHE_REF}" \
         --cache-to "type=registry,ref=${BACKEND_CACHE_REF},mode=max" \
         --provenance=false \
@@ -274,7 +278,6 @@ else
     docker build \
       -f deploy/docker/backend.Dockerfile \
       -t "$BACKEND_IMAGE" \
-      --build-arg "MAVEN_MIRROR_URL=${MAVEN_MIRROR_URL:-https://maven.aliyun.com/repository/public}" \
       .
   )
 

@@ -27,7 +27,7 @@ read_env_value() {
   printf '%s' "$value"
 }
 
-MYSQL_ROOT_PASSWORD="change-me-password"
+MYSQL_ROOT_PASSWORD="$(read_env_value MYSQL_ROOT_PASSWORD)"
 MYSQL_DATABASE="$(read_env_value MYSQL_DATABASE)"
 
 : "${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 未配置}"

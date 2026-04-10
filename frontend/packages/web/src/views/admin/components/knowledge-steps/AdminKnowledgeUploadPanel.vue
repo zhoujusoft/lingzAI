@@ -1,10 +1,10 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import KnowledgeStepProgress from './KnowledgeStepProgress.vue';
 import PageLayout from '@/components/PageLayout.vue';
 import { uploadDocument } from '@/api/datasets';
-import { createKnowledgeBase, createKnowledgeBaseWithDocument } from '@/api/knowledge-bases';
+import { createKnowledgeBase, createKnowledgeBaseWithDocument, updateKnowledgeBase } from '@/api/knowledge-bases';
 import { alert } from '@/composables/useModal';
 import { clearUserSession } from '@/composables/useCurrentUser';
 import { ROUTE_PATHS } from '@/router/routePaths';
@@ -20,6 +20,7 @@ const emit = defineEmits(['back', 'next-step']);
 
 const router = useRouter();
 const knowledgeName = ref(props.knowledge.name || '');
+const knowledgeCode = ref(props.knowledge.kbCode || '');
 const knowledgeDescription = ref(props.knowledge.description || '');
 const selectedType = ref('rag');
 const uploads = ref([]);
@@ -28,12 +29,23 @@ const isUploading = ref(false);
 const uploadError = ref('');
 const fieldErrors = ref({
     knowledgeName: '',
+    knowledgeCode: '',
 });
 const activeKnowledgeId = ref(props.knowledge?.id || null);
+const KB_CODE_PATTERN = /^[A-Za-z0-9._-]+$/;
 
 const processingFile = computed(() => uploads.value.find(item => item.isUploading));
-const isUploadOnlyMode = computed(() => Boolean(activeKnowledgeId.value));
+const isEditMode = computed(() => Boolean(activeKnowledgeId.value));
 const currentTargetPath = computed(() => props.knowledge?.path || props.knowledge?.name || '根目录');
+const submitButtonText = computed(() => {
+    if (isUploading.value) {
+        return '处理中...';
+    }
+    if (isEditMode.value) {
+        return uploads.value.length ? '保存并上传' : '保存修改';
+    }
+    return uploads.value.length ? '创建并导入' : '创建';
+});
 
 function handleUnauthorized() {
     clearUserSession();
@@ -103,8 +115,14 @@ function removeUpload(id) {
 
 async function startUpload() {
     fieldErrors.value.knowledgeName = '';
-    if (!isUploadOnlyMode.value && !knowledgeName.value.trim()) {
+    fieldErrors.value.knowledgeCode = '';
+
+    if (!knowledgeName.value.trim()) {
         fieldErrors.value.knowledgeName = '请输入知识库名称';
+        return;
+    }
+    if (knowledgeCode.value.trim() && !KB_CODE_PATTERN.test(knowledgeCode.value.trim())) {
+        fieldErrors.value.knowledgeCode = '编码仅支持字母、数字、点、下划线和中划线';
         return;
     }
 
@@ -112,30 +130,39 @@ async function startUpload() {
 
     try {
         if (!uploads.value.length) {
-            if (isUploadOnlyMode.value) {
-                uploadError.value = '请先选择文件';
-                return;
-            }
             isUploading.value = true;
-            const created = await createKnowledgeBase(
-                {
-                    kbName: knowledgeName.value.trim(),
-                    description: knowledgeDescription.value.trim(),
-                },
-                handleUnauthorized,
-            );
-            if (!created?.kbId) {
+            const result = isEditMode.value
+                ? await updateKnowledgeBase(
+                    {
+                        kbId: activeKnowledgeId.value,
+                        kbName: knowledgeName.value.trim(),
+                        kbCode: knowledgeCode.value.trim(),
+                        description: knowledgeDescription.value.trim(),
+                    },
+                    handleUnauthorized,
+                )
+                : await createKnowledgeBase(
+                    {
+                        kbName: knowledgeName.value.trim(),
+                        kbCode: knowledgeCode.value.trim(),
+                        description: knowledgeDescription.value.trim(),
+                    },
+                    handleUnauthorized,
+                );
+            if (!isEditMode.value && !result?.kbId) {
                 throw new Error('知识库创建失败');
             }
-            activeKnowledgeId.value = created.kbId;
+            activeKnowledgeId.value = result?.kbId ?? activeKnowledgeId.value;
+            knowledgeCode.value = result?.kbCode || knowledgeCode.value.trim();
             isUploading.value = false;
             await alert({
-                title: '创建成功',
-                message: '知识库已创建成功。',
+                title: isEditMode.value ? '保存成功' : '创建成功',
+                message: isEditMode.value ? '知识库信息已保存。' : '知识库已创建成功。',
             });
             emit('next-step', {
                 id: activeKnowledgeId.value,
                 name: knowledgeName.value.trim(),
+                kbCode: knowledgeCode.value.trim(),
                 description: knowledgeDescription.value.trim(),
                 parentId: null,
                 path: '',
@@ -158,6 +185,7 @@ async function startUpload() {
             result = await createKnowledgeBaseWithDocument(
                 {
                     kbName: knowledgeName.value.trim(),
+                    kbCode: knowledgeCode.value.trim(),
                     description: knowledgeDescription.value.trim(),
                     file: pendingFile.file,
                 },
@@ -167,7 +195,17 @@ async function startUpload() {
                 throw new Error('知识库创建失败');
             }
             activeKnowledgeId.value = result.kbId;
+            knowledgeCode.value = result?.kbCode || knowledgeCode.value.trim();
         } else {
+            await updateKnowledgeBase(
+                {
+                    kbId: activeKnowledgeId.value,
+                    kbName: knowledgeName.value.trim(),
+                    kbCode: knowledgeCode.value.trim(),
+                    description: knowledgeDescription.value.trim(),
+                },
+                handleUnauthorized,
+            );
             result = await uploadDocument({
                 kbId: activeKnowledgeId.value,
                 parentId: props.knowledge?.parentId ?? null,
@@ -184,6 +222,7 @@ async function startUpload() {
         emit('next-step', {
             id: activeKnowledgeId.value,
             name: knowledgeName.value.trim(),
+            kbCode: knowledgeCode.value.trim(),
             description: knowledgeDescription.value.trim(),
             parentId: props.knowledge?.parentId ?? null,
             path: props.knowledge?.path || '',
@@ -236,6 +275,17 @@ function getStatusLabel(status) {
     if (status === 'failed') return '失败';
     return '等待上传';
 }
+
+watch(
+    () => props.knowledge,
+    knowledge => {
+        knowledgeName.value = knowledge?.name || '';
+        knowledgeCode.value = knowledge?.kbCode || '';
+        knowledgeDescription.value = knowledge?.description || '';
+        activeKnowledgeId.value = knowledge?.id || null;
+    },
+    { immediate: true, deep: true },
+);
 </script>
 
 <template>
@@ -261,7 +311,7 @@ function getStatusLabel(status) {
 
         <div class="custom-scrollbar min-h-0 flex-1 overflow-y-auto px-8 py-8">
             <div class="mx-auto w-full max-w-4xl space-y-10">
-                <section v-if="!isUploadOnlyMode" class="space-y-4">
+                <section class="space-y-4">
                     <label class="block text-base font-bold text-slate-800">知识库名称</label>
                     <input
                         v-model="knowledgeName"
@@ -275,6 +325,24 @@ function getStatusLabel(status) {
                     <p v-if="fieldErrors.knowledgeName" class="text-sm text-red-500">
                         {{ fieldErrors.knowledgeName }}
                     </p>
+                    <div class="space-y-2">
+                        <label class="block text-base font-bold text-slate-800">知识库编码</label>
+                        <input
+                            v-model="knowledgeCode"
+                            type="text"
+                            placeholder="留空则自动生成，例如 support_center_v1"
+                            class="w-full rounded-xl border px-4 py-3 font-mono outline-none transition-all placeholder:text-slate-400 focus:ring-2"
+                            :class="fieldErrors.knowledgeCode
+                                ? 'border-red-300 bg-red-50/40 focus:border-red-300 focus:ring-red-100'
+                                : 'border-slate-200 focus:border-primary focus:ring-primary/20'"
+                        />
+                        <p class="text-sm text-slate-500">
+                            发布成工具后会用于稳定工具标识，建议使用可读且长期稳定的编码。
+                        </p>
+                        <p v-if="fieldErrors.knowledgeCode" class="text-sm text-red-500">
+                            {{ fieldErrors.knowledgeCode }}
+                        </p>
+                    </div>
                     <p v-if="props.knowledge?.parentId" class="text-sm text-slate-500">
                         当前上传目录：{{ props.knowledge?.path || props.knowledge?.name }}
                     </p>
@@ -289,7 +357,7 @@ function getStatusLabel(status) {
                     </div>
                 </section>
 
-                <section v-if="!isUploadOnlyMode" class="space-y-4">
+                <section class="space-y-4">
                     <label class="block text-base font-bold text-slate-800">知识库类型</label>
                     <div class="grid grid-cols-2 gap-4">
                         <button
@@ -325,9 +393,9 @@ function getStatusLabel(status) {
                 <section class="space-y-4">
                     <div class="space-y-2">
                         <label class="block text-base font-bold text-slate-800">
-                            {{ isUploadOnlyMode ? '上传到当前目录' : '上传文本文件' }}
+                            {{ isEditMode ? '上传到当前知识库' : '上传文本文件' }}
                         </label>
-                        <p v-if="isUploadOnlyMode" class="text-sm text-slate-500">
+                        <p v-if="isEditMode" class="text-sm text-slate-500">
                             当前目录：{{ currentTargetPath }}
                         </p>
                     </div>
@@ -427,11 +495,7 @@ function getStatusLabel(status) {
                     :disabled="isUploading"
                     @click="startUpload"
                 >
-                    {{
-                        isUploadOnlyMode
-                            ? '上传并导入'
-                            : (uploads.length ? '创建并导入' : '创建')
-                    }}
+                    {{ submitButtonText }}
                 </button>
             </div>
         </template>

@@ -1,13 +1,15 @@
 package lingzhou.agent.backend.business.model.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import java.time.Duration;
 import java.net.URI;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
-import lingzhou.agent.backend.business.model.domain.ModelAdapterType;
 import lingzhou.agent.backend.business.model.domain.ModelCapabilityType;
 import lingzhou.agent.backend.business.model.domain.ModelDefaultBinding;
 import lingzhou.agent.backend.business.model.domain.ModelDefinition;
@@ -21,9 +23,13 @@ import lingzhou.agent.backend.common.enums.UserType;
 import lingzhou.agent.backend.common.lzException.TaskException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientResponseException;
 
 @Service
 public class ModelLibraryService {
@@ -31,10 +37,21 @@ public class ModelLibraryService {
     public static final String STATUS_ACTIVE = "ACTIVE";
     public static final String STATUS_DRAFT = "DRAFT";
 
+    public static final String VENDOR_QWEN = "QWEN_ONLINE";
+    public static final String VENDOR_VLLM = "VLLM";
+
     private static final Logger logger = LoggerFactory.getLogger(ModelLibraryService.class);
     private static final Pattern CODE_PATTERN = Pattern.compile("[A-Za-z0-9._-]+");
     private static final Set<String> SUPPORTED_STATUSES = Set.of(STATUS_ACTIVE, STATUS_DRAFT);
-    private static final ObjectMapper JSON = new ObjectMapper();
+    private static final List<String> BUILTIN_VENDOR_CODES = List.of(VENDOR_QWEN, VENDOR_VLLM);
+    private static final Set<String> BUILTIN_MODEL_CODES =
+            Set.of(
+                    "qwen-chat-default",
+                    "qwen-chat-plus",
+                    "qwen-chat-turbo",
+                    "qwen-chat-long",
+                    "qwen-embedding-default",
+                    "qwen-rerank-default");
 
     private final ModelVendorMapper modelVendorMapper;
     private final ModelDefinitionMapper modelDefinitionMapper;
@@ -54,48 +71,50 @@ public class ModelLibraryService {
 
     public List<VendorView> listVendors(Long operatorUserId) throws TaskException {
         requireAdmin(operatorUserId);
-        Map<Long, Long> modelCountByVendor = buildModelCountByVendor();
-        return modelVendorMapper.selectAllOrdered().stream()
-                .map(vendor -> toVendorView(vendor, modelCountByVendor.getOrDefault(vendor.getId(), 0L).intValue()))
+        Map<Long, Integer> modelCountByVendor = buildModelCountByVendor();
+        return listBuiltinVendors().stream()
+                .map(vendor -> toVendorView(vendor, modelCountByVendor.getOrDefault(vendor.getId(), 0)))
                 .toList();
-    }
-
-    @Transactional(rollbackFor = Exception.class)
-    public VendorView createVendor(Long operatorUserId, UpsertVendorRequest request) throws TaskException {
-        SysUserModel operator = requireAdmin(operatorUserId);
-        NormalizedVendor normalized = normalizeVendorRequest(request);
-        ModelVendor existing = modelVendorMapper.selectByVendorCode(normalized.vendorCode());
-        if (existing != null) {
-            throw new TaskException("模型厂商编码已存在：" + normalized.vendorCode(), TaskException.Code.UNKNOWN);
-        }
-        ModelVendor entity = new ModelVendor();
-        applyVendor(entity, normalized);
-        modelVendorMapper.insert(entity);
-        logger.info("模型厂商创建成功：vendorCode={}, operatorUserId={}", entity.getVendorCode(), operator.getId());
-        return toVendorView(entity, 0);
     }
 
     @Transactional(rollbackFor = Exception.class)
     public VendorView updateVendor(Long operatorUserId, Long id, UpsertVendorRequest request) throws TaskException {
         SysUserModel operator = requireAdmin(operatorUserId);
-        ModelVendor existing = requireVendor(id);
-        NormalizedVendor normalized = normalizeVendorRequest(request);
-        ModelVendor sameCode = modelVendorMapper.selectByVendorCode(normalized.vendorCode());
-        if (sameCode != null && !sameCode.getId().equals(existing.getId())) {
-            throw new TaskException("模型厂商编码已存在：" + normalized.vendorCode(), TaskException.Code.UNKNOWN);
+        ModelVendor vendor = requireBuiltinVendor(id);
+        NormalizedVendor normalized = normalizeVendorRequest(request, vendor);
+        vendor.setDefaultBaseUrl(normalized.defaultBaseUrl());
+        vendor.setDefaultApiKey(normalized.defaultApiKey());
+        vendor.setStatus(normalized.status());
+        modelVendorMapper.updateById(vendor);
+        logger.info("模型厂商配置已更新：vendorCode={}, operatorUserId={}", vendor.getVendorCode(), operator.getId());
+        return toVendorView(vendor, countModelsByVendor(vendor.getId()));
+    }
+
+    public VendorValidationView validateVendor(Long operatorUserId, Long id, UpsertVendorRequest request)
+            throws TaskException {
+        requireAdmin(operatorUserId);
+        ModelVendor vendor = requireBuiltinVendor(id);
+        NormalizedVendor normalized = normalizeVendorRequest(request, vendor);
+        String effectiveApiKey = trimText(normalized.defaultApiKey());
+        if (!StringUtils.hasText(effectiveApiKey) && !VENDOR_VLLM.equals(trimText(vendor.getVendorCode()))) {
+            throw new TaskException("请先配置可用的默认 API Key", TaskException.Code.UNKNOWN);
         }
-        applyVendor(existing, normalized);
-        modelVendorMapper.updateById(existing);
-        logger.info("模型厂商更新成功：vendorId={}, operatorUserId={}", existing.getId(), operator.getId());
-        return toVendorView(existing, countModelsByVendor(existing.getId()));
+        String effectiveBaseUrl = resolveVendorValidationBaseUrl(vendor, normalized);
+        performVendorValidation(vendor, effectiveBaseUrl, effectiveApiKey);
+        return new VendorValidationView(
+                vendor.getId(),
+                vendor.getVendorCode(),
+                effectiveBaseUrl,
+                StringUtils.hasText(effectiveApiKey) ? "API Key 校验通过" : "连接校验通过");
     }
 
     public List<ModelView> listModels(Long operatorUserId, String keyword, String capabilityType, Long vendorId, String status)
             throws TaskException {
         requireAdmin(operatorUserId);
-        Map<Long, ModelVendor> vendorById = buildVendorById();
+        Map<Long, ModelVendor> vendorById = buildBuiltinVendorById();
         Map<String, Long> defaultModelIdByCapability = buildDefaultModelIdByCapability();
         return modelDefinitionMapper.search(keyword, capabilityType, vendorId, status).stream()
+                .filter(model -> vendorById.containsKey(model.getVendorId()))
                 .map(model -> toModelView(model, vendorById.get(model.getVendorId()), defaultModelIdByCapability))
                 .toList();
     }
@@ -104,15 +123,16 @@ public class ModelLibraryService {
     public ModelView createModel(Long operatorUserId, UpsertModelRequest request) throws TaskException {
         SysUserModel operator = requireAdmin(operatorUserId);
         NormalizedModel normalized = normalizeModelRequest(request, null);
-        ModelDefinition existing = modelDefinitionMapper.selectByModelCode(normalized.modelCode());
-        if (existing != null) {
-            throw new TaskException("模型编码已存在：" + normalized.modelCode(), TaskException.Code.UNKNOWN);
-        }
         ModelDefinition entity = new ModelDefinition();
         applyModel(entity, normalized);
         modelDefinitionMapper.insert(entity);
-        logger.info("模型定义创建成功：modelCode={}, operatorUserId={}", entity.getModelCode(), operator.getId());
-        return toModelView(entity, requireVendor(entity.getVendorId()), buildDefaultModelIdByCapability());
+        ModelVendor vendor = requireBuiltinVendor(entity.getVendorId());
+        logger.info(
+                "模型定义创建成功：modelCode={}, vendorCode={}, operatorUserId={}",
+                entity.getModelCode(),
+                vendor.getVendorCode(),
+                operator.getId());
+        return toModelView(entity, vendor, buildDefaultModelIdByCapability());
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -120,20 +140,21 @@ public class ModelLibraryService {
         SysUserModel operator = requireAdmin(operatorUserId);
         ModelDefinition existing = requireModel(id);
         NormalizedModel normalized = normalizeModelRequest(request, existing);
-        ModelDefinition sameCode = modelDefinitionMapper.selectByModelCode(normalized.modelCode());
-        if (sameCode != null && !sameCode.getId().equals(existing.getId())) {
-            throw new TaskException("模型编码已存在：" + normalized.modelCode(), TaskException.Code.UNKNOWN);
-        }
         applyModel(existing, normalized);
         modelDefinitionMapper.updateById(existing);
-        logger.info("模型定义更新成功：modelId={}, operatorUserId={}", existing.getId(), operator.getId());
-        return toModelView(existing, requireVendor(existing.getVendorId()), buildDefaultModelIdByCapability());
+        ModelVendor vendor = requireBuiltinVendor(existing.getVendorId());
+        logger.info(
+                "模型定义更新成功：modelId={}, vendorCode={}, operatorUserId={}",
+                existing.getId(),
+                vendor.getVendorCode(),
+                operator.getId());
+        return toModelView(existing, vendor, buildDefaultModelIdByCapability());
     }
 
     public List<DefaultBindingView> listDefaults(Long operatorUserId) throws TaskException {
         requireAdmin(operatorUserId);
-        Map<Long, ModelDefinition> modelById = buildModelById();
-        Map<Long, ModelVendor> vendorById = buildVendorById();
+        Map<Long, ModelDefinition> modelById = buildBuiltinModelById();
+        Map<Long, ModelVendor> vendorById = buildBuiltinVendorById();
         Map<String, ModelDefaultBinding> bindingByCapability = new LinkedHashMap<>();
         for (ModelDefaultBinding binding : modelDefaultBindingMapper.selectAllOrdered()) {
             bindingByCapability.put(binding.getCapabilityType(), binding);
@@ -160,15 +181,19 @@ public class ModelLibraryService {
                 modelDefaultBindingMapper.deleteById(existing.getId());
             }
             logger.info("默认模型已清空：capabilityType={}, operatorUserId={}", normalizedCapabilityType, operator.getId());
-            return new DefaultBindingView(normalizedCapabilityType, null, null, null, null, null, null);
+            return new DefaultBindingView(normalizedCapabilityType, null, null, null, null, null);
         }
 
         ModelDefinition model = requireModel(modelId);
+        ModelVendor vendor = requireBuiltinVendor(model.getVendorId());
         if (!normalizedCapabilityType.equalsIgnoreCase(model.getCapabilityType())) {
             throw new TaskException("默认模型能力类型不匹配", TaskException.Code.UNKNOWN);
         }
         if (!STATUS_ACTIVE.equals(normalizeStatus(model.getStatus()))) {
             throw new TaskException("仅启用状态的模型可设为默认模型", TaskException.Code.UNKNOWN);
+        }
+        if (!STATUS_ACTIVE.equals(normalizeStatus(vendor.getStatus()))) {
+            throw new TaskException("厂商未启用，无法设置默认模型", TaskException.Code.UNKNOWN);
         }
 
         if (existing == null) {
@@ -181,31 +206,24 @@ public class ModelLibraryService {
             modelDefaultBindingMapper.updateById(existing);
         }
 
-        ModelVendor vendor = requireVendor(model.getVendorId());
         logger.info(
                 "默认模型更新成功：capabilityType={}, modelId={}, operatorUserId={}",
                 normalizedCapabilityType,
                 model.getId(),
                 operator.getId());
-        return new DefaultBindingView(
-                normalizedCapabilityType,
-                model.getId(),
-                model.getDisplayName(),
-                vendor.getId(),
-                vendor.getVendorName(),
-                model.getAdapterType(),
-                normalizeStatus(model.getStatus()));
+        return toDefaultBindingView(normalizedCapabilityType, existing, buildBuiltinModelById(), buildBuiltinVendorById());
     }
 
-    private Map<Long, Long> buildModelCountByVendor() {
-        Map<Long, Long> counts = new LinkedHashMap<>();
+    private Map<Long, Integer> buildModelCountByVendor() {
+        Map<Long, Integer> result = new LinkedHashMap<>();
+        Set<Long> builtinVendorIds = buildBuiltinVendorById().keySet();
         for (ModelDefinition model : modelDefinitionMapper.search(null, null, null, null)) {
-            if (model.getVendorId() == null) {
+            if (model.getVendorId() == null || !builtinVendorIds.contains(model.getVendorId())) {
                 continue;
             }
-            counts.merge(model.getVendorId(), 1L, Long::sum);
+            result.merge(model.getVendorId(), 1, Integer::sum);
         }
-        return counts;
+        return result;
     }
 
     private int countModelsByVendor(Long vendorId) {
@@ -219,18 +237,29 @@ public class ModelLibraryService {
         return count;
     }
 
-    private Map<Long, ModelVendor> buildVendorById() {
+    private List<ModelVendor> listBuiltinVendors() {
+        return modelVendorMapper.selectList(new QueryWrapper<ModelVendor>()
+                        .in("vendor_code", BUILTIN_VENDOR_CODES))
+                .stream()
+                .sorted(Comparator.comparingInt(vendor -> vendorOrder(vendor.getVendorCode())))
+                .toList();
+    }
+
+    private Map<Long, ModelVendor> buildBuiltinVendorById() {
         Map<Long, ModelVendor> vendorById = new LinkedHashMap<>();
-        for (ModelVendor vendor : modelVendorMapper.selectAllOrdered()) {
+        for (ModelVendor vendor : listBuiltinVendors()) {
             vendorById.put(vendor.getId(), vendor);
         }
         return vendorById;
     }
 
-    private Map<Long, ModelDefinition> buildModelById() {
+    private Map<Long, ModelDefinition> buildBuiltinModelById() {
+        Map<Long, ModelVendor> vendorById = buildBuiltinVendorById();
         Map<Long, ModelDefinition> modelById = new LinkedHashMap<>();
         for (ModelDefinition model : modelDefinitionMapper.search(null, null, null, null)) {
-            modelById.put(model.getId(), model);
+            if (vendorById.containsKey(model.getVendorId())) {
+                modelById.put(model.getId(), model);
+            }
         }
         return modelById;
     }
@@ -253,27 +282,39 @@ public class ModelLibraryService {
                 trimText(vendor.getDescription()),
                 normalizeStatus(vendor.getStatus()),
                 modelCount,
+                trimText(vendor.getDefaultBaseUrl()),
+                StringUtils.hasText(vendor.getDefaultApiKey()),
+                vendorMode(vendor.getVendorCode()),
                 vendor.getCreatedAt(),
                 vendor.getUpdatedAt());
     }
 
     private ModelView toModelView(ModelDefinition model, ModelVendor vendor, Map<String, Long> defaultModelIdByCapability) {
-        boolean isDefault = model != null
+        boolean defaultModel = model != null
                 && defaultModelIdByCapability != null
                 && model.getId() != null
                 && model.getId().equals(defaultModelIdByCapability.get(model.getCapabilityType()));
+        boolean modelBaseUrlConfigured = StringUtils.hasText(model.getBaseUrl());
+        boolean vendorBaseUrlConfigured = vendor != null && StringUtils.hasText(vendor.getDefaultBaseUrl());
+        boolean modelApiKeyConfigured = StringUtils.hasText(model.getApiKey());
+        boolean vendorApiKeyConfigured = vendor != null && StringUtils.hasText(vendor.getDefaultApiKey());
         return new ModelView(
                 model.getId(),
                 model.getModelCode(),
                 model.getDisplayName(),
                 model.getCapabilityType(),
                 model.getVendorId(),
+                vendor == null ? "" : vendor.getVendorCode(),
                 vendor == null ? "" : vendor.getVendorName(),
-                model.getAdapterType(),
-                trimText(model.getProtocol()),
                 trimText(model.getBaseUrl()),
-                trimText(model.getPath()),
+                firstNonBlank(model.getBaseUrl(), vendor == null ? "" : vendor.getDefaultBaseUrl()),
+                !modelBaseUrlConfigured && vendorBaseUrlConfigured,
                 trimText(model.getModelName()),
+                normalizeStatus(model.getStatus()),
+                modelApiKeyConfigured || vendorApiKeyConfigured,
+                !modelApiKeyConfigured && vendorApiKeyConfigured,
+                trimText(model.getPath()),
+                trimText(model.getProtocol()),
                 model.getTemperature(),
                 model.getMaxTokens(),
                 trimText(model.getSystemPrompt()),
@@ -281,10 +322,8 @@ public class ModelLibraryService {
                 model.getDimensions(),
                 model.getTimeoutMs(),
                 model.getFallbackRrf(),
-                trimText(model.getExtraConfigJson()),
-                normalizeStatus(model.getStatus()),
-                StringUtils.hasText(model.getApiKey()),
-                isDefault,
+                defaultModel,
+                BUILTIN_MODEL_CODES.contains(trimText(model.getModelCode())),
                 model.getCreatedAt(),
                 model.getUpdatedAt());
     }
@@ -295,11 +334,11 @@ public class ModelLibraryService {
             Map<Long, ModelDefinition> modelById,
             Map<Long, ModelVendor> vendorById) {
         if (binding == null || binding.getModelId() == null) {
-            return new DefaultBindingView(capabilityType, null, null, null, null, null, null);
+            return new DefaultBindingView(capabilityType, null, null, null, null, null);
         }
         ModelDefinition model = modelById.get(binding.getModelId());
         if (model == null) {
-            return new DefaultBindingView(capabilityType, binding.getModelId(), null, null, null, null, "MISSING");
+            return new DefaultBindingView(capabilityType, binding.getModelId(), null, null, null, "MISSING");
         }
         ModelVendor vendor = vendorById.get(model.getVendorId());
         return new DefaultBindingView(
@@ -308,19 +347,22 @@ public class ModelLibraryService {
                 model.getDisplayName(),
                 vendor == null ? null : vendor.getId(),
                 vendor == null ? "" : vendor.getVendorName(),
-                model.getAdapterType(),
                 normalizeStatus(model.getStatus()));
     }
 
-    private NormalizedVendor normalizeVendorRequest(UpsertVendorRequest request) throws TaskException {
+    private NormalizedVendor normalizeVendorRequest(UpsertVendorRequest request, ModelVendor existing) throws TaskException {
         if (request == null) {
-            throw new TaskException("模型厂商请求参数不能为空", TaskException.Code.UNKNOWN);
+            throw new TaskException("厂商配置请求不能为空", TaskException.Code.UNKNOWN);
         }
-        return new NormalizedVendor(
-                normalizeCode(request.vendorCode(), "模型厂商编码不能为空"),
-                requireText(request.vendorName(), "模型厂商名称不能为空"),
-                trimText(request.description()),
-                normalizeStatus(request.status()));
+        String defaultBaseUrl = trimText(request.defaultBaseUrl());
+        if (StringUtils.hasText(defaultBaseUrl)) {
+            defaultBaseUrl = validateUrl(defaultBaseUrl);
+        }
+        String defaultApiKey = trimText(request.apiKey());
+        if (!StringUtils.hasText(defaultApiKey) && existing != null) {
+            defaultApiKey = trimText(existing.getDefaultApiKey());
+        }
+        return new NormalizedVendor(defaultBaseUrl, defaultApiKey, normalizeStatus(request.status()));
     }
 
     private NormalizedModel normalizeModelRequest(UpsertModelRequest request, ModelDefinition existing) throws TaskException {
@@ -331,46 +373,45 @@ public class ModelLibraryService {
         if (vendorId == null || vendorId <= 0) {
             throw new TaskException("模型厂商不能为空", TaskException.Code.UNKNOWN);
         }
-        requireVendor(vendorId);
+        ModelVendor vendor = requireBuiltinVendor(vendorId);
         String capabilityType = ModelCapabilityType.normalize(request.capabilityType());
-        String adapterType = ModelAdapterType.normalize(request.adapterType());
-        String baseUrl = validateUrl(requireText(request.baseUrl(), "Base URL 不能为空"));
-        String apiKey = resolveApiKey(request.apiKey(), existing);
-        if (!StringUtils.hasText(apiKey)) {
-            throw new TaskException("API Key 不能为空", TaskException.Code.UNKNOWN);
-        }
+        String displayName = requireText(request.displayName(), "模型名称不能为空");
         String modelName = requireText(request.modelName(), "模型名不能为空");
-        String path = normalizePath(defaultPath(capabilityType, adapterType, request.path()));
-        String protocol = normalizeProtocol(capabilityType, adapterType, request.protocol());
-        String extraConfigJson = normalizeExtraConfigJson(request.extraConfigJson());
+        String baseUrl = trimText(request.baseUrl());
+        if (StringUtils.hasText(baseUrl)) {
+            baseUrl = validateUrl(baseUrl);
+        }
+        String apiKey = resolveApiKey(request.apiKey(), existing);
+        String modelCode = resolveModelCode(request.modelCode(), vendor.getVendorCode(), capabilityType, modelName, existing);
+        String protocol = normalizeProtocol(capabilityType, vendor.getVendorCode(), request.protocol());
+        String path = normalizePath(defaultPath(capabilityType, vendor.getVendorCode(), request.path()));
+        Double temperature = normalizeTemperature(capabilityType, request.temperature());
+        Integer maxTokens = normalizePositiveInteger(request.maxTokens(), "maxTokens 必须大于 0");
+        String systemPrompt = normalizeOptionalText(request.systemPrompt());
+        Boolean enableThinking = normalizeEnableThinking(capabilityType, request.enableThinking());
+        Integer dimensions = normalizeDimensions(capabilityType, request.dimensions());
+        Integer timeoutMs = normalizeTimeoutMs(capabilityType, request.timeoutMs());
+        Boolean fallbackRrf = normalizeFallbackRrf(capabilityType, request.fallbackRrf());
 
         return new NormalizedModel(
-                normalizeCode(request.modelCode(), "模型编码不能为空"),
-                requireText(request.displayName(), "模型展示名称不能为空"),
+                modelCode,
+                displayName,
                 capabilityType,
-                vendorId,
-                adapterType,
+                vendor.getId(),
+                resolveAdapterType(vendor.getVendorCode()),
                 protocol,
                 baseUrl,
                 apiKey,
                 path,
                 modelName,
-                request.temperature(),
-                request.maxTokens(),
-                trimText(request.systemPrompt()),
-                request.enableThinking(),
-                request.dimensions(),
-                request.timeoutMs(),
-                request.fallbackRrf(),
-                extraConfigJson,
+                temperature,
+                maxTokens,
+                systemPrompt,
+                enableThinking,
+                dimensions,
+                timeoutMs,
+                fallbackRrf,
                 normalizeStatus(request.status()));
-    }
-
-    private void applyVendor(ModelVendor entity, NormalizedVendor normalized) {
-        entity.setVendorCode(normalized.vendorCode());
-        entity.setVendorName(normalized.vendorName());
-        entity.setDescription(normalized.description());
-        entity.setStatus(normalized.status());
     }
 
     private void applyModel(ModelDefinition entity, NormalizedModel normalized) {
@@ -384,15 +425,46 @@ public class ModelLibraryService {
         entity.setApiKey(normalized.apiKey());
         entity.setPath(normalized.path());
         entity.setModelName(normalized.modelName());
-        entity.setTemperature(normalized.capabilityType().equals(ModelCapabilityType.CHAT.name()) ? normalized.temperature() : null);
-        entity.setMaxTokens(normalized.capabilityType().equals(ModelCapabilityType.CHAT.name()) ? normalized.maxTokens() : null);
-        entity.setSystemPrompt(normalized.capabilityType().equals(ModelCapabilityType.CHAT.name()) ? normalized.systemPrompt() : null);
-        entity.setEnableThinking(normalized.capabilityType().equals(ModelCapabilityType.CHAT.name()) ? normalized.enableThinking() : null);
-        entity.setDimensions(normalized.capabilityType().equals(ModelCapabilityType.EMBEDDING.name()) ? normalized.dimensions() : null);
-        entity.setTimeoutMs(normalized.capabilityType().equals(ModelCapabilityType.RERANK.name()) ? normalized.timeoutMs() : null);
-        entity.setFallbackRrf(normalized.capabilityType().equals(ModelCapabilityType.RERANK.name()) ? normalized.fallbackRrf() : null);
-        entity.setExtraConfigJson(normalized.extraConfigJson());
+        entity.setTemperature(normalized.temperature());
+        entity.setMaxTokens(normalized.maxTokens());
+        entity.setSystemPrompt(normalized.systemPrompt());
+        entity.setEnableThinking(normalized.enableThinking());
+        entity.setDimensions(normalized.dimensions());
+        entity.setTimeoutMs(normalized.timeoutMs());
+        entity.setFallbackRrf(normalized.fallbackRrf());
+        entity.setExtraConfigJson("");
         entity.setStatus(normalized.status());
+    }
+
+    private String resolveModelCode(
+            String rawModelCode,
+            String vendorCode,
+            String capabilityType,
+            String modelName,
+            ModelDefinition existing)
+            throws TaskException {
+        if (StringUtils.hasText(rawModelCode)) {
+            String normalized = normalizeCode(rawModelCode, "模型编码不能为空");
+            ModelDefinition sameCode = modelDefinitionMapper.selectByModelCode(normalized);
+            if (sameCode != null && (existing == null || !sameCode.getId().equals(existing.getId()))) {
+                throw new TaskException("模型编码已存在：" + normalized, TaskException.Code.UNKNOWN);
+            }
+            return normalized;
+        }
+
+        String baseCode = normalizeCode(
+                (vendorCode + "-" + capabilityType + "-" + slugify(modelName)).toLowerCase(Locale.ROOT),
+                "模型编码不能为空");
+        String candidate = baseCode;
+        int suffix = 2;
+        while (true) {
+            ModelDefinition sameCode = modelDefinitionMapper.selectByModelCode(candidate);
+            if (sameCode == null || (existing != null && sameCode.getId().equals(existing.getId()))) {
+                return candidate;
+            }
+            candidate = baseCode + "-" + suffix;
+            suffix++;
+        }
     }
 
     private String resolveApiKey(String rawApiKey, ModelDefinition existing) {
@@ -419,12 +491,12 @@ public class ModelLibraryService {
         return operator;
     }
 
-    private ModelVendor requireVendor(Long id) throws TaskException {
+    private ModelVendor requireBuiltinVendor(Long id) throws TaskException {
         if (id == null || id <= 0) {
             throw new TaskException("模型厂商 id 不能为空", TaskException.Code.UNKNOWN);
         }
         ModelVendor vendor = modelVendorMapper.selectById(id);
-        if (vendor == null) {
+        if (vendor == null || !BUILTIN_VENDOR_CODES.contains(trimText(vendor.getVendorCode()))) {
             throw new TaskException("模型厂商不存在：" + id, TaskException.Code.UNKNOWN);
         }
         return vendor;
@@ -438,33 +510,22 @@ public class ModelLibraryService {
         if (model == null) {
             throw new TaskException("模型不存在：" + id, TaskException.Code.UNKNOWN);
         }
+        requireBuiltinVendor(model.getVendorId());
         return model;
     }
 
-    private String normalizeCode(String value, String message) throws TaskException {
-        String normalized = requireText(value, message);
-        if (!CODE_PATTERN.matcher(normalized).matches()) {
-            throw new TaskException("编码仅支持字母、数字、点、下划线和中划线", TaskException.Code.UNKNOWN);
-        }
-        return normalized;
+    private String resolveAdapterType(String vendorCode) {
+        return VENDOR_VLLM.equals(vendorCode) ? VENDOR_VLLM : VENDOR_QWEN;
     }
 
-    private String normalizeStatus(String status) {
-        String normalized = StringUtils.hasText(status) ? status.trim().toUpperCase() : STATUS_ACTIVE;
-        if (!SUPPORTED_STATUSES.contains(normalized)) {
-            return STATUS_ACTIVE;
-        }
-        return normalized;
-    }
-
-    private String normalizeProtocol(String capabilityType, String adapterType, String protocol) {
+    private String normalizeProtocol(String capabilityType, String vendorCode, String protocol) {
         if (!ModelCapabilityType.RERANK.name().equals(capabilityType)) {
             return trimText(protocol);
         }
         if (StringUtils.hasText(protocol)) {
             return protocol.trim();
         }
-        return ModelAdapterType.VLLM.name().equalsIgnoreCase(adapterType) ? "vllm" : "dashscope";
+        return VENDOR_VLLM.equals(vendorCode) ? "vllm" : "dashscope";
     }
 
     private String normalizePath(String path) {
@@ -478,35 +539,75 @@ public class ModelLibraryService {
         return normalized;
     }
 
-    private String defaultPath(String capabilityType, String adapterType, String rawPath) {
+    private String defaultPath(String capabilityType, String vendorCode, String rawPath) {
         if (StringUtils.hasText(rawPath)) {
             return rawPath;
         }
         if (ModelCapabilityType.CHAT.name().equals(capabilityType)) {
-            return ModelAdapterType.QWEN_ONLINE.name().equals(adapterType) ? "/v1/chat/completions" : "";
+            return "/v1/chat/completions";
         }
         if (ModelCapabilityType.EMBEDDING.name().equals(capabilityType)) {
             return "/v1/embeddings";
         }
         if (ModelCapabilityType.RERANK.name().equals(capabilityType)) {
-            return ModelAdapterType.VLLM.name().equals(adapterType)
-                    ? "/v1/rerank"
-                    : "/api/v1/services/rerank/text-rerank/text-rerank";
+            return VENDOR_VLLM.equals(vendorCode) ? "/v1/rerank" : "/api/v1/services/rerank/text-rerank/text-rerank";
         }
         return "";
     }
 
-    private String normalizeExtraConfigJson(String value) throws TaskException {
-        String normalized = trimText(value);
-        if (!StringUtils.hasText(normalized)) {
-            return "";
+    private Double normalizeTemperature(String capabilityType, Double temperature) throws TaskException {
+        if (!ModelCapabilityType.CHAT.name().equals(capabilityType)) {
+            return null;
         }
-        try {
-            JSON.readTree(normalized);
-            return normalized;
-        } catch (Exception ex) {
-            throw new TaskException("额外配置必须是合法 JSON", TaskException.Code.UNKNOWN, ex);
+        if (temperature == null) {
+            return null;
         }
+        if (temperature < 0D || temperature > 2D) {
+            throw new TaskException("temperature 需在 0 到 2 之间", TaskException.Code.UNKNOWN);
+        }
+        return temperature;
+    }
+
+    private Boolean normalizeEnableThinking(String capabilityType, Boolean enableThinking) {
+        if (!ModelCapabilityType.CHAT.name().equals(capabilityType)) {
+            return null;
+        }
+        return enableThinking;
+    }
+
+    private Integer normalizeDimensions(String capabilityType, Integer dimensions) throws TaskException {
+        if (!ModelCapabilityType.EMBEDDING.name().equals(capabilityType)) {
+            return null;
+        }
+        return normalizePositiveInteger(dimensions, "dimensions 必须大于 0");
+    }
+
+    private Integer normalizeTimeoutMs(String capabilityType, Integer timeoutMs) throws TaskException {
+        if (!ModelCapabilityType.RERANK.name().equals(capabilityType)) {
+            return null;
+        }
+        return normalizePositiveInteger(timeoutMs, "timeoutMs 必须大于 0");
+    }
+
+    private Boolean normalizeFallbackRrf(String capabilityType, Boolean fallbackRrf) {
+        if (!ModelCapabilityType.RERANK.name().equals(capabilityType)) {
+            return null;
+        }
+        return fallbackRrf;
+    }
+
+    private Integer normalizePositiveInteger(Integer value, String errorMessage) throws TaskException {
+        if (value == null) {
+            return null;
+        }
+        if (value <= 0) {
+            throw new TaskException(errorMessage, TaskException.Code.UNKNOWN);
+        }
+        return value;
+    }
+
+    private String normalizeOptionalText(String value) {
+        return StringUtils.hasText(value) ? value.trim() : "";
     }
 
     private String validateUrl(String value) throws TaskException {
@@ -526,6 +627,70 @@ public class ModelLibraryService {
         return value.trim();
     }
 
+    private String resolveVendorValidationBaseUrl(ModelVendor vendor, NormalizedVendor normalized) throws TaskException {
+        String effectiveBaseUrl = firstNonBlank(
+                normalized == null ? "" : normalized.defaultBaseUrl(),
+                vendor == null ? "" : vendor.getDefaultBaseUrl());
+        if (StringUtils.hasText(effectiveBaseUrl)) {
+            return effectiveBaseUrl;
+        }
+        if (vendor != null && VENDOR_QWEN.equals(trimText(vendor.getVendorCode()))) {
+            return "https://dashscope.aliyuncs.com/compatible-mode";
+        }
+        throw new TaskException("请先配置厂商 Base URL", TaskException.Code.UNKNOWN);
+    }
+
+    private void performVendorValidation(ModelVendor vendor, String baseUrl, String apiKey) throws TaskException {
+        String normalizedBaseUrl = normalizeValidationBaseUrl(vendor == null ? "" : vendor.getVendorCode(), baseUrl);
+        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory();
+        requestFactory.setReadTimeout(Duration.ofSeconds(10));
+        RestClient.Builder builder = RestClient.builder()
+                .baseUrl(normalizedBaseUrl)
+                .requestFactory(requestFactory);
+        if (StringUtils.hasText(apiKey)) {
+            builder.defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey);
+        }
+        RestClient restClient = builder.build();
+        try {
+            restClient.get().uri("/v1/models").retrieve().body(Object.class);
+        } catch (RestClientResponseException ex) {
+            throw new TaskException(
+                    "API Key 校验失败：HTTP " + ex.getStatusCode().value() + "，"
+                            + shorten(ex.getResponseBodyAsString(), 200),
+                    TaskException.Code.UNKNOWN,
+                    ex);
+        } catch (Exception ex) {
+            throw new TaskException(
+                    "API Key 校验失败：" + shorten(ex.getMessage(), 160),
+                    TaskException.Code.UNKNOWN,
+                    ex);
+        }
+    }
+
+    private String normalizeValidationBaseUrl(String vendorCode, String baseUrl) {
+        String normalized = trimText(baseUrl).replaceAll("/+$", "");
+        if (VENDOR_VLLM.equals(trimText(vendorCode)) && normalized.endsWith("/v1")) {
+            return normalized.substring(0, normalized.length() - 3);
+        }
+        return normalized;
+    }
+
+    private String shorten(String value, int maxLength) {
+        String text = trimText(value);
+        if (!StringUtils.hasText(text) || maxLength <= 0 || text.length() <= maxLength) {
+            return text;
+        }
+        return text.substring(0, maxLength) + "...";
+    }
+
+    private String normalizeCode(String value, String message) throws TaskException {
+        String normalized = requireText(value, message);
+        if (!CODE_PATTERN.matcher(normalized).matches()) {
+            throw new TaskException("编码仅支持字母、数字、点、下划线和中划线", TaskException.Code.UNKNOWN);
+        }
+        return normalized;
+    }
+
     private String requireText(String value, String message) throws TaskException {
         if (!StringUtils.hasText(value)) {
             throw new TaskException(message, TaskException.Code.UNKNOWN);
@@ -533,8 +698,40 @@ public class ModelLibraryService {
         return value.trim();
     }
 
+    private String normalizeStatus(String status) {
+        String normalized = StringUtils.hasText(status) ? status.trim().toUpperCase(Locale.ROOT) : STATUS_ACTIVE;
+        return SUPPORTED_STATUSES.contains(normalized) ? normalized : STATUS_ACTIVE;
+    }
+
     private String trimText(String value) {
         return StringUtils.hasText(value) ? value.trim() : "";
+    }
+
+    private String firstNonBlank(String first, String second) {
+        if (StringUtils.hasText(first)) {
+            return first.trim();
+        }
+        return trimText(second);
+    }
+
+    private int vendorOrder(String vendorCode) {
+        if (VENDOR_QWEN.equals(vendorCode)) {
+            return 0;
+        }
+        if (VENDOR_VLLM.equals(vendorCode)) {
+            return 1;
+        }
+        return 9;
+    }
+
+    private String vendorMode(String vendorCode) {
+        return VENDOR_QWEN.equals(vendorCode) ? "PREDEFINED" : "CUSTOMIZABLE";
+    }
+
+    private String slugify(String value) {
+        String normalized = trimText(value).toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9._-]+", "-");
+        normalized = normalized.replaceAll("^-+", "").replaceAll("-+$", "");
+        return StringUtils.hasText(normalized) ? normalized : "model";
     }
 
     public record VendorView(
@@ -544,14 +741,15 @@ public class ModelLibraryService {
             String description,
             String status,
             Integer modelCount,
+            String defaultBaseUrl,
+            Boolean apiKeyConfigured,
+            String mode,
             java.util.Date createdAt,
             java.util.Date updatedAt) {}
 
-    public record UpsertVendorRequest(
-            String vendorCode,
-            String vendorName,
-            String description,
-            String status) {}
+    public record VendorValidationView(Long id, String vendorCode, String baseUrl, String message) {}
+
+    public record UpsertVendorRequest(String defaultBaseUrl, String apiKey, String status) {}
 
     public record ModelView(
             Long id,
@@ -559,12 +757,17 @@ public class ModelLibraryService {
             String displayName,
             String capabilityType,
             Long vendorId,
+            String vendorCode,
             String vendorName,
-            String adapterType,
-            String protocol,
             String baseUrl,
-            String path,
+            String effectiveBaseUrl,
+            Boolean baseUrlInherited,
             String modelName,
+            String status,
+            Boolean apiKeyConfigured,
+            Boolean apiKeyInherited,
+            String path,
+            String protocol,
             Double temperature,
             Integer maxTokens,
             String systemPrompt,
@@ -572,10 +775,8 @@ public class ModelLibraryService {
             Integer dimensions,
             Integer timeoutMs,
             Boolean fallbackRrf,
-            String extraConfigJson,
-            String status,
-            Boolean apiKeyConfigured,
             Boolean defaultModel,
+            Boolean builtin,
             java.util.Date createdAt,
             java.util.Date updatedAt) {}
 
@@ -584,21 +785,19 @@ public class ModelLibraryService {
             String displayName,
             String capabilityType,
             Long vendorId,
-            String adapterType,
-            String protocol,
             String baseUrl,
             String apiKey,
-            String path,
             String modelName,
+            String status,
+            String protocol,
+            String path,
             Double temperature,
             Integer maxTokens,
             String systemPrompt,
             Boolean enableThinking,
             Integer dimensions,
             Integer timeoutMs,
-            Boolean fallbackRrf,
-            String extraConfigJson,
-            String status) {}
+            Boolean fallbackRrf) {}
 
     public record DefaultBindingRequest(Long modelId) {}
 
@@ -608,14 +807,9 @@ public class ModelLibraryService {
             String modelDisplayName,
             Long vendorId,
             String vendorName,
-            String adapterType,
             String modelStatus) {}
 
-    private record NormalizedVendor(
-            String vendorCode,
-            String vendorName,
-            String description,
-            String status) {}
+    private record NormalizedVendor(String defaultBaseUrl, String defaultApiKey, String status) {}
 
     private record NormalizedModel(
             String modelCode,
@@ -635,6 +829,5 @@ public class ModelLibraryService {
             Integer dimensions,
             Integer timeoutMs,
             Boolean fallbackRrf,
-            String extraConfigJson,
             String status) {}
 }

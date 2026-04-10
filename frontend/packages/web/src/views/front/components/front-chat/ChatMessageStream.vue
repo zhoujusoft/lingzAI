@@ -1,7 +1,7 @@
 <template>
     <div ref="chatWindow" class="custom-scrollbar flex-1 space-y-8 overflow-y-auto p-6">
         <div class="space-y-8">
-            <div v-if="messages.length === 0" class="mx-auto max-w-3xl py-12 text-center">
+            <div v-if="visibleMessages.length === 0" class="mx-auto max-w-3xl py-12 text-center">
                 <div
                     class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-100 text-primary shadow-sm"
                 >
@@ -11,10 +11,10 @@
                 <p class="mt-2 text-slate-500">{{ emptyDescription }}</p>
             </div>
             <div
-                v-for="(message, index) in messages"
+                v-for="(message, index) in visibleMessages"
                 :key="index"
                 :class="[
-                    'mx-auto flex w-full max-w-4xl gap-3',
+                    'mx-auto flex w-full max-w-4xl min-w-0 gap-3',
                     message.kind === 'user' ? 'justify-end' : 'justify-start',
                 ]"
             >
@@ -25,7 +25,11 @@
                     <span class="material-symbols-outlined text-lg">psychology</span>
                 </div>
                 <div
-                    :class="['flex max-w-[85%] flex-col gap-2', message.kind === 'user' ? 'items-end' : 'items-start']"
+                    :class="[
+                        'flex min-w-0 flex-col gap-2',
+                        resolveMessageContentWidthClass(message),
+                        message.kind === 'user' ? 'items-end' : 'items-start',
+                    ]"
                 >
                     <template v-if="message.kind === 'user'">
                         <div
@@ -47,13 +51,16 @@
                                 <span class="material-symbols-outlined ml-4 text-slate-300">visibility</span>
                             </div>
                         </div>
-                        <div class="rounded-2xl rounded-tr-none bg-primary p-4 text-sm text-white shadow-md">
+                        <div class="max-w-full break-words rounded-2xl rounded-tr-none bg-primary p-4 text-sm text-white shadow-md">
                             {{ message.text }}
                         </div>
                     </template>
                     <div
                         v-else-if="message.kind === 'assistant'"
-                        class="space-y-4 rounded-2xl rounded-tl-none border border-slate-200 bg-slate-50 p-5 text-sm text-slate-800 shadow-sm"
+                        :class="[
+                            'min-w-0 space-y-4 rounded-2xl rounded-tl-none border border-slate-200 bg-slate-50 p-5 text-sm text-slate-800 shadow-sm',
+                            hasFrontendRenderSegment(message) ? 'inline-block w-auto max-w-full' : 'w-full',
+                        ]"
                     >
                         <div v-if="message.segments && message.segments.length" class="grid gap-2">
                             <template
@@ -61,8 +68,17 @@
                                 :key="segment.key || segIndex"
                             >
                                 <div
-                                    v-if="segment.type === 'tool'"
-                                    class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
+                                    v-if="segment.type === 'tool' && segment.renderPayload"
+                                    class="w-full min-w-0"
+                                >
+                                    <ChatFrontendRenderBlock
+                                        :payload="segment.renderPayload"
+                                        @action="$emit('frontend-render-action', $event)"
+                                    />
+                                </div>
+                                <div
+                                    v-else-if="segment.type === 'tool'"
+                                    class="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
                                 >
                                     <button
                                         type="button"
@@ -70,8 +86,10 @@
                                         @click="$emit('toggle-segment', segment)"
                                     >
                                         <div class="flex items-center gap-2 text-xs font-semibold text-primary">
-                                            <span class="material-symbols-outlined text-base">terminal</span>
-                                            <span>工具调用</span>
+                                            <span class="material-symbols-outlined text-base">
+                                                {{ segment.renderPayload ? 'view_quilt' : 'terminal' }}
+                                            </span>
+                                            <span>{{ segment.renderPayload ? '前端渲染' : '工具调用' }}</span>
                                             <span class="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600">
                                                 {{ segment.displayName || segment.name || 'unknown' }}
                                             </span>
@@ -81,7 +99,7 @@
                                         </span>
                                     </button>
                                     <div v-if="segment.open" class="grid gap-2 p-2.5">
-                                        <div class="overflow-hidden rounded-lg border border-slate-200">
+                                        <div class="min-w-0 overflow-hidden rounded-lg border border-slate-200">
                                             <div
                                                 class="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400"
                                             >
@@ -91,21 +109,21 @@
                                                     <span class="material-symbols-outlined text-sm">content_copy</span>
                                                 </div>
                                             </div>
-                                            <div class="p-2.5">
-                                                <pre class="whitespace-pre-wrap break-words text-xs text-slate-600">{{ formatBlock(segment.inputText) }}</pre>
+                                            <div class="min-w-0 overflow-x-auto p-2.5">
+                                                <pre class="w-full min-w-0 whitespace-pre-wrap break-words text-xs text-slate-600">{{ formatBlock(segment.inputText) }}</pre>
                                             </div>
                                         </div>
-                                        <div class="overflow-hidden rounded-lg border border-slate-200">
+                                        <div class="min-w-0 overflow-hidden rounded-lg border border-slate-200">
                                             <div
                                                 class="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400"
                                             >
                                                 <span>输出</span>
                                                 <span class="material-symbols-outlined text-sm">content_copy</span>
                                             </div>
-                                            <div class="p-2.5">
+                                            <div class="min-w-0 overflow-x-auto p-2.5">
                                                 <pre
                                                     v-if="segment.response"
-                                                    class="whitespace-pre-wrap break-words text-xs text-slate-600"
+                                                    class="w-full min-w-0 whitespace-pre-wrap break-words text-xs text-slate-600"
                                                 >{{ formatBlock(segment.response) }}</pre>
                                                 <div
                                                     v-else
@@ -120,7 +138,7 @@
                                 </div>
                                 <div
                                     v-else-if="segment.type === 'html'"
-                                    class="cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-white"
+                                    class="min-w-0 cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-white"
                                     @click="$emit('open-html-preview', segment)"
                                 >
                                     <div class="flex items-center justify-between bg-slate-50 px-3 py-2">
@@ -131,14 +149,14 @@
                                         <span class="text-xs text-slate-400">点击预览</span>
                                     </div>
                                     <div class="p-2.5">
-                                        <div class="overflow-hidden rounded-lg border border-slate-200">
+                                        <div class="min-w-0 overflow-hidden rounded-lg border border-slate-200">
                                             <div
                                                 class="border-b border-slate-100 bg-slate-50 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400"
                                             >
                                                 HTML
                                             </div>
-                                            <div class="p-2.5">
-                                                <pre class="whitespace-pre-wrap break-words text-xs text-slate-600">{{ segment.size }}</pre>
+                                            <div class="min-w-0 overflow-x-auto p-2.5">
+                                                <pre class="w-full min-w-0 whitespace-pre-wrap break-words text-xs text-slate-600">{{ segment.size }}</pre>
                                             </div>
                                         </div>
                                     </div>
@@ -192,6 +210,7 @@
 
 <script>
 import { marked } from 'marked';
+import ChatFrontendRenderBlock from './ChatFrontendRenderBlock.vue';
 
 marked.setOptions({
     breaks: true,
@@ -200,7 +219,10 @@ marked.setOptions({
 
 export default {
     name: 'ChatMessageStream',
-    emits: ['toggle-segment', 'open-html-preview', 'open-citation'],
+    components: {
+        ChatFrontendRenderBlock,
+    },
+    emits: ['toggle-segment', 'open-html-preview', 'open-citation', 'frontend-render-action'],
     props: {
         messages: {
             type: Array,
@@ -228,23 +250,34 @@ export default {
         },
     },
     methods: {
+        isVisibleMessage(message) {
+            const messageType = String(message?.messageType || 'normal').trim().toLowerCase();
+            return messageType !== 'event';
+        },
+        hasFrontendRenderSegment(message) {
+            if (!message || !Array.isArray(message.segments)) {
+                return false;
+            }
+            return message.segments.some(
+                segment => segment?.type === 'tool' && Boolean(segment?.renderPayload)
+            );
+        },
+        resolveMessageContentWidthClass(message) {
+            if (message?.kind === 'user') {
+                return 'max-w-[85%]';
+            }
+            if (this.hasFrontendRenderSegment(message)) {
+                return 'max-w-full';
+            }
+            return 'max-w-[85%]';
+        },
         renderMarkdown(text) {
             return marked.parse(text || '');
         },
         renderMarkdownWithCitations(text, message) {
-            const source = String(text || '');
             const citationMap = this.buildCitationMap(message);
-            const decorated = source.replace(/\[(\d+)\]/g, (matched, refText) => {
-                const key = String(refText || '').trim();
-                if (!key) {
-                    return matched;
-                }
-                if (!citationMap.has(key)) {
-                    return `<span class="mx-0.5 inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-400">[${key}]</span>`;
-                }
-                return `<button type="button" data-citation-ref="${key}" class="mx-0.5 inline-flex cursor-pointer items-center rounded-full border border-emerald-300 bg-emerald-100 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-700 transition hover:bg-emerald-200">[${key}]</button>`;
-            });
-            return this.renderMarkdown(decorated);
+            const rendered = this.renderMarkdown(String(text || ''));
+            return this.decorateRenderedHtml(rendered, citationMap);
         },
         buildCitationMap(message) {
             const map = new Map();
@@ -262,6 +295,79 @@ export default {
                 map.set(key, segment);
             });
             return map;
+        },
+        decorateRenderedHtml(renderedHtml, citationMap) {
+            if (!renderedHtml || !(citationMap instanceof Map) || citationMap.size === 0) {
+                return renderedHtml;
+            }
+            if (typeof window === 'undefined' || typeof DOMParser === 'undefined') {
+                return renderedHtml;
+            }
+            const parser = new DOMParser();
+            const documentNode = parser.parseFromString(`<div>${renderedHtml}</div>`, 'text/html');
+            const root = documentNode.body.firstElementChild;
+            if (!root) {
+                return renderedHtml;
+            }
+            const nodeFilter = window.NodeFilter || NodeFilter;
+            const walker = documentNode.createTreeWalker(root, nodeFilter.SHOW_TEXT);
+            const textNodes = [];
+            let current = walker.nextNode();
+            while (current) {
+                if (this.shouldDecorateCitationText(current.parentElement)) {
+                    textNodes.push(current);
+                }
+                current = walker.nextNode();
+            }
+            textNodes.forEach(node => {
+                const content = node.textContent || '';
+                if (!/\[(\d+)\]/.test(content)) {
+                    return;
+                }
+                const fragment = documentNode.createDocumentFragment();
+                let lastIndex = 0;
+                content.replace(/\[(\d+)\]/g, (matched, refText, offset) => {
+                    if (offset > lastIndex) {
+                        fragment.appendChild(
+                            documentNode.createTextNode(content.slice(lastIndex, offset))
+                        );
+                    }
+                    fragment.appendChild(this.createCitationNode(documentNode, refText, citationMap));
+                    lastIndex = offset + matched.length;
+                    return matched;
+                });
+                if (lastIndex < content.length) {
+                    fragment.appendChild(documentNode.createTextNode(content.slice(lastIndex)));
+                }
+                node.parentNode?.replaceChild(fragment, node);
+            });
+            return root.innerHTML;
+        },
+        shouldDecorateCitationText(element) {
+            if (!element || typeof element.closest !== 'function') {
+                return false;
+            }
+            return !element.closest('pre, code, a, button');
+        },
+        createCitationNode(documentNode, refText, citationMap) {
+            const key = String(refText || '').trim();
+            if (!key) {
+                return documentNode.createTextNode('');
+            }
+            if (!citationMap.has(key)) {
+                const badge = documentNode.createElement('span');
+                badge.className =
+                    'mx-0.5 inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-400';
+                badge.textContent = `[${key}]`;
+                return badge;
+            }
+            const button = documentNode.createElement('button');
+            button.type = 'button';
+            button.setAttribute('data-citation-ref', key);
+            button.className =
+                'mx-0.5 inline-flex cursor-pointer items-center rounded-full border border-emerald-300 bg-emerald-100 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-700 transition hover:bg-emerald-200';
+            button.textContent = `[${key}]`;
+            return button;
         },
         handleMarkdownClick(event, message) {
             const target = event?.target?.closest?.('[data-citation-ref]');
@@ -306,6 +412,13 @@ export default {
             });
         },
     },
+    computed: {
+        visibleMessages() {
+            return Array.isArray(this.messages)
+                ? this.messages.filter(message => this.isVisibleMessage(message))
+                : [];
+        },
+    },
     watch: {
         scrollToken() {
             this.scrollChatToBottom(true);
@@ -319,6 +432,9 @@ export default {
 
 <style scoped>
 .chat-markdown {
+    max-width: 100%;
+    min-width: 0;
+    overflow: hidden;
     color: #1f2937;
     line-height: 1.75;
     word-break: break-word;
@@ -410,6 +526,7 @@ export default {
 
 .chat-markdown :deep(pre) {
     margin-top: 0.9rem;
+    max-width: 100%;
     overflow-x: auto;
     border: 1px solid #dbe3f0;
     background: #0f172a;
@@ -419,6 +536,7 @@ export default {
 }
 
 .chat-markdown :deep(pre code) {
+    white-space: pre;
     border: 0;
     background: transparent;
     color: inherit;
@@ -427,9 +545,12 @@ export default {
 }
 
 .chat-markdown :deep(table) {
-    width: 100%;
+    display: block;
+    max-width: 100%;
+    width: max-content;
     margin-top: 0.9rem;
     border-collapse: collapse;
+    overflow-x: auto;
     overflow: hidden;
     border-radius: 0.9rem;
     border: 1px solid #dbe3f0;

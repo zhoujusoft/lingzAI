@@ -19,6 +19,7 @@ function normalizeCount(value) {
 export class KnowledgeBean {
     constructor(source = {}) {
         this.id = null;
+        this.kbCode = null;
         this.name = null;
         this.description = null;
         this.docCount = null;
@@ -38,6 +39,7 @@ export class KnowledgeBean {
 
     assign(source = {}) {
         this.id = normalizeNullableNumber(source.id ?? source.kbId);
+        this.kbCode = normalizeNullableString(source.kbCode);
         this.name = normalizeNullableString(source.name ?? source.kbName);
         this.description = normalizeNullableString(source.description);
         this.docCount = normalizeCount(source.docCount);
@@ -61,6 +63,7 @@ export class KnowledgeBean {
     toApiObject() {
         return {
             id: this.id,
+            kbCode: this.kbCode,
             name: this.name,
             description: this.description,
             docCount: this.docCount,

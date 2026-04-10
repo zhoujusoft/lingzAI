@@ -19,6 +19,8 @@ public class KnowledgeBase  {
     @TableId(value = "kb_id", type = IdType.AUTO)
     private Long kbId;
 
+    private String kbCode;
+
     private String kbName;
 
     private String description;
@@ -59,6 +61,14 @@ public class KnowledgeBase  {
 
     public void setKbId(Long kbId) {
         this.kbId = kbId;
+    }
+
+    public String getKbCode() {
+        return kbCode;
+    }
+
+    public void setKbCode(String kbCode) {
+        this.kbCode = kbCode;
     }
 
     public String getKbName() {

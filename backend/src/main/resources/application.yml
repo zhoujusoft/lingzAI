@@ -4,8 +4,6 @@ server:
     context-path: /api
 
 spring:
-  profiles:
-    active: qwen
   devtools:
     restart:
       enabled: true
@@ -92,9 +90,27 @@ minio:
 
 app:
   chat:
-    # 默认走 qwen；若显式设置 APP_CHAT_PROVIDER 或在 profile 中覆盖，则以显式配置为准。
-    # 可选值：vllm | qwen-online
-    provider: ${APP_CHAT_PROVIDER:qwen-online}
+    general-system-prompt: |
+      你是 lingzhou智能助手。
+
+      角色与能力：
+      - 你是面向用户的普通 AI 聊天助手
+      - 你的核心能力是直接调用大模型，完成通用问答、内容生成、总结归纳、解释说明与日常分析
+      - 不要把自己描述为技能编排助手、工具代理或工作流引擎，除非用户明确进入对应场景
+
+      回答要求：
+      - 默认使用中文回答，必要时可保留英文技术术语、代码、命令、路径和接口字段名
+      - 回答应直接、自然、清晰，优先给出结论，再补充必要说明
+      - 对不确定的信息要明确说明，不要编造事实、结果或外部数据
+      - 如果用户表达不完整，仅在确实影响回答时再提出简短澄清问题
+
+      Markdown 输出规范：
+      - 默认使用清晰、克制、可读的 Markdown
+      - 只在有助于阅读时使用标题、列表、表格，不要滥用层级
+      - 代码、命令、路径、环境变量、接口字段、配置键请使用反引号包裹
+      - 多行代码、SQL、JSON、YAML、Shell 命令请使用 fenced code block，并尽量带上语言标记
+      - 列表格式保持统一，避免混用不同风格的列表符号
+      - 不要输出破损的 Markdown，例如未闭合的代码块、未配对的强调符号、层级混乱的列表
     system-prompt: |
       你是一个可调用工具、可使用技能完成任务的中文 AI 助手。
 
@@ -134,7 +150,7 @@ app:
       # Message window size per session
       max-messages: 50
   embedding:
-    dimensions: 1024
+    dimensions: ${APP_EMBEDDING_DIMENSIONS:1024}
   skills:
     root-dir: ./skills
     package:
@@ -174,3 +190,29 @@ app:
     request-expire-seconds: 300
     nonce-expire-seconds: 300
     allowed-source-systems: oa
+
+model:
+  qwen:
+    chat:
+      temperature: ${MODEL_QWEN_CHAT_TEMPERATURE:}
+      max-tokens: ${MODEL_QWEN_CHAT_MAX_TOKENS:}
+      system-prompt: ${MODEL_QWEN_CHAT_SYSTEM_PROMPT:}
+      enable-thinking: ${MODEL_QWEN_CHAT_ENABLE_THINKING:false}
+    embedding:
+      dimensions: ${MODEL_QWEN_EMBEDDING_DIMENSIONS:${APP_EMBEDDING_DIMENSIONS:1024}}
+    rerank:
+      protocol: ${MODEL_QWEN_RERANK_PROTOCOL:dashscope}
+      timeout-ms: ${MODEL_QWEN_RERANK_TIMEOUT_MS:${APP_RAG_RERANK_TIMEOUT_MS:1200}}
+      fallback-rrf: ${MODEL_QWEN_RERANK_FALLBACK_RRF:${APP_RAG_RERANK_FALLBACK_RRF:true}}
+  vllm:
+    chat:
+      temperature: ${MODEL_VLLM_CHAT_TEMPERATURE:${CHAT_TEMPERATURE:0.7}}
+      max-tokens: ${MODEL_VLLM_CHAT_MAX_TOKENS:${CHAT_MAX_TOKENS:20000}}
+      system-prompt: ${MODEL_VLLM_CHAT_SYSTEM_PROMPT:}
+      enable-thinking: ${MODEL_VLLM_CHAT_ENABLE_THINKING:false}
+    embedding:
+      dimensions: ${MODEL_VLLM_EMBEDDING_DIMENSIONS:0}
+    rerank:
+      protocol: ${MODEL_VLLM_RERANK_PROTOCOL:vllm}
+      timeout-ms: ${MODEL_VLLM_RERANK_TIMEOUT_MS:${APP_RAG_RERANK_TIMEOUT_MS:1200}}
+      fallback-rrf: ${MODEL_VLLM_RERANK_FALLBACK_RRF:${APP_RAG_RERANK_FALLBACK_RRF:true}}

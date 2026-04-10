@@ -3,6 +3,8 @@ CREATE TABLE IF NOT EXISTS `model_vendor` (
   `vendor_code` varchar(64) NOT NULL COMMENT '模型厂商编码',
   `vendor_name` varchar(128) NOT NULL COMMENT '模型厂商名称',
   `description` varchar(500) DEFAULT NULL COMMENT '厂商描述',
+  `default_base_url` varchar(500) DEFAULT NULL COMMENT '厂商默认 Base URL',
+  `default_api_key` varchar(500) DEFAULT NULL COMMENT '厂商默认 API Key',
   `status` varchar(32) NOT NULL DEFAULT 'ACTIVE' COMMENT '状态：ACTIVE/DRAFT',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -49,3 +51,43 @@ CREATE TABLE IF NOT EXISTS `model_default_binding` (
   UNIQUE KEY `uk_model_default_binding_capability` (`capability_type`),
   KEY `idx_model_default_binding_model` (`model_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='默认模型绑定';
+
+ALTER TABLE `model_vendor`
+  ADD COLUMN IF NOT EXISTS `default_base_url` varchar(500) DEFAULT NULL COMMENT '厂商默认 Base URL' AFTER `description`,
+  ADD COLUMN IF NOT EXISTS `default_api_key` varchar(500) DEFAULT NULL COMMENT '厂商默认 API Key' AFTER `default_base_url`;
+
+INSERT INTO `model_vendor` (`vendor_code`, `vendor_name`, `description`, `default_base_url`, `default_api_key`, `status`)
+SELECT 'QWEN_ONLINE', '通义千问', '预置模型模式，默认只需要配置厂商级 API Key 即可使用。', 'https://dashscope.aliyuncs.com/compatible-mode', '', 'ACTIVE'
+WHERE NOT EXISTS (
+  SELECT 1 FROM `model_vendor` WHERE `vendor_code` = 'QWEN_ONLINE'
+);
+
+INSERT INTO `model_vendor` (`vendor_code`, `vendor_name`, `description`, `default_base_url`, `default_api_key`, `status`)
+SELECT 'VLLM', 'vLLM', '自定义模型模式，适合离线部署与私有模型服务。', '', '', 'ACTIVE'
+WHERE NOT EXISTS (
+  SELECT 1 FROM `model_vendor` WHERE `vendor_code` = 'VLLM'
+);
+
+INSERT INTO `model_definition` (`model_code`, `display_name`, `capability_type`, `vendor_id`, `adapter_type`, `protocol`, `base_url`, `api_key`, `path`, `model_name`, `enable_thinking`, `status`)
+SELECT 'qwen-chat-default', '通义对话模型', 'CHAT', vendor.`id`, 'QWEN_ONLINE', '', '', '', '/v1/chat/completions', 'qwen3-max', 0, 'ACTIVE'
+FROM `model_vendor` vendor
+WHERE vendor.`vendor_code` = 'QWEN_ONLINE'
+  AND NOT EXISTS (
+    SELECT 1 FROM `model_definition` WHERE `model_code` = 'qwen-chat-default'
+  );
+
+INSERT INTO `model_definition` (`model_code`, `display_name`, `capability_type`, `vendor_id`, `adapter_type`, `protocol`, `base_url`, `api_key`, `path`, `model_name`, `status`)
+SELECT 'qwen-embedding-default', '通义向量模型', 'EMBEDDING', vendor.`id`, 'QWEN_ONLINE', '', '', '', '/v1/embeddings', 'text-embedding-v4', 'ACTIVE'
+FROM `model_vendor` vendor
+WHERE vendor.`vendor_code` = 'QWEN_ONLINE'
+  AND NOT EXISTS (
+    SELECT 1 FROM `model_definition` WHERE `model_code` = 'qwen-embedding-default'
+  );
+
+INSERT INTO `model_definition` (`model_code`, `display_name`, `capability_type`, `vendor_id`, `adapter_type`, `protocol`, `base_url`, `api_key`, `path`, `model_name`, `status`)
+SELECT 'qwen-rerank-default', '通义 Rerank 模型', 'RERANK', vendor.`id`, 'QWEN_ONLINE', 'dashscope', 'https://dashscope.aliyuncs.com', '', '/api/v1/services/rerank/text-rerank/text-rerank', 'gte-rerank-v2', 'ACTIVE'
+FROM `model_vendor` vendor
+WHERE vendor.`vendor_code` = 'QWEN_ONLINE'
+  AND NOT EXISTS (
+    SELECT 1 FROM `model_definition` WHERE `model_code` = 'qwen-rerank-default'
+  );

@@ -130,13 +130,11 @@ sudo systemctl daemon-reload && \
 
 ## 必填配置
 
-启动前至少需要填写这些变量：
+启动前请按实际厂商需求填写 `.env` / `release.env` 中的模型参数。
+当前配置口径为：
 
-- `APP_CHAT_QWEN_ONLINE_API_KEY`
-- `APP_EMBEDDING_API_KEY`
-- `APP_RAG_RERANK_API_KEY`
-
-若三者使用同一个 DashScope Key，也可以填成同一个值。
+- 模型表维护：`baseUrl`、`path`、`modelName`
+- 配置文件维护：`model.qwen.*`、`model.vllm.*` 对应的运行参数
 
 ## 快速开始
 
@@ -182,5 +180,5 @@ docker compose --env-file .env -f docker-compose.yml down
 
 ## 说明
 
-- Quick 部署默认使用 `qwen` profile。
+- Quick 部署已改为统一配置入口，不再通过 `qwen` / `vllm` profile 切换模型配置。
 - `frontend` 与 `backend` 都直接从镜像仓库拉取，不在当前 compose 中本地构建。

@@ -35,14 +35,16 @@ public class KnowledgeBasePublishService {
 
     public PublishStatusView getPublishStatus(Long kbId) throws TaskException {
         KnowledgeBase knowledgeBase = requireKnowledgeBase(kbId);
+        String kbCode = requireKbCode(knowledgeBase);
         KnowledgeBasePublishBinding binding = publishBindingMapper.selectByKbId(kbId);
-        List<PublishedToolView> tools = toPublishedToolViews(knowledgeBaseToolPublishService.loadPublishedTools(kbId));
+        List<PublishedToolView> tools = toPublishedToolViews(knowledgeBaseToolPublishService.loadPublishedTools(kbCode));
         return toStatusView(knowledgeBase, binding, tools);
     }
 
     @Transactional(rollbackFor = Exception.class)
     public PublishStatusView publish(Long kbId) throws TaskException {
         KnowledgeBase knowledgeBase = requireKnowledgeBase(kbId);
+        requireKbCode(knowledgeBase);
         List<String> toolNames = knowledgeBaseToolPublishService.publish(knowledgeBase);
         Date now = new Date();
 
@@ -70,6 +72,7 @@ public class KnowledgeBasePublishService {
     @Transactional(rollbackFor = Exception.class)
     public PublishStatusView disable(Long kbId) throws TaskException {
         KnowledgeBase knowledgeBase = requireKnowledgeBase(kbId);
+        String kbCode = requireKbCode(knowledgeBase);
         KnowledgeBasePublishBinding binding = publishBindingMapper.selectByKbId(kbId);
         Date now = new Date();
         if (binding == null) {
@@ -85,7 +88,7 @@ public class KnowledgeBasePublishService {
         } else {
             publishBindingMapper.updateById(binding);
         }
-        knowledgeBaseToolPublishService.disable(kbId);
+        knowledgeBaseToolPublishService.disable(kbCode);
         return toStatusView(knowledgeBase, binding, List.of());
     }
 
@@ -114,6 +117,13 @@ public class KnowledgeBasePublishService {
             throw new TaskException("知识库不存在：" + kbId, TaskException.Code.UNKNOWN);
         }
         return knowledgeBase;
+    }
+
+    private String requireKbCode(KnowledgeBase knowledgeBase) throws TaskException {
+        if (knowledgeBase == null || !StringUtils.hasText(knowledgeBase.getKbCode())) {
+            throw new TaskException("知识库编码缺失，请先执行数据库增量脚本后重试", TaskException.Code.UNKNOWN);
+        }
+        return knowledgeBase.getKbCode().trim();
     }
 
     private String normalizeText(String value) {

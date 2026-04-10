@@ -32,6 +32,10 @@ function normalizeDatasetId(value) {
     return null;
 }
 
+function isPublishedDataset(item) {
+    return String(item?.publishStatus || '').trim().toUpperCase() === 'PUBLISHED';
+}
+
 async function loadDatasetIds(onUnauthorized) {
     const now = Date.now();
     if (cachedDatasetIds && now - cachedDatasetAt < 30_000) {
@@ -41,6 +45,9 @@ async function loadDatasetIds(onUnauthorized) {
     const dedup = new Set();
     const ids = [];
     (Array.isArray(records) ? records : []).forEach(item => {
+        if (!isPublishedDataset(item)) {
+            return;
+        }
         const id = normalizeDatasetId(item?.id);
         if (id != null && !dedup.has(id)) {
             dedup.add(id);

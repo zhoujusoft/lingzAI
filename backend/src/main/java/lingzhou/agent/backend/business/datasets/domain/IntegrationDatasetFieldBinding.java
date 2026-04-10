@@ -16,6 +16,8 @@ public class IntegrationDatasetFieldBinding {
 
     private String objectCode;
 
+    private String formCode;
+
     private String fieldName;
 
     private String fieldAlias;
@@ -62,6 +64,14 @@ public class IntegrationDatasetFieldBinding {
 
     public void setObjectCode(String objectCode) {
         this.objectCode = objectCode;
+    }
+
+    public String getFormCode() {
+        return formCode;
+    }
+
+    public void setFormCode(String formCode) {
+        this.formCode = formCode;
     }
 
     public String getFieldName() {

@@ -1,6 +1,9 @@
 package lingzhou.agent.backend.capability.api.registry;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import lingzhou.agent.backend.capability.api.client.LowcodePlatformClient;
 import lingzhou.agent.backend.business.skill.domain.LowcodeApiCatalog;
@@ -18,27 +21,23 @@ import org.springframework.util.StringUtils;
 @Service
 public class LowcodeToolRegistryService {
 
-    private static final String GENERIC_OBJECT_SCHEMA = """
-            {
-              "type": "object",
-              "additionalProperties": true
-            }
-            """;
-
     private final LowcodeApiCatalogService lowcodeApiCatalogService;
     private final LowcodePlatformConfigService lowcodePlatformConfigService;
     private final LowcodeTokenService lowcodeTokenService;
     private final LowcodePlatformClient lowcodePlatformClient;
+    private final ObjectMapper objectMapper;
 
     public LowcodeToolRegistryService(
             LowcodeApiCatalogService lowcodeApiCatalogService,
             LowcodePlatformConfigService lowcodePlatformConfigService,
             LowcodeTokenService lowcodeTokenService,
-            LowcodePlatformClient lowcodePlatformClient) {
+            LowcodePlatformClient lowcodePlatformClient,
+            ObjectMapper objectMapper) {
         this.lowcodeApiCatalogService = lowcodeApiCatalogService;
         this.lowcodePlatformConfigService = lowcodePlatformConfigService;
         this.lowcodeTokenService = lowcodeTokenService;
         this.lowcodePlatformClient = lowcodePlatformClient;
+        this.objectMapper = objectMapper;
     }
 
     public ToolCallback findByName(String toolName) {
@@ -53,23 +52,46 @@ public class LowcodeToolRegistryService {
     }
 
     private String buildDescription(LowcodeApiCatalog catalog) {
+        LowcodeApiSchemaResolver.ResolvedSchema resolved =
+                LowcodeApiSchemaResolver.resolve(catalog.getRemoteSchemaJson(), objectMapper);
         StringBuilder builder = new StringBuilder();
         builder.append(StringUtils.hasText(catalog.getApiName()) ? catalog.getApiName().trim() : catalog.getToolName());
         if (StringUtils.hasText(catalog.getDescription())) {
             builder.append("。").append(catalog.getDescription().trim());
         }
-        builder.append("。调用低代码平台 API，入参会原样透传为 JSON。");
+        builder.append("。调用低代码平台 API。");
+        if (!resolved.fields().isEmpty()) {
+            List<String> fields = new ArrayList<>();
+            for (LowcodeApiSchemaResolver.FieldDefinition field : resolved.fields()) {
+                StringBuilder fieldText = new StringBuilder(field.key());
+                if (StringUtils.hasText(field.label()) && !field.label().equals(field.key())) {
+                    fieldText.append("（").append(field.label()).append("）");
+                }
+                if (field.required()) {
+                    fieldText.append("[必填]");
+                }
+                fields.add(fieldText.toString());
+                if (fields.size() >= 10) {
+                    break;
+                }
+            }
+            builder.append(" 可用入参：").append(String.join("、", fields)).append("。");
+        } else {
+            builder.append(" 入参会原样透传为 JSON。");
+        }
         return builder.toString();
     }
 
     public ToolCallback buildCallback(LowcodeApiCatalog catalog) {
+        LowcodeApiSchemaResolver.ResolvedSchema resolved =
+                LowcodeApiSchemaResolver.resolve(catalog.getRemoteSchemaJson(), objectMapper);
         return FunctionToolCallback.builder(
                         catalog.getToolName(),
                         (Map<String, Object> arguments, org.springframework.ai.chat.model.ToolContext toolContext) ->
                                 executeCatalog(catalog, arguments))
                 .description(buildDescription(catalog))
                 .inputType(new ParameterizedTypeReference<Map<String, Object>>() {})
-                .inputSchema(GENERIC_OBJECT_SCHEMA)
+                .inputSchema(resolved.jsonSchema())
                 .build();
     }
 

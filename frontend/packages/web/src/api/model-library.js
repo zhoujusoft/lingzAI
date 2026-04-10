@@ -29,6 +29,9 @@ function normalizeVendor(item) {
         description: item?.description || '',
         status: item?.status || 'ACTIVE',
         modelCount: Number(item?.modelCount) || 0,
+        defaultBaseUrl: item?.defaultBaseUrl || '',
+        apiKeyConfigured: Boolean(item?.apiKeyConfigured),
+        mode: item?.mode || 'CUSTOMIZABLE',
         createdAt: item?.createdAt || '',
         updatedAt: item?.updatedAt || '',
     };
@@ -41,23 +44,28 @@ function normalizeModel(item) {
         displayName: item?.displayName || '',
         capabilityType: item?.capabilityType || 'CHAT',
         vendorId: Number(item?.vendorId) || null,
+        vendorCode: item?.vendorCode || '',
         vendorName: item?.vendorName || '',
-        adapterType: item?.adapterType || 'QWEN_ONLINE',
-        protocol: item?.protocol || '',
         baseUrl: item?.baseUrl || '',
-        path: item?.path || '',
+        effectiveBaseUrl: item?.effectiveBaseUrl || '',
+        baseUrlInherited: Boolean(item?.baseUrlInherited),
         modelName: item?.modelName || '',
-        temperature: item?.temperature ?? '',
-        maxTokens: item?.maxTokens ?? '',
-        systemPrompt: item?.systemPrompt || '',
-        enableThinking: item?.enableThinking,
-        dimensions: item?.dimensions ?? '',
-        timeoutMs: item?.timeoutMs ?? '',
-        fallbackRrf: item?.fallbackRrf,
-        extraConfigJson: item?.extraConfigJson || '',
         status: item?.status || 'ACTIVE',
         apiKeyConfigured: Boolean(item?.apiKeyConfigured),
+        apiKeyInherited: Boolean(item?.apiKeyInherited),
+        path: item?.path || '',
+        protocol: item?.protocol || '',
+        temperature: typeof item?.temperature === 'number' ? item.temperature : null,
+        maxTokens: Number.isInteger(item?.maxTokens) ? item.maxTokens : null,
+        systemPrompt: item?.systemPrompt || '',
+        enableThinking:
+            typeof item?.enableThinking === 'boolean' ? item.enableThinking : null,
+        dimensions: Number.isInteger(item?.dimensions) ? item.dimensions : null,
+        timeoutMs: Number.isInteger(item?.timeoutMs) ? item.timeoutMs : null,
+        fallbackRrf:
+            typeof item?.fallbackRrf === 'boolean' ? item.fallbackRrf : null,
         defaultModel: Boolean(item?.defaultModel),
+        builtin: Boolean(item?.builtin),
         createdAt: item?.createdAt || '',
         updatedAt: item?.updatedAt || '',
     };
@@ -70,7 +78,6 @@ function normalizeDefaultBinding(item) {
         modelDisplayName: item?.modelDisplayName || '',
         vendorId: item?.vendorId ? Number(item.vendorId) : null,
         vendorName: item?.vendorName || '',
-        adapterType: item?.adapterType || '',
         modelStatus: item?.modelStatus || '',
     };
 }
@@ -81,20 +88,20 @@ export function listModelLibraryVendors(onUnauthorized) {
     );
 }
 
-export function createModelLibraryVendor(payload, onUnauthorized) {
-    return authedJson(
-        '/api/model-library/vendors',
-        { method: 'POST', body: payload },
-        onUnauthorized
-    ).then(normalizeVendor);
-}
-
 export function updateModelLibraryVendor(id, payload, onUnauthorized) {
     return authedJson(
         `/api/model-library/vendors/${id}`,
         { method: 'PUT', body: payload },
         onUnauthorized
     ).then(normalizeVendor);
+}
+
+export function validateModelLibraryVendor(id, payload, onUnauthorized) {
+    return authedJson(
+        `/api/model-library/vendors/${id}/validate`,
+        { method: 'POST', body: payload },
+        onUnauthorized
+    );
 }
 
 export function listModelLibraryModels(params = {}, onUnauthorized) {

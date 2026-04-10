@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.ArrayList;
 import java.util.concurrent.ThreadLocalRandom;
+import lingzhou.agent.backend.capability.tool.publish.DatasetToolPublishService;
 import lingzhou.agent.backend.business.datasets.domain.IntegrationDataset;
 import lingzhou.agent.backend.business.datasets.domain.IntegrationDatasetFieldBinding;
 import lingzhou.agent.backend.business.datasets.domain.IntegrationDatasetObjectBinding;
@@ -25,7 +26,6 @@ import lingzhou.agent.backend.business.datasets.mapper.IntegrationDatasetRelatio
 import lingzhou.agent.backend.business.integration.domain.IntegrationDataSource;
 import lingzhou.agent.backend.business.integration.mapper.IntegrationDataSourceMapper;
 import lingzhou.agent.backend.business.integration.service.lowcode.LowcodeDatasetBrowseService;
-import lingzhou.agent.backend.business.integration.service.support.IntegrationSchemaService;
 import lingzhou.agent.backend.capability.modelruntime.ModelRuntimeClientFactory;
 import lingzhou.agent.backend.common.lzException.TaskException;
 import org.slf4j.Logger;
@@ -46,7 +46,7 @@ public class IntegrationDatasetService {
     private final IntegrationDatasetFieldBindingMapper fieldBindingMapper;
     private final IntegrationDatasetRelationBindingMapper relationBindingMapper;
     private final IntegrationDatasetPublishBindingMapper publishBindingMapper;
-    private final IntegrationSchemaService integrationSchemaService;
+    private final DatasetToolPublishService datasetToolPublishService;
     private final LowcodeDatasetBrowseService lowcodeDatasetBrowseService;
     private final ModelRuntimeClientFactory modelRuntimeClientFactory;
     private final ObjectMapper objectMapper;
@@ -58,7 +58,7 @@ public class IntegrationDatasetService {
             IntegrationDatasetFieldBindingMapper fieldBindingMapper,
             IntegrationDatasetRelationBindingMapper relationBindingMapper,
             IntegrationDatasetPublishBindingMapper publishBindingMapper,
-            IntegrationSchemaService integrationSchemaService,
+            DatasetToolPublishService datasetToolPublishService,
             LowcodeDatasetBrowseService lowcodeDatasetBrowseService,
             ModelRuntimeClientFactory modelRuntimeClientFactory,
             ObjectMapper objectMapper) {
@@ -68,14 +68,13 @@ public class IntegrationDatasetService {
         this.fieldBindingMapper = fieldBindingMapper;
         this.relationBindingMapper = relationBindingMapper;
         this.publishBindingMapper = publishBindingMapper;
-        this.integrationSchemaService = integrationSchemaService;
+        this.datasetToolPublishService = datasetToolPublishService;
         this.lowcodeDatasetBrowseService = lowcodeDatasetBrowseService;
         this.modelRuntimeClientFactory = modelRuntimeClientFactory;
         this.objectMapper = objectMapper;
     }
 
     public List<DatasetSummary> listDatasets(String keyword, String sourceKind, Long aiDataSourceId, String lowcodePlatformKey) {
-        integrationSchemaService.ensureSchema();
         List<IntegrationDataset> datasets =
                 integrationDatasetMapper.search(keyword, sourceKind, aiDataSourceId, lowcodePlatformKey);
         Map<Long, IntegrationDatasetPublishBinding> publishBindingMap = publishBindingMapper
@@ -92,14 +91,23 @@ public class IntegrationDatasetService {
     }
 
     public DatasetDetail getDataset(Long id) throws TaskException {
-        integrationSchemaService.ensureSchema();
         IntegrationDataset dataset = requireDataset(id);
+        return toDetail(dataset);
+    }
+
+    public DatasetDetail getDatasetByCode(String datasetCode) throws TaskException {
+        if (!StringUtils.hasText(datasetCode)) {
+            throw new TaskException("数据集编码不能为空", TaskException.Code.UNKNOWN);
+        }
+        IntegrationDataset dataset = integrationDatasetMapper.selectByDatasetCode(datasetCode.trim());
+        if (dataset == null) {
+            throw new TaskException("数据集不存在：" + datasetCode, TaskException.Code.UNKNOWN);
+        }
         return toDetail(dataset);
     }
 
     @Transactional(rollbackFor = Exception.class)
     public DatasetDetail create(UpsertDatasetRequest request) throws TaskException {
-        integrationSchemaService.ensureSchema();
         NormalizedDataset normalized = normalizeRequest(request, null);
         if (integrationDatasetMapper.selectByName(normalized.name()) != null) {
             throw new TaskException("数据集名称已存在：" + normalized.name(), TaskException.Code.UNKNOWN);
@@ -114,7 +122,6 @@ public class IntegrationDatasetService {
 
     @Transactional(rollbackFor = Exception.class)
     public DatasetDetail update(Long id, UpsertDatasetRequest request) throws TaskException {
-        integrationSchemaService.ensureSchema();
         IntegrationDataset dataset = requireDataset(id);
         NormalizedDataset normalized = normalizeRequest(request, dataset);
         IntegrationDataset sameName = integrationDatasetMapper.selectByName(normalized.name());
@@ -128,12 +135,10 @@ public class IntegrationDatasetService {
     }
 
     private DatasetSummary toSummary(IntegrationDataset dataset) {
-        dataset = ensureDatasetCode(dataset);
         return toSummary(dataset, publishBindingMapper.selectByDatasetId(dataset.getId()));
     }
 
     private DatasetSummary toSummary(IntegrationDataset dataset, IntegrationDatasetPublishBinding publishBinding) {
-        dataset = ensureDatasetCode(dataset);
         IntegrationDataSource dataSource = dataset.getAiDataSourceId() == null
                 ? null
                 : integrationDataSourceMapper.selectById(dataset.getAiDataSourceId());
@@ -194,6 +199,7 @@ public class IntegrationDatasetService {
                         .map(item -> new ObjectBindingView(
                                 item.getId(),
                                 item.getObjectCode(),
+                                item.getFormCode(),
                                 item.getObjectName(),
                                 item.getObjectSource(),
                                 item.getSelected(),
@@ -203,6 +209,7 @@ public class IntegrationDatasetService {
                         .map(item -> new FieldBindingView(
                                 item.getId(),
                                 item.getObjectCode(),
+                                item.getFormCode(),
                                 item.getFieldName(),
                                 item.getFieldAlias(),
                                 item.getFieldType(),
@@ -235,15 +242,6 @@ public class IntegrationDatasetService {
 
     private Integer defaultNumber(Integer value) {
         return value == null ? 0 : value;
-    }
-
-    private IntegrationDataset ensureDatasetCode(IntegrationDataset dataset) {
-        if (dataset == null || StringUtils.hasText(dataset.getDatasetCode())) {
-            return dataset;
-        }
-        dataset.setDatasetCode(generateUniqueDatasetCode());
-        integrationDatasetMapper.updateById(dataset);
-        return dataset;
     }
 
     private String generateUniqueDatasetCode() {
@@ -298,7 +296,11 @@ public class IntegrationDatasetService {
                 }
                 rootObjectNameMap.putIfAbsent(trimText(object.objectCode()), trimText(object.objectName()));
                 List<LowcodeDatasetBrowseService.FieldView> browseFields =
-                        lowcodeDatasetBrowseService.listFields(dataset.getLowcodePlatformKey(), appId, object.objectCode());
+                        lowcodeDatasetBrowseService.listFields(
+                                dataset.getLowcodePlatformKey(),
+                                appId,
+                                object.objectCode(),
+                                object.formCode());
                 for (LowcodeDatasetBrowseService.FieldView field : browseFields) {
                     fieldLookup.putIfAbsent(buildFieldLookupKey(field.objectCode(), field.subObjectCode(), field.fieldName()), field);
                 }
@@ -319,6 +321,9 @@ public class IntegrationDatasetService {
                 continue;
             }
             fieldBinding.setObjectCode(trimText(matchedField.objectCode()));
+            if (!StringUtils.hasText(fieldBinding.getFormCode())) {
+                fieldBinding.setFormCode(trimText(matchedField.formCode()));
+            }
             if (!StringUtils.hasText(fieldBinding.getFieldScope())) {
                 fieldBinding.setFieldScope(matchedField.fieldScope());
             }
@@ -394,7 +399,6 @@ public class IntegrationDatasetService {
     }
 
     private IntegrationDataset requireDataset(Long id) throws TaskException {
-        integrationSchemaService.ensureSchema();
         if (id == null) {
             throw new TaskException("数据集 id 不能为空", TaskException.Code.UNKNOWN);
         }
@@ -474,6 +478,7 @@ public class IntegrationDatasetService {
                     objectCode,
                     new ObjectBindingInput(
                             objectCode,
+                            trimText(item.formCode()),
                             StringUtils.hasText(item.objectName()) ? item.objectName().trim() : objectCode,
                             trimText(item.objectSource()),
                             item.selected() == null ? 1 : item.selected(),
@@ -497,12 +502,14 @@ public class IntegrationDatasetService {
                     ownerObjectCode,
                     new ObjectBindingInput(
                             ownerObjectCode,
+                            trimText(item.formCode()),
                             firstNonBlank(item.objectName(), item.subObjectName(), ownerObjectCode),
                             deriveObjectSource(item),
                             1,
                             objectSort++));
             normalizedFields.add(new FieldBindingInput(
                     ownerObjectCode,
+                    trimText(item.formCode()),
                     fieldName,
                     trimText(item.fieldAlias()),
                     trimText(item.fieldType()),
@@ -572,6 +579,7 @@ public class IntegrationDatasetService {
             IntegrationDatasetObjectBinding binding = new IntegrationDatasetObjectBinding();
             binding.setDatasetId(datasetId);
             binding.setObjectCode(item.objectCode().trim());
+            binding.setFormCode(trimText(item.formCode()));
             binding.setObjectName(trimText(item.objectName()));
             binding.setObjectSource(trimText(item.objectSource()));
             binding.setSelected(item.selected() == null ? 1 : item.selected());
@@ -586,6 +594,7 @@ public class IntegrationDatasetService {
             IntegrationDatasetFieldBinding binding = new IntegrationDatasetFieldBinding();
             binding.setDatasetId(datasetId);
             binding.setObjectCode(item.objectCode().trim());
+            binding.setFormCode(trimText(item.formCode()));
             binding.setFieldName(item.fieldName().trim());
             binding.setFieldAlias(trimText(item.fieldAlias()));
             binding.setFieldType(trimText(item.fieldType()));
@@ -663,8 +672,11 @@ public class IntegrationDatasetService {
 
     @Transactional(rollbackFor = Exception.class)
     public void delete(Long id) throws TaskException {
-        integrationSchemaService.ensureSchema();
         IntegrationDataset dataset = requireDataset(id);
+        if (StringUtils.hasText(dataset.getDatasetCode())) {
+            datasetToolPublishService.disable(dataset.getDatasetCode());
+        }
+        publishBindingMapper.deleteByDatasetId(dataset.getId());
         objectBindingMapper.deleteByDatasetId(dataset.getId());
         fieldBindingMapper.deleteByDatasetId(dataset.getId());
         relationBindingMapper.deleteByDatasetId(dataset.getId());
@@ -966,10 +978,16 @@ public class IntegrationDatasetService {
             java.util.Date updatedAt) {}
 
     public record ObjectBindingInput(
-            String objectCode, String objectName, String objectSource, Integer selected, Integer sortOrder) {}
+            String objectCode,
+            String formCode,
+            String objectName,
+            String objectSource,
+            Integer selected,
+            Integer sortOrder) {}
 
     public record FieldBindingInput(
             String objectCode,
+            String formCode,
             String fieldName,
             String fieldAlias,
             String fieldType,
@@ -988,11 +1006,18 @@ public class IntegrationDatasetService {
             String relationSource) {}
 
     public record ObjectBindingView(
-            Long id, String objectCode, String objectName, String objectSource, Integer selected, Integer sortOrder) {}
+            Long id,
+            String objectCode,
+            String formCode,
+            String objectName,
+            String objectSource,
+            Integer selected,
+            Integer sortOrder) {}
 
     public record FieldBindingView(
             Long id,
             String objectCode,
+            String formCode,
             String fieldName,
             String fieldAlias,
             String fieldType,

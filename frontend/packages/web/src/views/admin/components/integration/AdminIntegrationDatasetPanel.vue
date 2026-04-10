@@ -285,7 +285,6 @@ onMounted(loadPageData);
                                 <span class="rounded bg-slate-100 px-2 py-1">{{ item.objectCount }} 个对象</span>
                                 <span class="rounded bg-slate-100 px-2 py-1">{{ item.fieldCount }} 个字段</span>
                                 <span class="rounded px-2 py-1" :class="publishStatusClass(item)">{{ publishStatusLabel(item) }}</span>
-                                <span v-if="item.publishedVersion > 0" class="rounded bg-slate-100 px-2 py-1">v{{ item.publishedVersion }}</span>
                             </div>
                             <p v-if="item.lastPublishMessage" class="mt-3 text-xs leading-5 text-slate-400">
                                 {{ item.lastPublishMessage }}
