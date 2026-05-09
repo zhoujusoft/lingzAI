@@ -14,7 +14,6 @@ services:
       TZ: ${TZ:-Asia/Shanghai}
       SERVER_PORT: 5050
       SERVER_SERVLET_CONTEXT_PATH: /api
-      SKILL_ROOT: /app/skills
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE}?useSSL=false&allowPublicKeyRetrieval=true&useUnicode=true&characterEncoding=UTF-8&serverTimezone=GMT%2B8&zeroDateTimeBehavior=convertToNull
       SPRING_DATASOURCE_USERNAME: ${MYSQL_USER}
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
@@ -52,7 +51,7 @@ services:
       MODEL_VLLM_RERANK_FALLBACK_RRF: ${MODEL_VLLM_RERANK_FALLBACK_RRF:-true}
     volumes:
       - ./data/backend/uploads:/app/uploads
-      - ./data/backend/skills:/app/skills
+      - ./data/backend/workspaces:/app/workspaces
     depends_on:
       mysql:
         condition: service_healthy
