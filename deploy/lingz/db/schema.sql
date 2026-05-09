@@ -254,47 +254,164 @@ CREATE TABLE `knowledge_document` (
   `document_json` json DEFAULT NULL COMMENT '文档解析JSON',
   PRIMARY KEY (`doc_id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=517 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='存储文档和文件夹信息，支持目录层级和元数据';
--- chat_session ddl
-CREATE TABLE `chat_session` (
-                                `id` bigint NOT NULL AUTO_INCREMENT COMMENT '会话主键',
-                                `session_code` char(26) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '会话编码（ULID）',
-                                `session_type` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '会话类型：GENERAL_CHAT/SKILL_CHAT/KNOWLEDGE_QA',
-                                `scope_id` bigint DEFAULT NULL COMMENT '会话作用域ID（知识问答场景可存 kb_id）',
-                                `name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '会话名称',
-                                `status` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT 'normal' COMMENT '会话状态',
-                                `last_message` varchar(120) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '最近一条消息摘要',
-                                `create_user_id` bigint NOT NULL COMMENT '创建用户ID',
-                                `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-                                `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-                                PRIMARY KEY (`id`),
-                                UNIQUE KEY `uk_chat_session_code` (`session_code`),
-                                KEY `idx_chat_session_user_type_updated` (`create_user_id`,`session_type`,`updated_at`,`id`),
-                                KEY `idx_chat_session_scope` (`scope_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='用户会话主表';
+-- conversation_session ddl
+CREATE TABLE `conversation_session` (
+                                        `id` bigint NOT NULL AUTO_INCREMENT COMMENT '会话主键',
+                                        `session_code` char(26) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '会话编码（ULID）',
+                                        `session_type` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '会话类型：GENERAL_CHAT/SKILL_CHAT/PUBLISHED_SKILL_CHAT/DATASET_CHAT/KNOWLEDGE_QA',
+                                        `scope_type` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '作用域类型，例如SKILL/DATASET/KNOWLEDGE_BASE',
+                                        `scope_id` bigint DEFAULT NULL COMMENT '会话作用域ID',
+                                        `title` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '会话标题',
+                                        `status` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT 'ACTIVE' COMMENT '会话状态',
+                                        `last_message_id` bigint DEFAULT NULL COMMENT '最近一条主消息ID',
+                                        `last_message_preview` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '最近一条主消息预览',
+                                        `create_user_id` bigint NOT NULL COMMENT '创建用户ID',
+                                        `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                                        `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                                        `archived_at` datetime DEFAULT NULL COMMENT '归档时间',
+                                        PRIMARY KEY (`id`),
+                                        UNIQUE KEY `uk_conversation_session_code` (`session_code`),
+                                        KEY `idx_conversation_session_user_type_updated` (`create_user_id`,`session_type`,`updated_at`,`id`),
+                                        KEY `idx_conversation_session_scope` (`scope_type`,`scope_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='会话主表';
 
--- imessages ddl
-CREATE TABLE `imessages` (
-                             `id` bigint NOT NULL AUTO_INCREMENT COMMENT '消息主键',
-                             `session_id` bigint NOT NULL COMMENT '关联会话ID',
-                             `query` text CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '提问',
-                             `message_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT 'normal' COMMENT '消息类型：normal=普通消息，event=事件消息',
-                             `question_type` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '问题类型',
-                             `params_json` json DEFAULT NULL COMMENT '参数',
-                             `answer` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '回答',
-                             `ordinal` int DEFAULT NULL COMMENT '序号',
-                             `document_list` json DEFAULT NULL COMMENT '文档信息',
-                             `file_list` json DEFAULT NULL COMMENT '文件信息',
-                             `consumes_time` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '问答耗时',
-                             `error` text CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '错误信息',
-                             `status` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT 'pending' COMMENT '状态',
-                             `final_query` text CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '最终提问',
-                             `create_user_id` bigint DEFAULT NULL COMMENT '创建人ID',
-                             `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-                             `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+-- conversation_message ddl
+CREATE TABLE `conversation_message` (
+                                        `id` bigint NOT NULL AUTO_INCREMENT COMMENT '消息主键',
+                                        `session_id` bigint NOT NULL COMMENT '关联会话ID',
+                                        `message_code` char(26) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '消息编码（ULID）',
+                                        `parent_message_id` bigint DEFAULT NULL COMMENT '父消息ID，用于一条用户消息关联多条assistant消息',
+                                        `role` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '消息角色 USER/ASSISTANT/SYSTEM',
+                                        `message_kind` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '消息类型 INPUT/REPLY/FOLLOWUP/NOTICE/SUMMARY/ARTIFACT_CARD',
+                                        `content` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '主展示内容',
+                                        `content_format` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT 'TEXT' COMMENT '内容格式 TEXT/MARKDOWN/JSON',
+                                        `status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'PENDING' COMMENT '消息状态 PENDING/STREAMING/COMPLETED/FAILED/CANCELLED',
+                                        `error_code` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '错误码',
+                                        `error_message` text CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '错误信息',
+                                        `params_json` json DEFAULT NULL COMMENT '扩展参数JSON',
+                                        `attachments_json` json DEFAULT NULL COMMENT '附件JSON',
+                                        `artifact_summary_json` json DEFAULT NULL COMMENT '产物/引用摘要JSON',
+                                        `sequence_no` int NOT NULL COMMENT '会话内消息顺序',
+                                        `create_user_id` bigint DEFAULT NULL COMMENT '创建用户ID',
+                                        `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                                        `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                                        `completed_at` datetime DEFAULT NULL COMMENT '完成时间',
+                                        PRIMARY KEY (`id`),
+                                        UNIQUE KEY `uk_conversation_message_code` (`message_code`),
+                                        KEY `idx_conversation_message_session_seq` (`session_id`,`sequence_no`,`id`),
+                                        KEY `idx_conversation_message_parent` (`parent_message_id`,`created_at`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='会话主消息表';
+
+CREATE TABLE IF NOT EXISTS `conversation_event` (
+                                        `id` bigint NOT NULL AUTO_INCREMENT COMMENT '事件主键',
+                                        `session_id` bigint NOT NULL COMMENT '关联会话ID',
+                                        `message_id` bigint DEFAULT NULL COMMENT '关联主消息ID',
+                                        `event_code` char(26) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '事件编码（ULID）',
+                                        `parent_event_id` bigint DEFAULT NULL COMMENT '父事件ID',
+                                        `event_type` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '事件类型',
+                                        `event_subtype` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '事件子类型',
+                                        `sequence_no` int NOT NULL COMMENT '会话内事件顺序',
+                                        `summary_text` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '用于记忆与折叠展示的摘要',
+                                        `payload_json` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '结构化事件负载JSON',
+                                        `create_user_id` bigint DEFAULT NULL COMMENT '创建用户ID',
+                                        `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                                        PRIMARY KEY (`id`),
+                                        UNIQUE KEY `uk_conversation_event_code` (`event_code`),
+                                        KEY `idx_conversation_event_session_seq` (`session_id`,`sequence_no`,`id`),
+                                        KEY `idx_conversation_event_message_type` (`message_id`,`event_type`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='会话事件流表';
+
+CREATE TABLE IF NOT EXISTS `channel_config` (
+                             `id` bigint NOT NULL AUTO_INCREMENT COMMENT '渠道配置主键',
+                             `name` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '渠道名称',
+                             `channel_type` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '渠道类型，如weixin/webchat/dingtalk',
+                             `route_type` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '路由类型 GENERAL_CHAT/SKILL_CHAT/DATASET_CHAT',
+                             `route_target_id` bigint DEFAULT NULL COMMENT '路由目标ID；技能路由为skillId，数据集路由为datasetId，通用聊天为空',
+                             `owner_user_id` bigint DEFAULT NULL COMMENT '渠道默认归属用户ID，作为兜底配置',
+                             `bot_prefix` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '机器人触发前缀',
+                             `config_json` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '渠道原始配置JSON',
+                             `enabled` tinyint NOT NULL DEFAULT '1' COMMENT '是否启用',
+                             `description` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '描述',
+                             `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                             `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
                              PRIMARY KEY (`id`),
-                             KEY `idx_imessages_session_created` (`session_id`,`created_at`,`id`),
-                             KEY `idx_imessages_user_created` (`create_user_id`,`created_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='会话消息表';
+                             UNIQUE KEY `uk_channel_config_type` (`channel_type`),
+                             KEY `idx_channel_config_type_enabled` (`channel_type`,`enabled`),
+                             KEY `idx_channel_config_owner_user` (`owner_user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='外部渠道配置表';
+
+CREATE TABLE IF NOT EXISTS `channel_user_binding` (
+                             `id` bigint NOT NULL AUTO_INCREMENT COMMENT '绑定主键',
+                             `channel_id` bigint NOT NULL COMMENT '关联渠道ID',
+                             `channel_type` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '渠道类型',
+                             `owner_user_id` bigint NOT NULL COMMENT '系统用户ID',
+                             `route_type` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '路由类型 GENERAL_CHAT/SKILL_CHAT/DATASET_CHAT',
+                             `route_target_id` bigint DEFAULT NULL COMMENT '路由目标ID',
+                             `runtime_context_json` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '渠道运行时上下文 JSON，例如微信登录上下文',
+                             `runtime_context_updated_at` datetime DEFAULT NULL COMMENT '运行时上下文更新时间',
+                             `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                             `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                             PRIMARY KEY (`id`),
+                             UNIQUE KEY `uk_channel_user_binding` (`channel_id`,`owner_user_id`),
+                             KEY `idx_channel_user_binding_channel_type` (`channel_type`),
+                             KEY `idx_channel_user_binding_owner_user` (`owner_user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='渠道用户绑定表';
+
+CREATE TABLE IF NOT EXISTS `channel_session_binding` (
+                             `id` bigint NOT NULL AUTO_INCREMENT COMMENT '绑定主键',
+                             `channel_id` bigint NOT NULL COMMENT '关联渠道ID',
+                             `channel_type` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '渠道类型',
+                             `external_session_key` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '外部会话唯一键',
+                             `external_sender_id` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '外部发送者ID',
+                             `external_sender_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '外部发送者名称',
+                             `reply_target` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '回复目标标识',
+                             `owner_user_id` bigint DEFAULT NULL COMMENT '当前外部会话归属的系统用户ID',
+                             `chat_session_code` char(26) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '内部聊天会话编码',
+                             `last_active_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '最近活跃时间',
+                             `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                             `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                             PRIMARY KEY (`id`),
+                             UNIQUE KEY `uk_channel_session_binding` (`channel_id`,`external_session_key`),
+                             KEY `idx_channel_session_binding_session_code` (`chat_session_code`),
+                             KEY `idx_channel_session_binding_channel_type` (`channel_type`),
+                             KEY `idx_channel_session_binding_owner_user` (`owner_user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='外部渠道会话与内部聊天会话绑定表';
+
+INSERT INTO `channel_config` (
+    `name`, `channel_type`, `route_type`, `route_target_id`, `owner_user_id`, `bot_prefix`, `config_json`, `enabled`, `description`
+)
+SELECT
+    '微信 iLink',
+    'weixin',
+    'GENERAL_CHAT',
+    NULL,
+    NULL,
+    NULL,
+    '{\"autoPoll\":true,\"pollIntervalMs\":3000,\"heartbeatEnabled\":true}',
+    1,
+    '微信渠道接入配置'
+FROM DUAL
+WHERE NOT EXISTS (
+    SELECT 1 FROM `channel_config` WHERE `channel_type` = 'weixin'
+);
+
+INSERT INTO `channel_config` (
+    `name`, `channel_type`, `route_type`, `route_target_id`, `owner_user_id`, `bot_prefix`, `config_json`, `enabled`, `description`
+)
+SELECT
+    'WebChat',
+    'webchat',
+    'GENERAL_CHAT',
+    NULL,
+    NULL,
+    NULL,
+    '{\"theme\":\"default\",\"welcomeMessage\":\"你好，有什么可以帮你？\"}',
+    1,
+    'WebChat 渠道接入配置'
+FROM DUAL
+WHERE NOT EXISTS (
+    SELECT 1 FROM `channel_config` WHERE `channel_type` = 'webchat'
+);
 
 CREATE TABLE IF NOT EXISTS `skill_catalog` (
                                `id` bigint NOT NULL AUTO_INCREMENT COMMENT '技能目录主键',
@@ -303,6 +420,13 @@ CREATE TABLE IF NOT EXISTS `skill_catalog` (
                                `description` text CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '展示描述',
                                `category` varchar(120) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '技能分类',
                                `source` varchar(120) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '技能来源',
+                               `version` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT '1.0' COMMENT '技能版本',
+                               `author` varchar(120) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'zhouju' COMMENT '技能作者',
+                               `icon` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'grid_view' COMMENT '技能主图标',
+                               `icon_color` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'blue' COMMENT '技能图标颜色',
+                               `tool_binding_status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'READY' COMMENT '工具绑定状态：READY/MISSING_DEPENDENCY/NEEDS_REBIND/UNSUPPORTED',
+                               `tool_binding_message` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '工具绑定状态说明',
+                               `tool_binding_details` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '工具绑定异常明细(JSON)',
                                `visible` tinyint DEFAULT '1' COMMENT '是否在前台技能市场可见，1=可见，0=隐藏',
                                `sort_order` int DEFAULT '0' COMMENT '排序值，越小越靠前',
                                `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -311,6 +435,21 @@ CREATE TABLE IF NOT EXISTS `skill_catalog` (
                                UNIQUE KEY `uk_skill_catalog_runtime_skill` (`runtime_skill_name`),
                                KEY `idx_skill_catalog_visible_sort` (`visible`,`sort_order`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='技能业务目录表';
+
+CREATE TABLE IF NOT EXISTS `skill_publish_binding` (
+                               `id` bigint NOT NULL AUTO_INCREMENT COMMENT '发布主键',
+                               `skill_id` bigint NOT NULL COMMENT '技能目录 ID',
+                               `publish_status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'DISABLED' COMMENT '发布状态：PUBLISHED/DISABLED',
+                               `app_code` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '发布应用编码',
+                               `app_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '发布应用名称',
+                               `app_description` text CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '发布应用描述',
+                               `published_at` datetime DEFAULT NULL COMMENT '发布时间',
+                               `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                               `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                               PRIMARY KEY (`id`),
+                               UNIQUE KEY `uk_skill_publish_binding_skill` (`skill_id`),
+                               UNIQUE KEY `uk_skill_publish_binding_code` (`app_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='技能发布绑定表';
 
 CREATE TABLE IF NOT EXISTS `skill_tool_binding` (
                                     `id` bigint NOT NULL AUTO_INCREMENT COMMENT '绑定主键',
@@ -328,7 +467,7 @@ CREATE TABLE IF NOT EXISTS `tool_catalog` (
                                `tool_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '工具唯一名称',
                                `display_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '展示名称',
                                `description` text CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '工具描述',
-                               `tool_type` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '工具类型：GLOBAL/SKILL_NATIVE/MCP_REMOTE',
+                               `tool_type` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '工具类型：GLOBAL/RUNTIME/SKILL_NATIVE/MCP_REMOTE/LOWCODE_API/DATASET_TOOL/KNOWLEDGE_BASE_TOOL',
                                `bindable` tinyint DEFAULT '0' COMMENT '是否允许被技能追加绑定，1=允许，0=不允许',
                                `owner_skill_name` varchar(120) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '所属运行时技能名称，公共工具为空',
                                `source` varchar(120) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '工具来源',
@@ -429,6 +568,16 @@ INSERT INTO `skill_catalog` (`runtime_skill_name`, `display_name`, `description`
 SELECT 'form-app-assistant', '表单应用助手', '引导创建或扩展表单应用，结合文字、Excel 与参考资料生成标准化表单模型。', '表单搭建', 'runtime', 1, 170
 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM `skill_catalog` WHERE `runtime_skill_name` = 'form-app-assistant');
+
+UPDATE `skill_catalog`
+SET `icon` = CASE MOD(CRC32(`runtime_skill_name`), 6)
+    WHEN 0 THEN 'grid_view'
+    WHEN 1 THEN 'smart_toy'
+    WHEN 2 THEN 'rocket_launch'
+    WHEN 3 THEN 'inventory_2'
+    WHEN 4 THEN 'dataset'
+    ELSE 'hub'
+END;
 
 INSERT INTO `tool_catalog` (`tool_name`, `display_name`, `description`, `tool_type`, `bindable`, `owner_skill_name`, `source`, `sort_order`)
 SELECT 'readFile', '读取文件', '读取本地 UTF-8 文本文件内容。', 'GLOBAL', 1, NULL, 'runtime', 0
@@ -813,3 +962,31 @@ CREATE TABLE IF NOT EXISTS `skill_package_file` (
                                KEY `idx_skill_package_file_install` (`install_id`),
                                KEY `idx_skill_package_file_package` (`package_id`,`relative_path`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='技能包受管文件记录表';
+
+CREATE TABLE IF NOT EXISTS `skill_studio_project` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '技能工坊项目主键',
+  `project_code` char(26) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '项目编码',
+  `name` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '项目名称',
+  `description` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '项目需求描述',
+  `status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'DRAFT' COMMENT '项目状态',
+  `project_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'SKILL' COMMENT '项目类型',
+  `draft_skill_name` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '关联草稿 skill 名称',
+  `runtime_skill_name` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '运行时技能名',
+  `icon` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT 'Material icon 名称',
+  `icon_color` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '图标主题色',
+  `category` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '技能分类',
+  `draft_path` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '草稿目录路径',
+  `cover_summary` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '列表摘要',
+  `initial_prompt` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '创建项目时的初始描述',
+  `last_session_id` bigint DEFAULT NULL COMMENT '最近会话ID',
+  `last_message_preview` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '最近消息摘要',
+  `create_user_id` bigint NOT NULL COMMENT '创建用户ID',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `archived_at` datetime DEFAULT NULL COMMENT '归档时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_skill_studio_project_code` (`project_code`),
+  KEY `idx_skill_studio_project_user_updated` (`create_user_id`, `updated_at`),
+  KEY `idx_skill_studio_project_user_status` (`create_user_id`, `status`),
+  KEY `idx_skill_studio_project_archived` (`archived_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='技能工坊项目表';
