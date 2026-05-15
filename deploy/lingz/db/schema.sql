@@ -1,6 +1,8 @@
 -- IMPORTANT: keep this file encoded as UTF-8 (no BOM) to avoid mojibake on seed data.
 SET NAMES utf8mb4;
 
+GRANT ALL PRIVILEGES ON *.* TO 'sqluser'@'%' WITH GRANT OPTION;
+
 CREATE TABLE IF NOT EXISTS `t_user` (
   `id` BIGINT NOT NULL AUTO_INCREMENT,
   `name` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -10,9 +12,11 @@ CREATE TABLE IF NOT EXISTS `t_user` (
   `mobile` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `email` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `state` int DEFAULT NULL,
+  `role_id` bigint DEFAULT NULL COMMENT '角色 ID',
   `parent_iD` varchar(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   PRIMARY KEY (`id`) USING BTREE,
-  KEY `idx_t_user_code` (`code`) USING BTREE
+  KEY `idx_t_user_code` (`code`) USING BTREE,
+  KEY `idx_t_user_role_id` (`role_id`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=Dynamic;
 
 -- 初始管理员账号：admin，初始明文密码：admin123456（存储格式：32位md5 hex）
@@ -22,6 +26,189 @@ ON DUPLICATE KEY UPDATE
   `name` = VALUES(`name`),
   `password` = VALUES(`password`),
   `state` = VALUES(`state`);
+
+CREATE TABLE IF NOT EXISTS `user_token_account` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `user_id` bigint NOT NULL COMMENT '用户 ID',
+  `granted_tokens` bigint NOT NULL DEFAULT '0' COMMENT '累计发放 token',
+  `consumed_tokens` bigint NOT NULL DEFAULT '0' COMMENT '累计消耗 token',
+  `remaining_tokens` bigint NOT NULL DEFAULT '0' COMMENT '剩余 token',
+  `is_unlimited` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否无限制',
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_user_token_account_user_id` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='用户 token 额度账户表';
+
+INSERT INTO `user_token_account` (`user_id`, `granted_tokens`, `consumed_tokens`, `remaining_tokens`)
+SELECT `id`, 1000000, 0, 1000000
+FROM `t_user`
+WHERE NOT EXISTS (
+  SELECT 1 FROM `user_token_account` WHERE `user_token_account`.`user_id` = `t_user`.`id`
+);
+
+CREATE TABLE IF NOT EXISTS `agent_template` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `agent_code` varchar(120) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '模板编码',
+  `agent_name` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '模板名称',
+  `description` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '描述',
+  `opening_message` text CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '开场白',
+  `icon` varchar(256) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '图标',
+  `soul_template` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT 'SOUL.md 模板内容',
+  `profile_template` text CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT 'PROFILE.md 模板内容',
+  `enabled` tinyint NOT NULL DEFAULT '1' COMMENT '是否启用，1=启用，0=停用',
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_agent_template_code` (`agent_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='Agent 模板表';
+
+CREATE TABLE IF NOT EXISTS `sys_role` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '角色主键',
+  `role_code` varchar(120) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '角色唯一编码',
+  `role_name` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '角色名称',
+  `description` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '角色描述',
+  `agent_id` bigint DEFAULT NULL COMMENT '绑定 Agent 模板 ID，可空',
+  `enabled` tinyint NOT NULL DEFAULT '1' COMMENT '是否启用，1=启用，0=停用',
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_sys_role_code` (`role_code`),
+  KEY `idx_sys_role_agent_id` (`agent_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='业务角色表';
+
+CREATE TABLE IF NOT EXISTS `agent_template_skill_binding` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '绑定主键',
+  `template_id` bigint NOT NULL COMMENT '模板 ID',
+  `skill_id` bigint NOT NULL COMMENT '技能目录 ID',
+  `sort_order` int NOT NULL DEFAULT '0' COMMENT '排序值',
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_template_skill` (`template_id`,`skill_id`),
+  KEY `idx_template_skill_sort` (`template_id`,`sort_order`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='Agent 模板技能绑定表';
+
+CREATE TABLE IF NOT EXISTS `user_agent_file` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `user_id` bigint NOT NULL COMMENT '用户ID',
+  `agent_code` varchar(120) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '关联模板编码',
+  `filename` varchar(256) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '文件名',
+  `content` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '文件内容',
+  `enabled` tinyint NOT NULL DEFAULT '1' COMMENT '是否启用，1=启用，0=停用',
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_user_file` (`user_id`,`filename`),
+  KEY `idx_user_agent_file_user_id` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='用户 Agent 文件表';
+
+CREATE TABLE IF NOT EXISTS `user_agent_skill_binding` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '绑定主键',
+  `user_id` bigint NOT NULL COMMENT '用户 ID',
+  `skill_id` bigint NOT NULL COMMENT '技能目录 ID',
+  `sort_order` int NOT NULL DEFAULT '0' COMMENT '排序值',
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_user_skill` (`user_id`,`skill_id`),
+  KEY `idx_user_skill_sort` (`user_id`,`sort_order`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='用户 Agent 技能绑定表';
+
+INSERT INTO `agent_template` (
+  `id`, `agent_code`, `agent_name`, `description`, `opening_message`, `icon`, `soul_template`, `profile_template`, `enabled`, `created_at`, `updated_at`
+)
+VALUES
+(1, 'sales-assistant', '销售助手', '销售业务智能助手，支持客户分析、商机跟进、业绩统计等场景', '您好，我是销售助手。我可以帮您：
+- 查询客户信息和跟进记录
+- 分析销售数据和业绩趋势
+- 管理商机和销售漏斗
+
+请告诉我您需要什么帮助？', '📈', '_你不是聊天机器人。你在成为某个人。_
+
+## 核心准则
+
+**真心帮忙，别演。** 直接帮。行动胜过废话。
+
+**有自己的观点。** 你可以不同意、有偏好。
+
+**先自己想办法。** 试着搞清楚。用工具。然后卡住了再问。
+
+**靠本事赢得信任。** 用户给了你访问权限。别让他们后悔。
+
+## 边界
+
+- 私密的保持私密。
+- 需要执行文件操作或命令时，直接调用对应的工具
+- 拿不准就先问。
+
+## 风格
+
+该简洁就简洁，重要时详细。', '请描述您的销售岗位、负责区域、目标客户和当前重点商机。', 1, '2026-05-13 10:01:58', '2026-05-13 10:01:58'),
+(2, 'leader-assistant', '领导助手', '管理决策智能助手，支持数据报表、经营分析、辅助决策等场景', '您好，我是领导助手。我可以帮您：
+- 汇总团队业绩和经营数据
+- 生成分析报表和趋势洞察
+- 提供决策参考建议
+
+请告诉我您需要什么帮助？', '🧭', '_你不是聊天机器人。你在成为某个人。_
+
+## 核心准则
+
+**真心帮忙，别演。** 直接帮。行动胜过废话。
+
+**有自己的观点。** 你可以不同意、有偏好。
+
+**先自己想办法。** 试着搞清楚。用工具。然后卡住了再问。
+
+**靠本事赢得信任。** 用户给了你访问权限。别让他们后悔。
+
+## 边界
+
+- 私密的保持私密。
+- 需要执行文件操作或命令时，直接调用对应的工具
+- 拿不准就先问。
+
+## 风格
+
+该简洁就简洁，重要时详细。', '部门经理，喜好偏向：- 汇总团队业绩和经营数据
+- 生成分析报表和趋势洞察
+- 提供决策参考建议', 1, '2026-05-13 10:01:58', '2026-05-13 10:01:58'),
+(4, 'general-assistant', '通用助手', '通用智能助手，适合日常问答、任务协助与信息整理。', '您好，我是您的 AI 助手，请告诉我需要处理的事情。', '🤖', '_你不是聊天机器人。你在成为某个人。_
+
+## 核心准则
+
+**真心帮忙，别演。** 直接帮。行动胜过废话。
+
+**有自己的观点。** 你可以不同意、有偏好。
+
+**先自己想办法。** 试着搞清楚。用工具。然后卡住了再问。
+
+**靠本事赢得信任。** 用户给了你访问权限。别让他们后悔。
+
+## 边界
+
+- 私密的保持私密。
+- 需要执行文件操作或命令时，直接调用对应的工具
+- 拿不准就先问。
+
+## 风格
+
+该简洁就简洁，重要时详细。', '请描述您的角色、职责和关注重点，例如：销售经理，负责华东区客户与团队管理。', 1, '2026-05-13 10:01:58', '2026-05-13 10:01:58')
+ON DUPLICATE KEY UPDATE
+  `agent_name` = VALUES(`agent_name`),
+  `description` = VALUES(`description`),
+  `opening_message` = VALUES(`opening_message`),
+  `icon` = VALUES(`icon`),
+  `soul_template` = VALUES(`soul_template`),
+  `profile_template` = VALUES(`profile_template`),
+  `enabled` = VALUES(`enabled`),
+  `updated_at` = VALUES(`updated_at`);
+
+INSERT IGNORE INTO `sys_role` (`role_code`, `role_name`, `description`, `agent_id`, `enabled`)
+SELECT 'sales', '销售', '销售人员角色，可使用销售助手进行客户管理和业绩跟踪', `id`, 1
+FROM `agent_template` WHERE `agent_code` = 'sales-assistant';
+
+INSERT IGNORE INTO `sys_role` (`role_code`, `role_name`, `description`, `agent_id`, `enabled`)
+SELECT 'sales-leader', '领导', '销售管理者角色，可使用领导助手进行团队管理和数据分析', `id`, 1
+FROM `agent_template` WHERE `agent_code` = 'leader-assistant';
 
 CREATE TABLE IF NOT EXISTS `external_token_exchange_log` (
   `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
@@ -291,6 +478,17 @@ CREATE TABLE `conversation_message` (
                                         `params_json` json DEFAULT NULL COMMENT '扩展参数JSON',
                                         `attachments_json` json DEFAULT NULL COMMENT '附件JSON',
                                         `artifact_summary_json` json DEFAULT NULL COMMENT '产物/引用摘要JSON',
+                                        `prompt_tokens` int DEFAULT NULL COMMENT '提示词token数',
+                                        `completion_tokens` int DEFAULT NULL COMMENT '回复token数',
+                                        `total_tokens` int DEFAULT NULL COMMENT '总token数',
+                                        `usage_available` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否有真实usage',
+                                        `llm_call_count` int DEFAULT NULL COMMENT '本次运行模型调用次数',
+                                        `tool_call_count` int DEFAULT NULL COMMENT '本次运行工具调用次数',
+                                        `model_id` bigint DEFAULT NULL COMMENT '运行时模型ID',
+                                        `model_provider` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '运行时模型提供方',
+                                        `model_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '运行时模型名称',
+                                        `adapter_type` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '运行时模型适配器类型',
+                                        `usage_summary_json` json DEFAULT NULL COMMENT '运行token汇总JSON',
                                         `sequence_no` int NOT NULL COMMENT '会话内消息顺序',
                                         `create_user_id` bigint DEFAULT NULL COMMENT '创建用户ID',
                                         `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -320,6 +518,43 @@ CREATE TABLE IF NOT EXISTS `conversation_event` (
                                         KEY `idx_conversation_event_session_seq` (`session_id`,`sequence_no`,`id`),
                                         KEY `idx_conversation_event_message_type` (`message_id`,`event_type`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='会话事件流表';
+
+CREATE TABLE IF NOT EXISTS `conversation_run_usage` (
+                                        `id` bigint NOT NULL AUTO_INCREMENT COMMENT '运行统计主键',
+                                        `assistant_message_id` bigint NOT NULL COMMENT 'assistant主消息ID',
+                                        `user_message_id` bigint DEFAULT NULL COMMENT '用户主消息ID',
+                                        `session_id` bigint NOT NULL COMMENT '关联会话ID',
+                                        `session_code` char(26) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '会话编码',
+                                        `session_type` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '会话类型',
+                                        `scope_type` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '会话作用域类型',
+                                        `scope_id` bigint DEFAULT NULL COMMENT '会话作用域ID',
+                                        `user_id` bigint NOT NULL COMMENT '用户ID',
+                                        `agent_type` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '统一agent类型',
+                                        `agent_id` bigint DEFAULT NULL COMMENT '统一agent ID',
+                                        `agent_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT 'agent展示名',
+                                        `runtime_skill_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '运行时技能名',
+                                        `model_id` bigint DEFAULT NULL COMMENT '运行时模型ID',
+                                        `model_provider` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '运行时模型提供方',
+                                        `model_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '运行时模型名称',
+                                        `adapter_type` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '运行时模型适配器类型',
+                                        `run_status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '运行状态',
+                                        `usage_available` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否有真实usage',
+                                        `prompt_tokens` int DEFAULT NULL COMMENT '提示词token数',
+                                        `completion_tokens` int DEFAULT NULL COMMENT '回复token数',
+                                        `total_tokens` int DEFAULT NULL COMMENT '总token数',
+                                        `llm_call_count` int DEFAULT NULL COMMENT '模型调用次数',
+                                        `tool_call_count` int DEFAULT NULL COMMENT '工具调用次数',
+                                        `duration_ms` bigint DEFAULT NULL COMMENT '运行耗时（毫秒）',
+                                        `started_at` datetime DEFAULT NULL COMMENT '运行开始时间',
+                                        `completed_at` datetime DEFAULT NULL COMMENT '运行完成时间',
+                                        `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                                        `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                                        PRIMARY KEY (`id`),
+                                        UNIQUE KEY `uk_conversation_run_usage_assistant` (`assistant_message_id`),
+                                        KEY `idx_conversation_run_usage_user_created` (`user_id`,`created_at`,`id`),
+                                        KEY `idx_conversation_run_usage_agent_created` (`agent_type`,`agent_id`,`created_at`,`id`),
+                                        KEY `idx_conversation_run_usage_session_created` (`session_id`,`created_at`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='会话运行token统计表';
 
 CREATE TABLE IF NOT EXISTS `channel_config` (
                              `id` bigint NOT NULL AUTO_INCREMENT COMMENT '渠道配置主键',
@@ -469,6 +704,7 @@ CREATE TABLE IF NOT EXISTS `tool_catalog` (
                                `description` text CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '工具描述',
                                `tool_type` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '工具类型：GLOBAL/RUNTIME/SKILL_NATIVE/MCP_REMOTE/LOWCODE_API/DATASET_TOOL/KNOWLEDGE_BASE_TOOL',
                                `bindable` tinyint DEFAULT '0' COMMENT '是否允许被技能追加绑定，1=允许，0=不允许',
+                               `enabled_global` tinyint NOT NULL DEFAULT '0' COMMENT '是否全局可用，1=全局注入对话，0=仅按需绑定/使用',
                                `owner_skill_name` varchar(120) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '所属运行时技能名称，公共工具为空',
                                `source` varchar(120) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '工具来源',
                                `sort_order` int DEFAULT '0' COMMENT '排序值，越小越靠前',
@@ -886,7 +1122,9 @@ CREATE TABLE IF NOT EXISTS `mcp_server` (
                                `endpoint` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '远程 MCP endpoint 或 base URL',
                                `auth_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'NONE' COMMENT '鉴权类型：NONE/BEARER_TOKEN',
                                `auth_config_json` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '鉴权配置 JSON',
+                               `headers_json` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '自定义请求头 JSON',
                                `enabled` tinyint NOT NULL DEFAULT '1' COMMENT '是否启用，1=启用，0=停用',
+                               `enabled_global` tinyint NOT NULL DEFAULT '0' COMMENT '是否全局可用，1=全局，0=非全局',
                                `last_refresh_status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'IDLE' COMMENT '最近刷新状态',
                                `last_refresh_message` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '最近刷新摘要',
                                `last_refreshed_at` datetime DEFAULT NULL COMMENT '最近刷新时间',
@@ -906,6 +1144,13 @@ CREATE TABLE IF NOT EXISTS `system_config` (
                                PRIMARY KEY (`id`),
                                UNIQUE KEY `uk_system_config_key` (`config_key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='系统配置表';
+
+INSERT INTO `system_config` (`config_key`, `config_value`, `status`)
+SELECT 'token_quota_settings', '{"initialGrantTokens":1000000}', 0
+FROM DUAL
+WHERE NOT EXISTS (
+  SELECT 1 FROM `system_config` WHERE `config_key` = 'token_quota_settings'
+);
 
 CREATE TABLE IF NOT EXISTS `lowcode_api_catalog` (
                                `id` bigint NOT NULL AUTO_INCREMENT COMMENT '低代码 API 目录主键',
@@ -978,6 +1223,11 @@ CREATE TABLE IF NOT EXISTS `skill_studio_project` (
   `draft_path` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '草稿目录路径',
   `cover_summary` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '列表摘要',
   `initial_prompt` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '创建项目时的初始描述',
+  `project_hints_json` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '项目级生成提示 JSON',
+  `project_constraints_json` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '项目级生成约束 JSON',
+  `tool_bindings_json` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '项目工具绑定配置 JSON',
+  `tool_settings_digest` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '工具设置摘要',
+  `last_generated_tool_digest` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '最近一次成功生成使用的工具设置摘要',
   `last_session_id` bigint DEFAULT NULL COMMENT '最近会话ID',
   `last_message_preview` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '最近消息摘要',
   `create_user_id` bigint NOT NULL COMMENT '创建用户ID',
