@@ -1,4 +1,6 @@
 -- IMPORTANT: keep this file encoded as UTF-8 (no BOM) to avoid mojibake on seed data.
+-- flyway-baseline-version: 1.4.14
+-- flyway-baseline-description: schema-snapshot-baseline
 SET NAMES utf8mb4;
 
 GRANT ALL PRIVILEGES ON *.* TO 'sqluser'@'%' WITH GRANT OPTION;
@@ -76,6 +78,16 @@ CREATE TABLE IF NOT EXISTS `sys_role` (
   UNIQUE KEY `uk_sys_role_code` (`role_code`),
   KEY `idx_sys_role_agent_id` (`agent_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='业务角色表';
+
+CREATE TABLE IF NOT EXISTS `sys_role_menu_permission` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT 'role menu permission id',
+  `role_id` bigint NOT NULL COMMENT 'role id',
+  `menu_key` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT 'menu permission key',
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT 'created time',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_role_menu` (`role_id`,`menu_key`),
+  KEY `idx_role_id` (`role_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='role menu permissions';
 
 CREATE TABLE IF NOT EXISTS `agent_template_skill_binding` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '绑定主键',
@@ -210,6 +222,87 @@ INSERT IGNORE INTO `sys_role` (`role_code`, `role_name`, `description`, `agent_i
 SELECT 'sales-leader', '领导', '销售管理者角色，可使用领导助手进行团队管理和数据分析', `id`, 1
 FROM `agent_template` WHERE `agent_code` = 'leader-assistant';
 
+INSERT IGNORE INTO `sys_role` (`role_code`, `role_name`, `description`, `agent_id`, `enabled`)
+VALUES ('normal-user', '普通用户', '默认普通用户角色', NULL, 1);
+
+INSERT IGNORE INTO `sys_role` (`role_code`, `role_name`, `description`, `agent_id`, `enabled`)
+VALUES ('manage-user', '管理端用户', '注册用户技能默认绑定角色', NULL, 1);
+
+INSERT IGNORE INTO `sys_role_menu_permission` (`role_id`, `menu_key`)
+SELECT r.`id`, 'admin.knowledge.view'
+FROM `sys_role` r
+WHERE r.`role_code` = 'normal-user';
+
+INSERT IGNORE INTO `sys_role_menu_permission` (`role_id`, `menu_key`)
+SELECT r.`id`, 'admin.skillstudio.view'
+FROM `sys_role` r
+WHERE r.`role_code` = 'normal-user';
+
+INSERT IGNORE INTO `sys_role_menu_permission` (`role_id`, `menu_key`)
+SELECT r.`id`, 'admin.channel-management.view'
+FROM `sys_role` r
+WHERE r.`role_code` = 'normal-user';
+
+INSERT IGNORE INTO `sys_role_menu_permission` (`role_id`, `menu_key`)
+SELECT r.`id`, 'admin.integration.data-sources.view'
+FROM `sys_role` r
+WHERE r.`role_code` = 'normal-user';
+
+INSERT IGNORE INTO `sys_role_menu_permission` (`role_id`, `menu_key`)
+SELECT r.`id`, 'admin.knowledge.view'
+FROM `sys_role` r
+WHERE r.`role_code` = 'manage-user';
+
+INSERT IGNORE INTO `sys_role_menu_permission` (`role_id`, `menu_key`)
+SELECT r.`id`, 'admin.skillstudio.view'
+FROM `sys_role` r
+WHERE r.`role_code` = 'manage-user';
+
+INSERT IGNORE INTO `sys_role_menu_permission` (`role_id`, `menu_key`)
+SELECT r.`id`, 'admin.channel-management.view'
+FROM `sys_role` r
+WHERE r.`role_code` = 'manage-user';
+
+INSERT IGNORE INTO `sys_role_menu_permission` (`role_id`, `menu_key`)
+SELECT r.`id`, 'admin.integration.data-sources.view'
+FROM `sys_role` r
+WHERE r.`role_code` = 'manage-user';
+
+INSERT IGNORE INTO `sys_role_menu_permission` (`role_id`, `menu_key`)
+SELECT r.`id`, 'admin.skill-management.view'
+FROM `sys_role` r
+WHERE r.`role_code` = 'manage-user';
+
+INSERT IGNORE INTO `sys_role_menu_permission` (`role_id`, `menu_key`)
+SELECT r.`id`, 'admin.mcp-management.view'
+FROM `sys_role` r
+WHERE r.`role_code` = 'manage-user';
+
+INSERT IGNORE INTO `sys_role_menu_permission` (`role_id`, `menu_key`)
+SELECT r.`id`, 'admin.model-library.view'
+FROM `sys_role` r
+WHERE r.`role_code` = 'manage-user';
+
+INSERT IGNORE INTO `sys_role_menu_permission` (`role_id`, `menu_key`)
+SELECT r.`id`, 'admin.token-usage.view'
+FROM `sys_role` r
+WHERE r.`role_code` = 'manage-user';
+
+INSERT IGNORE INTO `sys_role_menu_permission` (`role_id`, `menu_key`)
+SELECT r.`id`, 'admin.integration.datasets.view'
+FROM `sys_role` r
+WHERE r.`role_code` = 'manage-user';
+
+INSERT IGNORE INTO `sys_role_menu_permission` (`role_id`, `menu_key`)
+SELECT r.`id`, 'admin.api-library.view'
+FROM `sys_role` r
+WHERE r.`role_code` = 'manage-user';
+
+INSERT IGNORE INTO `sys_role_menu_permission` (`role_id`, `menu_key`)
+SELECT r.`id`, 'admin.tool-library.view'
+FROM `sys_role` r
+WHERE r.`role_code` = 'manage-user';
+
 CREATE TABLE IF NOT EXISTS `external_token_exchange_log` (
   `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
   `source_system` VARCHAR(64) NOT NULL COMMENT '来源系统标识',
@@ -300,6 +393,8 @@ CREATE TABLE `knowledge_base` (
                                   `kb_code` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '知识库稳定编码',
                                   `kb_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '知识库名称，唯一',
                                   `description` text CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '知识库描述，可为空',
+                                  `owner_user_id` bigint DEFAULT NULL COMMENT '创建人用户ID（历史数据可为空）',
+                                  `permission_scope` tinyint DEFAULT NULL COMMENT '权限范围：1仅创建人可见可操作，2所有人可见仅创建人可操作，3所有人可见可操作（历史数据可为空，由代码兼容）',
                                   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间，自动记录',
                                   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP COMMENT '更新时间，自动更新',
                                   PRIMARY KEY (`kb_id`),
@@ -329,11 +424,14 @@ CREATE TABLE IF NOT EXISTS `integration_data_source` (
                                   `connection_uri` varchar(1024) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '连接串',
                                   `auth_type` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'USERNAME_PASSWORD' COMMENT '鉴权类型',
                                   `auth_config_json` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '鉴权配置 JSON',
+                                  `owner_user_id` bigint DEFAULT NULL COMMENT '创建人用户ID（历史数据可为空）',
+                                  `permission_scope` tinyint DEFAULT NULL COMMENT '权限范围：1仅创建人可见可操作，2所有人可见仅创建人可操作，3所有人可见可操作（历史数据可为空，由代码兼容）',
                                   `status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'DRAFT' COMMENT '状态',
                                   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
                                   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
                                   PRIMARY KEY (`id`),
-                                  UNIQUE KEY `uk_integration_data_source_name` (`name`)
+                                  UNIQUE KEY `uk_integration_data_source_name` (`name`),
+                                  KEY `idx_integration_data_source_owner_user` (`owner_user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='AI 平台数据源';
 
 CREATE TABLE IF NOT EXISTS `integration_dataset` (
@@ -346,6 +444,8 @@ CREATE TABLE IF NOT EXISTS `integration_dataset` (
                                   `lowcode_app_id` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '低代码应用 ID',
                                   `lowcode_app_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '低代码应用名称',
                                   `description` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '描述',
+                                  `owner_user_id` bigint DEFAULT NULL COMMENT '创建人用户ID（历史数据可为空）',
+                                  `permission_scope` tinyint DEFAULT NULL COMMENT '权限范围：1仅创建人可见可操作，2所有人可见仅创建人可操作，3所有人可见可操作（历史数据可为空，由代码兼容）',
                                   `business_logic` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '业务逻辑说明',
                                   `status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'ACTIVE' COMMENT '状态',
                                   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -353,7 +453,8 @@ CREATE TABLE IF NOT EXISTS `integration_dataset` (
                                   PRIMARY KEY (`id`),
                                   UNIQUE KEY `uk_integration_dataset_code` (`dataset_code`),
                                   KEY `idx_integration_dataset_source_kind` (`source_kind`),
-                                  KEY `idx_integration_dataset_ai_source` (`ai_data_source_id`)
+                                  KEY `idx_integration_dataset_ai_source` (`ai_data_source_id`),
+                                  KEY `idx_integration_dataset_owner_user` (`owner_user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='统一数据集';
 
 CREATE TABLE IF NOT EXISTS `integration_dataset_object_binding` (
@@ -448,6 +549,7 @@ CREATE TABLE `conversation_session` (
                                         `session_type` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '会话类型：GENERAL_CHAT/SKILL_CHAT/PUBLISHED_SKILL_CHAT/DATASET_CHAT/KNOWLEDGE_QA',
                                         `scope_type` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '作用域类型，例如SKILL/DATASET/KNOWLEDGE_BASE',
                                         `scope_id` bigint DEFAULT NULL COMMENT '会话作用域ID',
+                                        `chat_model_id` bigint DEFAULT NULL COMMENT '会话绑定的对话模型ID',
                                         `title` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '会话标题',
                                         `status` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT 'ACTIVE' COMMENT '会话状态',
                                         `last_message_id` bigint DEFAULT NULL COMMENT '最近一条主消息ID',
@@ -471,6 +573,7 @@ CREATE TABLE `conversation_message` (
                                         `role` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '消息角色 USER/ASSISTANT/SYSTEM',
                                         `message_kind` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '消息类型 INPUT/REPLY/FOLLOWUP/NOTICE/SUMMARY/ARTIFACT_CARD',
                                         `content` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '主展示内容',
+                                        `segments_json` json DEFAULT NULL COMMENT '消息时间线片段JSON',
                                         `content_format` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT 'TEXT' COMMENT '内容格式 TEXT/MARKDOWN/JSON',
                                         `status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'PENDING' COMMENT '消息状态 PENDING/STREAMING/COMPLETED/FAILED/CANCELLED',
                                         `error_code` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '错误码',
@@ -504,10 +607,15 @@ CREATE TABLE IF NOT EXISTS `conversation_event` (
                                         `id` bigint NOT NULL AUTO_INCREMENT COMMENT '事件主键',
                                         `session_id` bigint NOT NULL COMMENT '关联会话ID',
                                         `message_id` bigint DEFAULT NULL COMMENT '关联主消息ID',
+                                        `run_id` bigint DEFAULT NULL COMMENT '关联执行ID',
                                         `event_code` char(26) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '事件编码（ULID）',
                                         `parent_event_id` bigint DEFAULT NULL COMMENT '父事件ID',
                                         `event_type` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '事件类型',
                                         `event_subtype` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '事件子类型',
+                                        `phase` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '执行阶段',
+                                        `sub_stage` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '执行子阶段',
+                                        `tool_name` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '工具名',
+                                        `event_status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '事件状态',
                                         `sequence_no` int NOT NULL COMMENT '会话内事件顺序',
                                         `summary_text` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '用于记忆与折叠展示的摘要',
                                         `payload_json` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '结构化事件负载JSON',
@@ -516,8 +624,36 @@ CREATE TABLE IF NOT EXISTS `conversation_event` (
                                         PRIMARY KEY (`id`),
                                         UNIQUE KEY `uk_conversation_event_code` (`event_code`),
                                         KEY `idx_conversation_event_session_seq` (`session_id`,`sequence_no`,`id`),
-                                        KEY `idx_conversation_event_message_type` (`message_id`,`event_type`,`id`)
+                                        KEY `idx_conversation_event_message_type` (`message_id`,`event_type`,`id`),
+                                        KEY `idx_conversation_event_run_seq` (`run_id`,`sequence_no`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='会话事件流表';
+
+CREATE TABLE IF NOT EXISTS `conversation_run` (
+                                        `id` bigint NOT NULL AUTO_INCREMENT COMMENT '执行主键',
+                                        `run_code` char(26) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '执行编码(ULID)',
+                                        `session_id` bigint NOT NULL COMMENT '关联会话ID',
+                                        `trigger_message_id` bigint NOT NULL COMMENT '触发消息ID',
+                                        `final_message_id` bigint DEFAULT NULL COMMENT '最终assistant消息ID',
+                                        `run_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT 'CHAT/TOOL/CODE/SKILL/DATASET',
+                                        `status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT 'PENDING/RUNNING/WAITING_INPUT/SUCCEEDED/FAILED/CANCELLED',
+                                        `phase` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT 'TRIAGE/REASONING/ACTION/OBSERVATION/FINALIZING',
+                                        `sub_stage` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '执行子阶段',
+                                        `current_task` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '当前任务摘要',
+                                        `current_runtime_skill_name` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '当前技能',
+                                        `context_json` json DEFAULT NULL COMMENT '轻量运行上下文快照',
+                                        `error_code` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '错误码',
+                                        `error_message` varchar(1000) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '错误信息',
+                                        `create_user_id` bigint NOT NULL COMMENT '创建用户ID',
+                                        `started_at` datetime DEFAULT NULL COMMENT '开始时间',
+                                        `finished_at` datetime DEFAULT NULL COMMENT '结束时间',
+                                        `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                                        `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                                        PRIMARY KEY (`id`),
+                                        UNIQUE KEY `uk_conversation_run_code` (`run_code`),
+                                        KEY `idx_conversation_run_session` (`session_id`,`id`),
+                                        KEY `idx_conversation_run_trigger_message` (`trigger_message_id`,`id`),
+                                        KEY `idx_conversation_run_status` (`status`,`updated_at`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='会话执行主表';
 
 CREATE TABLE IF NOT EXISTS `conversation_run_usage` (
                                         `id` bigint NOT NULL AUTO_INCREMENT COMMENT '运行统计主键',
@@ -652,10 +788,11 @@ CREATE TABLE IF NOT EXISTS `skill_catalog` (
                                `id` bigint NOT NULL AUTO_INCREMENT COMMENT '技能目录主键',
                                `runtime_skill_name` varchar(120) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '运行时技能唯一名称',
                                `display_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '展示名称',
-                               `description` text CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '展示描述',
-                               `category` varchar(120) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '技能分类',
-                               `source` varchar(120) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '技能来源',
-                               `version` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT '1.0' COMMENT '技能版本',
+                                `description` text CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '展示描述',
+                                `category` varchar(120) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '技能分类',
+                                `source` varchar(120) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '技能来源',
+                                `owner_user_id` bigint DEFAULT NULL COMMENT '创建人用户ID（历史数据可为空）',
+                                `version` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT '1.0' COMMENT '技能版本',
                                `author` varchar(120) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'zhouju' COMMENT '技能作者',
                                `icon` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'grid_view' COMMENT '技能主图标',
                                `icon_color` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'blue' COMMENT '技能图标颜色',
@@ -668,6 +805,7 @@ CREATE TABLE IF NOT EXISTS `skill_catalog` (
                                `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
                                PRIMARY KEY (`id`),
                                UNIQUE KEY `uk_skill_catalog_runtime_skill` (`runtime_skill_name`),
+                               KEY `idx_skill_catalog_owner_user` (`owner_user_id`),
                                KEY `idx_skill_catalog_visible_sort` (`visible`,`sort_order`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='技能业务目录表';
 
@@ -707,6 +845,8 @@ CREATE TABLE IF NOT EXISTS `tool_catalog` (
                                `enabled_global` tinyint NOT NULL DEFAULT '0' COMMENT '是否全局可用，1=全局注入对话，0=仅按需绑定/使用',
                                `owner_skill_name` varchar(120) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '所属运行时技能名称，公共工具为空',
                                `source` varchar(120) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '工具来源',
+                               `owner_user_id` bigint DEFAULT NULL COMMENT '创建人用户ID（历史数据可为空）',
+                               `permission_scope` tinyint DEFAULT NULL COMMENT '权限范围：1仅创建人可见可操作，2所有人可见仅创建人可操作，3所有人可见可操作（历史数据可为空，由代码兼容）',
                                `sort_order` int DEFAULT '0' COMMENT '排序值，越小越靠前',
                                `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
                                `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -831,7 +971,7 @@ FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM `tool_catalog` WHERE `tool_name` = 'runPython');
 
 INSERT INTO `tool_catalog` (`tool_name`, `display_name`, `description`, `tool_type`, `bindable`, `owner_skill_name`, `source`, `sort_order`)
-SELECT 'listActiveSkills', '查看已激活技能', '列出当前已激活技能及其说明，便于判断可调用能力。', 'GLOBAL', 1, NULL, 'runtime', 3
+SELECT 'listActiveSkills', '查看可用技能', '列出当前用户可用的全部技能，并标记哪些技能已在当前 runtime 中加载。', 'GLOBAL', 1, NULL, 'runtime', 3
 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM `tool_catalog` WHERE `tool_name` = 'listActiveSkills');
 
@@ -970,6 +1110,375 @@ WHERE s.`runtime_skill_name` = 'weather'
       SELECT 1 FROM `skill_tool_binding` b
       WHERE b.`skill_id` = s.`id` AND b.`tool_name` = 'getWeather'
   );
+
+INSERT INTO `skill_catalog` (
+    `runtime_skill_name`,
+    `display_name`,
+    `description`,
+    `category`,
+    `source`,
+    `version`,
+    `author`,
+    `icon`,
+    `icon_color`,
+    `tool_binding_status`,
+    `tool_binding_message`,
+    `visible`,
+    `sort_order`,
+    `created_at`,
+    `updated_at`
+)
+SELECT
+    'meeting-assistant',
+    '会议助手',
+    '基于重点事项数据集查询会议室预订、会议时间、参会人员、会议标题和会议内容，并生成会议详情 HTML 右侧预览。',
+    '行政办公',
+    'filesystem',
+    '1.0',
+    'codex-agent',
+    'meeting_room',
+    'cyan',
+    'READY',
+    NULL,
+    1,
+    220,
+    NOW(),
+    NOW()
+FROM DUAL
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM `skill_catalog`
+    WHERE `runtime_skill_name` = 'meeting-assistant'
+);
+
+UPDATE `skill_catalog`
+SET
+    `display_name` = '会议助手',
+    `description` = '基于重点事项数据集查询会议室预订、会议时间、参会人员、会议标题和会议内容，并生成会议详情 HTML 右侧预览。',
+    `category` = '行政办公',
+    `source` = 'filesystem',
+    `version` = '1.0',
+    `author` = 'codex-agent',
+    `icon` = 'meeting_room',
+    `icon_color` = 'cyan',
+    `tool_binding_status` = 'READY',
+    `tool_binding_message` = NULL,
+    `tool_binding_details` = NULL,
+    `visible` = 1,
+    `sort_order` = 220,
+    `updated_at` = NOW()
+WHERE `runtime_skill_name` = 'meeting-assistant';
+
+DELETE stb
+FROM `skill_tool_binding` stb
+JOIN `skill_catalog` sc ON sc.`id` = stb.`skill_id`
+WHERE sc.`runtime_skill_name` = 'meeting-assistant'
+  AND (stb.`tool_name` LIKE 'dataset.meeting_assistant.%'
+       OR stb.`tool_name` LIKE 'dataset.DS20260518172145VHZB.%');
+
+DELETE FROM `tool_catalog`
+WHERE (`tool_name` LIKE 'dataset.meeting_assistant.%' AND `source` = 'dataset:meeting_assistant')
+   OR `tool_name` LIKE 'dataset.DS20260518172145VHZB.%';
+
+INSERT INTO `tool_catalog` (
+    `tool_name`, `display_name`, `description`, `tool_type`, `bindable`, `enabled_global`,
+    `owner_skill_name`, `source`, `sort_order`, `created_at`, `updated_at`
+)
+SELECT tool_map.`tool_name`, tool_map.`display_name`, tool_map.`description`, 'DATASET_TOOL', 1, 0,
+       NULL, 'dataset:DS20260518172145VHZB', tool_map.`sort_order`, NOW(), NOW()
+FROM (
+    SELECT 'dataset.DS20260518172145VHZB.search_dataset_summary' AS `tool_name`, '重点事项数据集摘要' AS `display_name`, '查询重点事项数据集的对象摘要，用于定位会议室预订对象。' AS `description`, 71000 AS `sort_order`
+    UNION ALL SELECT 'dataset.DS20260518172145VHZB.get_dataset_schema', '重点事项数据集结构', '查询重点事项数据集的对象和字段结构，SQL 必须使用返回的对象编码和字段名。', 71001
+    UNION ALL SELECT 'dataset.DS20260518172145VHZB.execute_dataset_sql', '重点事项数据集查询', '执行重点事项数据集只读 SQL，用于查询会议室名称、会议时间、参会人员、会议标题和会议内容。', 71002
+) tool_map;
+
+INSERT INTO `skill_tool_binding` (`skill_id`, `tool_name`, `binding_type`, `created_at`)
+SELECT sc.`id`, tool_map.`tool_name`, 'MANUAL', NOW()
+FROM `skill_catalog` sc
+JOIN (
+    SELECT 'dataset.DS20260518172145VHZB.search_dataset_summary' AS `tool_name`
+    UNION ALL SELECT 'dataset.DS20260518172145VHZB.get_dataset_schema'
+    UNION ALL SELECT 'dataset.DS20260518172145VHZB.execute_dataset_sql'
+) tool_map
+JOIN `tool_catalog` tc ON tc.`tool_name` = tool_map.`tool_name` AND tc.`bindable` = 1
+WHERE sc.`runtime_skill_name` = 'meeting-assistant';
+
+UPDATE `skill_catalog` sc
+SET
+    `tool_binding_status` = CASE
+        WHEN (SELECT COUNT(*) FROM `skill_tool_binding` stb WHERE stb.`skill_id` = sc.`id` AND stb.`tool_name` LIKE 'dataset.DS20260518172145VHZB.%') = 3 THEN 'READY'
+        ELSE 'NEEDS_REBIND'
+    END,
+    `tool_binding_message` = CASE
+        WHEN (SELECT COUNT(*) FROM `skill_tool_binding` stb WHERE stb.`skill_id` = sc.`id` AND stb.`tool_name` LIKE 'dataset.DS20260518172145VHZB.%') = 3 THEN NULL
+        ELSE '请绑定会议助手所需的 3 个重点事项数据集工具'
+    END,
+    `tool_binding_details` = NULL,
+    `updated_at` = NOW()
+WHERE sc.`runtime_skill_name` = 'meeting-assistant';
+
+INSERT INTO `agent_template_skill_binding` (`template_id`, `skill_id`, `sort_order`, `created_at`)
+SELECT at.`id`, sc.`id`, 220, NOW()
+FROM `agent_template` at
+JOIN `skill_catalog` sc
+    ON sc.`runtime_skill_name` = 'meeting-assistant'
+WHERE at.`agent_code` = 'leader-assistant'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM `agent_template_skill_binding` atsb
+    WHERE atsb.`template_id` = at.`id`
+      AND atsb.`skill_id` = sc.`id`
+);
+
+UPDATE `agent_template_skill_binding` atsb
+JOIN `agent_template` at ON at.`id` = atsb.`template_id`
+JOIN `skill_catalog` sc ON sc.`id` = atsb.`skill_id`
+SET atsb.`sort_order` = 220
+WHERE at.`agent_code` = 'leader-assistant'
+  AND sc.`runtime_skill_name` = 'meeting-assistant';
+
+INSERT INTO `tool_catalog` (
+    `tool_name`, `display_name`, `description`, `tool_type`, `bindable`, `enabled_global`,
+    `owner_skill_name`, `source`, `sort_order`, `created_at`, `updated_at`
+)
+SELECT
+    'dataset.DS202605191535356JGP.execute_dataset_sql',
+    '项目管理数据集查询',
+    '执行项目管理数据集只读 SQL，用于查询项目审批、预警和超期回款明细。',
+    'DATASET_TOOL',
+    1,
+    0,
+    NULL,
+    'dataset:DS202605191535356JGP',
+    71102,
+    NOW(),
+    NOW()
+FROM DUAL
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM `tool_catalog`
+    WHERE `tool_name` = 'dataset.DS202605191535356JGP.execute_dataset_sql'
+);
+
+UPDATE `tool_catalog`
+SET
+    `display_name` = '项目管理数据集查询',
+    `description` = '执行项目管理数据集只读 SQL，用于查询项目审批、预警和超期回款明细。',
+    `tool_type` = 'DATASET_TOOL',
+    `bindable` = 1,
+    `enabled_global` = 0,
+    `owner_skill_name` = NULL,
+    `source` = 'dataset:DS202605191535356JGP',
+    `sort_order` = 71102,
+    `updated_at` = NOW()
+WHERE `tool_name` = 'dataset.DS202605191535356JGP.execute_dataset_sql';
+
+INSERT INTO `tool_catalog` (
+    `tool_name`, `display_name`, `description`, `tool_type`, `bindable`, `enabled_global`,
+    `owner_skill_name`, `source`, `sort_order`, `created_at`, `updated_at`
+)
+SELECT
+    'lowcode.11290.jyzbkb_cuiktx',
+    '催款提醒',
+    '调用低代码平台催款提醒 API，根据客户名称、项目名称、合同金额、计划回款金额、计划回款日期、逾期天数、销售负责人和销售负责人用户id创建催款提醒。',
+    'LOWCODE_API',
+    1,
+    0,
+    NULL,
+    'lowcode:11290',
+    71104,
+    NOW(),
+    NOW()
+FROM DUAL
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM `tool_catalog`
+    WHERE `tool_name` = 'lowcode.11290.jyzbkb_cuiktx'
+);
+
+UPDATE `tool_catalog`
+SET
+    `display_name` = '催款提醒',
+    `description` = '调用低代码平台催款提醒 API，根据客户名称、项目名称、合同金额、计划回款金额、计划回款日期、逾期天数、销售负责人和销售负责人用户id创建催款提醒。',
+    `tool_type` = 'LOWCODE_API',
+    `bindable` = 1,
+    `enabled_global` = 0,
+    `owner_skill_name` = NULL,
+    `source` = 'lowcode:11290',
+    `sort_order` = 71104,
+    `updated_at` = NOW()
+WHERE `tool_name` = 'lowcode.11290.jyzbkb_cuiktx';
+
+INSERT INTO `skill_catalog` (
+    `runtime_skill_name`,
+    `display_name`,
+    `description`,
+    `category`,
+    `source`,
+    `version`,
+    `author`,
+    `icon`,
+    `icon_color`,
+    `tool_binding_status`,
+    `tool_binding_message`,
+    `visible`,
+    `sort_order`,
+    `created_at`,
+    `updated_at`
+)
+SELECT
+    'sales-assistant',
+    '销售助手',
+    '面向销售回款催办场景，查询超期回款记录并调用催款提醒工具创建提醒，同时生成字段表格 HTML 右侧预览。',
+    '销售',
+    'filesystem',
+    '1.0',
+    'codex-agent',
+    'payments',
+    'amber',
+    'NEEDS_REBIND',
+    '请绑定销售助手所需的项目管理数据集查询工具和催款提醒工具',
+    1,
+    210,
+    NOW(),
+    NOW()
+FROM DUAL
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM `skill_catalog`
+    WHERE `runtime_skill_name` = 'sales-assistant'
+);
+
+UPDATE `skill_catalog`
+SET
+    `display_name` = '销售助手',
+    `description` = '面向销售回款催办场景，查询超期回款记录并调用催款提醒工具创建提醒，同时生成字段表格 HTML 右侧预览。',
+    `category` = '销售',
+    `source` = 'filesystem',
+    `version` = '1.0',
+    `author` = 'codex-agent',
+    `icon` = 'payments',
+    `icon_color` = 'amber',
+    `tool_binding_status` = 'NEEDS_REBIND',
+    `tool_binding_message` = '请绑定销售助手所需的项目管理数据集查询工具和催款提醒工具',
+    `tool_binding_details` = NULL,
+    `visible` = 1,
+    `sort_order` = 210,
+    `updated_at` = NOW()
+WHERE `runtime_skill_name` = 'sales-assistant';
+
+INSERT INTO `skill_tool_binding` (`skill_id`, `tool_name`, `binding_type`, `created_at`)
+SELECT sc.`id`, tool_map.`tool_name`, 'MANUAL', NOW()
+FROM `skill_catalog` sc
+JOIN (
+    SELECT 'dataset.DS202605191535356JGP.execute_dataset_sql' AS `tool_name`
+    UNION ALL SELECT 'lowcode.11290.jyzbkb_cuiktx'
+) tool_map
+JOIN `tool_catalog` tc ON tc.`tool_name` = tool_map.`tool_name` AND tc.`bindable` = 1
+WHERE sc.`runtime_skill_name` = 'sales-assistant'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM `skill_tool_binding` stb
+    WHERE stb.`skill_id` = sc.`id`
+      AND stb.`tool_name` = tool_map.`tool_name`
+);
+
+UPDATE `skill_tool_binding` stb
+JOIN `skill_catalog` sc ON sc.`id` = stb.`skill_id`
+SET stb.`binding_type` = 'MANUAL'
+WHERE sc.`runtime_skill_name` = 'sales-assistant'
+  AND stb.`tool_name` IN (
+    'dataset.DS202605191535356JGP.execute_dataset_sql',
+    'lowcode.11290.jyzbkb_cuiktx'
+);
+
+UPDATE `skill_catalog` sc
+SET
+    `tool_binding_status` = CASE
+        WHEN (
+            SELECT COUNT(*)
+            FROM `skill_tool_binding` stb
+            WHERE stb.`skill_id` = sc.`id`
+              AND stb.`tool_name` IN (
+                'dataset.DS202605191535356JGP.execute_dataset_sql',
+                'lowcode.11290.jyzbkb_cuiktx'
+              )
+        ) = 2 THEN 'READY'
+        WHEN (
+            SELECT COUNT(*)
+            FROM `tool_catalog` tc
+            WHERE tc.`tool_name` IN (
+                'dataset.DS202605191535356JGP.execute_dataset_sql',
+                'lowcode.11290.jyzbkb_cuiktx'
+            )
+              AND tc.`bindable` = 1
+        ) = 2 THEN 'NEEDS_REBIND'
+        ELSE 'MISSING_DEPENDENCY'
+    END,
+    `tool_binding_message` = CASE
+        WHEN (
+            SELECT COUNT(*)
+            FROM `skill_tool_binding` stb
+            WHERE stb.`skill_id` = sc.`id`
+              AND stb.`tool_name` IN (
+                'dataset.DS202605191535356JGP.execute_dataset_sql',
+                'lowcode.11290.jyzbkb_cuiktx'
+              )
+        ) = 2 THEN NULL
+        WHEN (
+            SELECT COUNT(*)
+            FROM `tool_catalog` tc
+            WHERE tc.`tool_name` IN (
+                'dataset.DS202605191535356JGP.execute_dataset_sql',
+                'lowcode.11290.jyzbkb_cuiktx'
+            )
+              AND tc.`bindable` = 1
+        ) = 2 THEN '请重新绑定销售助手所需的项目管理数据集查询工具和催款提醒工具'
+        ELSE '请先注册并开放销售助手所需的项目管理数据集查询工具和催款提醒工具'
+    END,
+    `tool_binding_details` = NULL,
+    `updated_at` = NOW()
+WHERE sc.`runtime_skill_name` = 'sales-assistant';
+
+INSERT INTO `agent_template_skill_binding` (`template_id`, `skill_id`, `sort_order`, `created_at`)
+SELECT at.`id`, sc.`id`, 210, NOW()
+FROM `agent_template` at
+JOIN `skill_catalog` sc
+    ON sc.`runtime_skill_name` = 'sales-assistant'
+WHERE at.`agent_code` = 'sales-assistant'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM `agent_template_skill_binding` atsb
+    WHERE atsb.`template_id` = at.`id`
+      AND atsb.`skill_id` = sc.`id`
+);
+
+UPDATE `agent_template_skill_binding` atsb
+JOIN `agent_template` at ON at.`id` = atsb.`template_id`
+JOIN `skill_catalog` sc ON sc.`id` = atsb.`skill_id`
+SET atsb.`sort_order` = 210
+WHERE at.`agent_code` = 'sales-assistant'
+  AND sc.`runtime_skill_name` = 'sales-assistant';
+
+INSERT INTO `agent_template_skill_binding` (`template_id`, `skill_id`, `sort_order`, `created_at`)
+SELECT at.`id`, sc.`id`, 205, NOW()
+FROM `agent_template` at
+JOIN `skill_catalog` sc
+    ON sc.`runtime_skill_name` = 'sales-assistant'
+WHERE at.`agent_code` = 'leader-assistant'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM `agent_template_skill_binding` atsb
+    WHERE atsb.`template_id` = at.`id`
+      AND atsb.`skill_id` = sc.`id`
+);
+
+UPDATE `agent_template_skill_binding` atsb
+JOIN `agent_template` at ON at.`id` = atsb.`template_id`
+JOIN `skill_catalog` sc ON sc.`id` = atsb.`skill_id`
+SET atsb.`sort_order` = 205
+WHERE at.`agent_code` = 'leader-assistant'
+  AND sc.`runtime_skill_name` = 'sales-assistant';
 
 CREATE TABLE IF NOT EXISTS `model_vendor` (
                                `id` bigint NOT NULL AUTO_INCREMENT COMMENT '模型厂商主键',
@@ -1120,6 +1629,8 @@ CREATE TABLE IF NOT EXISTS `mcp_server` (
                                `server_scope` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'INTERNAL' COMMENT '服务范围：INTERNAL/EXTERNAL',
                                `transport_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '传输类型：STREAMABLE_HTTP/SSE',
                                `endpoint` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '远程 MCP endpoint 或 base URL',
+                               `owner_user_id` bigint DEFAULT NULL COMMENT '创建人用户ID（历史数据可为空）',
+                               `permission_scope` tinyint DEFAULT NULL COMMENT '权限范围：1仅创建人可见可操作，2所有人可见仅创建人可操作，3所有人可见可操作（历史数据可为空，由代码兼容）',
                                `auth_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'NONE' COMMENT '鉴权类型：NONE/BEARER_TOKEN',
                                `auth_config_json` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '鉴权配置 JSON',
                                `headers_json` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '自定义请求头 JSON',
@@ -1131,7 +1642,8 @@ CREATE TABLE IF NOT EXISTS `mcp_server` (
                                `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
                                `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
                                PRIMARY KEY (`id`),
-                               UNIQUE KEY `uk_mcp_server_key` (`server_key`)
+                               UNIQUE KEY `uk_mcp_server_key` (`server_key`),
+                               KEY `idx_mcp_server_owner_user` (`owner_user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='远程 MCP server 配置表';
 
 CREATE TABLE IF NOT EXISTS `system_config` (
@@ -1240,3 +1752,46 @@ CREATE TABLE IF NOT EXISTS `skill_studio_project` (
   KEY `idx_skill_studio_project_user_status` (`create_user_id`, `status`),
   KEY `idx_skill_studio_project_archived` (`archived_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='技能工坊项目表';
+
+CREATE TABLE IF NOT EXISTS `runtime_file_asset` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `file_code` char(26) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '文件编码（ULID）',
+  `user_id` bigint NOT NULL COMMENT '用户ID',
+  `session_id` bigint DEFAULT NULL COMMENT '会话ID',
+  `session_code` char(26) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '会话编码',
+  `run_id` bigint DEFAULT NULL COMMENT '关联执行ID',
+  `origin_message_id` bigint DEFAULT NULL COMMENT '来源消息ID',
+  `origin_event_id` bigint DEFAULT NULL COMMENT '来源事件ID',
+  `parent_file_code` char(26) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '父文件编码',
+  `file_role` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '文件角色 UPLOAD/TEMP/ARTIFACT',
+  `producer_type` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '产生方式 USER_UPLOAD/WRITE_ARTIFACT/SYSTEM',
+  `status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'ACTIVE' COMMENT '状态 ACTIVE/DELETED/EXPIRED/FAILED',
+  `display_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '展示文件名',
+  `storage_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '存储文件名',
+  `extension` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '扩展名',
+  `content_type` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT 'MIME类型',
+  `size_bytes` bigint DEFAULT NULL COMMENT '文件大小（字节）',
+  `sha256` char(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '内容SHA-256',
+  `logical_root` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '逻辑根目录 UPLOADS/OUTPUTS/TEMP/PROFILE',
+  `logical_path` varchar(1024) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '逻辑相对路径',
+  `virtual_path` varchar(1024) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '虚拟路径',
+  `local_path` varchar(1024) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '本地真实路径',
+  `local_status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'PRESENT' COMMENT '本地副本状态 PRESENT/MISSING/DELETED/FAILED',
+  `bucket` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT 'MinIO bucket',
+  `object_name` varchar(1024) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT 'MinIO object key',
+  `minio_status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'PENDING' COMMENT 'MinIO状态 PENDING/UPLOADED/MISSING/FAILED',
+  `metadata_json` json DEFAULT NULL COMMENT '扩展元数据JSON',
+  `expired_at` datetime DEFAULT NULL COMMENT '过期时间',
+  `deleted_at` datetime DEFAULT NULL COMMENT '软删除时间',
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_runtime_file_asset_code` (`file_code`),
+  KEY `idx_runtime_file_asset_user_session` (`user_id`,`session_id`,`id`),
+  KEY `idx_runtime_file_asset_origin_message` (`origin_message_id`,`id`),
+  KEY `idx_runtime_file_asset_origin_event` (`origin_event_id`,`id`),
+  KEY `idx_runtime_file_asset_role_status` (`file_role`,`status`,`id`),
+  KEY `idx_runtime_file_asset_parent` (`parent_file_code`),
+  KEY `idx_runtime_file_asset_virtual_path` (`user_id`,`session_id`,`virtual_path`(255)),
+  KEY `idx_runtime_file_asset_run` (`run_id`,`id`)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='运行时文件资产表';
