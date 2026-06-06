@@ -1,5 +1,5 @@
 -- IMPORTANT: keep this file encoded as UTF-8 (no BOM) to avoid mojibake on seed data.
--- flyway-baseline-version: 1.4.14
+-- flyway-baseline-version: 1.6.1
 -- flyway-baseline-description: schema-snapshot-baseline
 SET NAMES utf8mb4;
 
@@ -14,7 +14,9 @@ CREATE TABLE IF NOT EXISTS `t_user` (
   `mobile` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `email` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `state` int DEFAULT NULL,
+  `license_exempt` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否豁免 license 人数限制',
   `role_id` bigint DEFAULT NULL COMMENT '角色 ID',
+  `avatar_object_name` varchar(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '头像对象路径',
   `parent_iD` varchar(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   PRIMARY KEY (`id`) USING BTREE,
   KEY `idx_t_user_code` (`code`) USING BTREE,
@@ -28,6 +30,10 @@ ON DUPLICATE KEY UPDATE
   `name` = VALUES(`name`),
   `password` = VALUES(`password`),
   `state` = VALUES(`state`);
+
+UPDATE `t_user`
+SET `license_exempt` = 1
+WHERE `code` = 'admin';
 
 CREATE TABLE IF NOT EXISTS `user_token_account` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
@@ -89,6 +95,20 @@ CREATE TABLE IF NOT EXISTS `sys_role_menu_permission` (
   KEY `idx_role_id` (`role_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='role menu permissions';
 
+CREATE TABLE IF NOT EXISTS `sys_role_resource_permission` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `role_id` bigint NOT NULL COMMENT '角色ID',
+  `resource_type` varchar(32) NOT NULL COMMENT '资源类型：SKILL/TOOL',
+  `resource_id` bigint NOT NULL COMMENT '资源ID（skill_catalog.id 或 tool_catalog.id）',
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `created_by` bigint DEFAULT NULL COMMENT '创建人用户ID',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_role_resource` (`role_id`,`resource_type`,`resource_id`),
+  KEY `idx_role_id` (`role_id`),
+  KEY `idx_resource` (`resource_type`,`resource_id`),
+  KEY `idx_created_by` (`created_by`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='角色资源权限表';
+
 CREATE TABLE IF NOT EXISTS `agent_template_skill_binding` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '绑定主键',
   `template_id` bigint NOT NULL COMMENT '模板 ID',
@@ -113,6 +133,19 @@ CREATE TABLE IF NOT EXISTS `user_agent_file` (
   UNIQUE KEY `uk_user_file` (`user_id`,`filename`),
   KEY `idx_user_agent_file_user_id` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='用户 Agent 文件表';
+
+CREATE TABLE IF NOT EXISTS `user_agent` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `user_id` bigint NOT NULL COMMENT '用户ID',
+  `agent_id` bigint NOT NULL COMMENT 'agent_template.id',
+  `agent_name` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '用户自定义助手名称',
+  `avatar_object_name` varchar(1024) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '用户自定义助手头像对象路径',
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_user_agent_user` (`user_id`),
+  KEY `idx_user_agent_agent_id` (`agent_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='用户当前Agent配置表';
 
 CREATE TABLE IF NOT EXISTS `user_agent_skill_binding` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '绑定主键',
@@ -635,7 +668,7 @@ CREATE TABLE IF NOT EXISTS `conversation_run` (
                                         `trigger_message_id` bigint NOT NULL COMMENT '触发消息ID',
                                         `final_message_id` bigint DEFAULT NULL COMMENT '最终assistant消息ID',
                                         `run_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT 'CHAT/TOOL/CODE/SKILL/DATASET',
-                                        `status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT 'PENDING/RUNNING/WAITING_INPUT/SUCCEEDED/FAILED/CANCELLED',
+                                        `status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT 'PENDING/RUNNING/WAITING_INPUT/WAITING_APPROVAL/SUCCEEDED/FAILED/CANCELLED',
                                         `phase` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT 'TRIAGE/REASONING/ACTION/OBSERVATION/FINALIZING',
                                         `sub_stage` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '执行子阶段',
                                         `current_task` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '当前任务摘要',
@@ -654,6 +687,37 @@ CREATE TABLE IF NOT EXISTS `conversation_run` (
                                         KEY `idx_conversation_run_trigger_message` (`trigger_message_id`,`id`),
                                         KEY `idx_conversation_run_status` (`status`,`updated_at`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='会话执行主表';
+
+CREATE TABLE IF NOT EXISTS `runtime_approval` (
+                                        `id` bigint NOT NULL AUTO_INCREMENT COMMENT '审批主键',
+                                        `approval_code` char(26) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '审批编码(ULID)',
+                                        `run_id` bigint NOT NULL COMMENT '关联执行ID',
+                                        `run_code` char(26) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '执行编码',
+                                        `session_id` bigint DEFAULT NULL COMMENT '关联会话ID',
+                                        `assistant_message_id` bigint DEFAULT NULL COMMENT 'assistant消息ID',
+                                        `tool_call_id` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '模型工具调用ID',
+                                        `tool_name` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '工具名称',
+                                        `tool_display_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '工具展示名',
+                                        `tool_arguments_json` json NOT NULL COMMENT '工具调用参数',
+                                        `tool_result` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '审批后工具执行结果',
+                                        `approval_status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT 'PENDING/APPROVED/REJECTED/CANCELLED',
+                                        `execution_status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT 'NOT_STARTED/RUNNING/SUCCEEDED/FAILED/SKIPPED',
+                                        `risk_level` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT 'LOW/MEDIUM/HIGH',
+                                        `trigger_reason` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '触发审批原因',
+                                        `analysis_json` json DEFAULT NULL COMMENT '风险分析结果',
+                                        `requested_by` bigint DEFAULT NULL COMMENT '发起用户ID',
+                                        `decided_by` bigint DEFAULT NULL COMMENT '审批用户ID',
+                                        `decision_comment` varchar(1000) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '审批备注',
+                                        `decided_at` datetime DEFAULT NULL COMMENT '审批时间',
+                                        `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                                        `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                                        PRIMARY KEY (`id`),
+                                        UNIQUE KEY `uk_runtime_approval_code` (`approval_code`),
+                                        KEY `idx_runtime_approval_run` (`run_id`,`id`),
+                                        KEY `idx_runtime_approval_run_code` (`run_code`,`id`),
+                                        KEY `idx_runtime_approval_status` (`approval_status`,`updated_at`,`id`),
+                                        KEY `idx_runtime_approval_tool` (`tool_name`,`approval_status`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='运行时工具人工审批表';
 
 CREATE TABLE IF NOT EXISTS `conversation_run_usage` (
                                         `id` bigint NOT NULL AUTO_INCREMENT COMMENT '运行统计主键',
@@ -1664,6 +1728,76 @@ WHERE NOT EXISTS (
   SELECT 1 FROM `system_config` WHERE `config_key` = 'token_quota_settings'
 );
 
+CREATE TABLE IF NOT EXISTS `service_license` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `license_id` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT 'license 业务标识',
+  `serial_no` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '授权流水号',
+  `revision` int NOT NULL DEFAULT '1' COMMENT '版本号',
+  `product_code` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '产品编码',
+  `edition` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '版本类型',
+  `customer_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '客户名称',
+  `instance_code` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '实例码',
+  `issued_at` datetime DEFAULT NULL COMMENT '签发时间',
+  `effective_at` datetime DEFAULT NULL COMMENT '生效时间',
+  `expires_at` datetime DEFAULT NULL COMMENT '过期时间',
+  `max_active_users` int NOT NULL DEFAULT '0' COMMENT '授权人数上限，0 表示不限制',
+  `max_total_tokens` bigint NOT NULL DEFAULT '0' COMMENT '授权 token 总量，0 表示不限制',
+  `status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT 'license 状态',
+  `feature_flags_json` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '功能开关 JSON',
+  `raw_payload` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '原始 payload',
+  `raw_signature` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '签名',
+  `file_sha256` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT 'license 文件 sha256',
+  `imported_by` bigint DEFAULT NULL COMMENT '导入人',
+  `imported_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '导入时间',
+  `last_verified_at` datetime DEFAULT NULL COMMENT '最近验签时间',
+  `is_current` tinyint NOT NULL DEFAULT '0' COMMENT '是否当前生效 license',
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_service_license_license_id_revision` (`license_id`, `revision`),
+  KEY `idx_service_license_current` (`is_current`, `id`),
+  KEY `idx_service_license_status` (`status`, `id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='服务 license 主表';
+
+CREATE TABLE IF NOT EXISTS `service_license_import_log` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `license_id` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT 'license 标识',
+  `operator_user_id` bigint DEFAULT NULL COMMENT '操作人',
+  `import_status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '导入状态',
+  `failure_reason` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '失败原因',
+  `file_sha256` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '文件 sha256',
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_service_license_import_log_created` (`created_at`, `id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='服务 license 导入日志';
+
+CREATE TABLE IF NOT EXISTS `service_license_token_account` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `license_id` bigint NOT NULL COMMENT 'license 表主键',
+  `granted_tokens` bigint NOT NULL DEFAULT '0' COMMENT '授权 token 总量',
+  `consumed_tokens` bigint NOT NULL DEFAULT '0' COMMENT '已消耗 token',
+  `reserved_tokens` bigint NOT NULL DEFAULT '0' COMMENT '预留 token',
+  `remaining_tokens` bigint NOT NULL DEFAULT '0' COMMENT '剩余 token',
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_service_license_token_account_license_id` (`license_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='服务 license token 账户';
+
+CREATE TABLE IF NOT EXISTS `service_license_token_ledger` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `license_id` bigint NOT NULL COMMENT 'license 表主键',
+  `source_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '来源类型',
+  `source_id` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '来源标识',
+  `user_id` bigint DEFAULT NULL COMMENT '操作用户',
+  `delta_tokens` bigint NOT NULL COMMENT 'token 变动量',
+  `balance_after` bigint NOT NULL DEFAULT '0' COMMENT '变动后余额',
+  `remark` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '备注',
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_service_license_token_ledger_license_created` (`license_id`, `created_at`, `id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='服务 license token 流水';
+
 CREATE TABLE IF NOT EXISTS `lowcode_api_catalog` (
                                `id` bigint NOT NULL AUTO_INCREMENT COMMENT '低代码 API 目录主键',
                                `platform_key` varchar(120) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '低代码平台标识',
@@ -1673,9 +1807,10 @@ CREATE TABLE IF NOT EXISTS `lowcode_api_catalog` (
                                `api_code` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '远程 API Code',
                                `api_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT 'API 名称',
                                `description` text CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT 'API 描述',
-                               `remote_schema_json` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '远程原始 schema JSON',
-                               `tool_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '注册后的工具名称',
-                               `enabled` tinyint NOT NULL DEFAULT '1' COMMENT '是否启用，1=启用，0=停用',
+                                 `remote_schema_json` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '远程原始 schema JSON',
+                                 `tool_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '注册后的工具名称',
+                                 `tool_remark` text CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '工具备注',
+                                 `enabled` tinyint NOT NULL DEFAULT '1' COMMENT '是否启用，1=启用，0=停用',
                                `last_sync_at` datetime DEFAULT NULL COMMENT '最近同步时间',
                                `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
                                `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
