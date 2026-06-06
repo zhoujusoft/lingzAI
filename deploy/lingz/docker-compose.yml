@@ -1,7 +1,7 @@
 services:
   frontend:
     restart: unless-stopped
-    image: ${REGISTRY:-125.75.152.167:5001}/${FRONTEND_IMAGE_NAME:-lingzhou-frontend}:${IMAGE_TAG:-1.1.0}
+    image: ${REGISTRY:-125.75.152.167:5001}/${FRONTEND_IMAGE_NAME:-lingzhou-frontend}:${IMAGE_TAG:-1.7.0}
     depends_on:
       - backend
     ports:
@@ -9,10 +9,10 @@ services:
 
   backend:
     restart: unless-stopped
-    image: ${REGISTRY:-125.75.152.167:5001}/${BACKEND_IMAGE_NAME:-lingzhou-backend}:${IMAGE_TAG:-1.1.0}
+    image: ${REGISTRY:-125.75.152.167:5001}/${BACKEND_IMAGE_NAME:-lingzhou-backend}:${IMAGE_TAG:-1.7.0}
     environment:
       TZ: ${TZ:-Asia/Shanghai}
-      APP_VERSION: ${IMAGE_TAG:-1.3.7}
+      APP_VERSION: ${IMAGE_TAG:-1.7.0}
       SERVER_PORT: 5050
       SERVER_SERVLET_CONTEXT_PATH: /api
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE}?useSSL=false&allowPublicKeyRetrieval=true&useUnicode=true&characterEncoding=UTF-8&serverTimezone=GMT%2B8&zeroDateTimeBehavior=convertToNull
@@ -21,7 +21,8 @@ services:
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
       SPRING_FLYWAY_ENABLED: true
-      SPRING_FLYWAY_BASELINE_VERSION: ${IMAGE_TAG:-1.3.7}
+      # Flyway baseline 版本应固定，不应随 IMAGE_TAG 变化，否则会跳过迁移脚本
+      SPRING_FLYWAY_BASELINE_VERSION: ${FLYWAY_BASELINE_VERSION:-1.6.1}
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
