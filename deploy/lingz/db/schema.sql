@@ -1,5 +1,5 @@
 -- IMPORTANT: keep this file encoded as UTF-8 (no BOM) to avoid mojibake on seed data.
--- flyway-baseline-version: 1.6.1
+-- flyway-baseline-version: 1.6.3
 -- flyway-baseline-description: schema-snapshot-baseline
 SET NAMES utf8mb4;
 
@@ -140,6 +140,7 @@ CREATE TABLE IF NOT EXISTS `user_agent` (
   `agent_id` bigint NOT NULL COMMENT 'agent_template.id',
   `agent_name` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '用户自定义助手名称',
   `avatar_object_name` varchar(1024) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '用户自定义助手头像对象路径',
+  `skill_preference_configured` tinyint NOT NULL DEFAULT '0' COMMENT '是否已配置个人技能启用偏好，1=已配置，0=未配置默认全启用',
   `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`),
@@ -1930,3 +1931,26 @@ CREATE TABLE IF NOT EXISTS `runtime_file_asset` (
   KEY `idx_runtime_file_asset_virtual_path` (`user_id`,`session_id`,`virtual_path`(255)),
   KEY `idx_runtime_file_asset_run` (`run_id`,`id`)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='运行时文件资产表';
+
+-- Flyway baseline marker for databases initialized from this schema snapshot.
+CREATE TABLE IF NOT EXISTS `flyway_schema_history` (
+  `installed_rank` INT NOT NULL,
+  `version` VARCHAR(50),
+  `description` VARCHAR(200) NOT NULL,
+  `type` VARCHAR(20) NOT NULL,
+  `script` VARCHAR(1000) NOT NULL,
+  `checksum` INT,
+  `installed_by` VARCHAR(100) NOT NULL,
+  `installed_on` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `execution_time` INT NOT NULL,
+  `success` BOOL NOT NULL,
+  PRIMARY KEY (`installed_rank`)
+) ENGINE=InnoDB;
+
+CREATE INDEX `flyway_schema_history_s_idx`
+  ON `flyway_schema_history` (`success`);
+
+INSERT INTO `flyway_schema_history`
+(`installed_rank`, `version`, `description`, `type`, `script`, `checksum`, `installed_by`, `execution_time`, `success`)
+SELECT 1, '1.6.3', 'schema-snapshot-baseline', 'BASELINE', 'schema-snapshot-baseline', NULL, 'schema.sql', 0, TRUE
+WHERE NOT EXISTS (SELECT 1 FROM `flyway_schema_history` WHERE `installed_rank` = 1);
