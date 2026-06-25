@@ -247,99 +247,16 @@ Skill 决定策略
 
 ## 快速开始
 
-### 方案 A：Docker Compose 快速体验
+### Docker Compose 快速体验
 
 适合第一次启动项目、快速联调或演示。
 
-1. 复制 Quick 环境文件：
 
-```bash
-cp deploy/compose-quick/.env.example deploy/compose-quick/.env
+在服务器上执行以下命令，系统将自动安装。
+```
+curl -sSL https://gitee.com/zhoujusoft/lingzai/raw/main/deploy/lingz/deploy_lingz.sh | sudo bash
 ```
 
-2. 按需编辑 `deploy/compose-quick/.env`
-
-3. 启动整套服务：
-
-```bash
-./deploy/manage.sh quick-up
-```
-
-默认情况下：
-
-- 前端端口为 `80`
-- 后端 API 上下文路径为 `/api`
-
-相关文档：
-
-- `deploy/README.md`
-
-### 方案 B：本地开发模式
-
-如果你希望中间件走 Docker、本地直接运行前后端进程，可以使用这个流程。
-
-1. 启动开发中间件：
-
-```bash
-cp deploy/.env.dev.example deploy/.env.dev
-./deploy/manage.sh dev-up
-```
-
-默认会启动：
-
-- MySQL：`3306`
-- Redis：`16379`
-- MinIO：`19000`、`19001`
-- Elasticsearch：`9200`
-
-2. 启动后端：
-
-```bash
-mvn -f backend/pom.xml spring-boot:run
-```
-
-3. 启动前端：
-
-```bash
-cd frontend
-pnpm install
-pnpm dev
-```
-
-前端默认地址为 `http://localhost:5173`，会将 `/api` 代理到后端。
-
-更多说明见 `deploy/README.dev.md`。
-
-## 模型配置说明
-
-当前模型配置已经按“数据库 + 配置文件”拆分职责：
-
-- 模型表维护：`baseUrl`、`path`、`modelName`
-- 配置文件维护：厂商运行参数，例如 `model.qwen.*`、`model.vllm.*`
-
-也就是说：
-
-- 选择哪个模型、请求哪个地址、走哪个接口路径，由模型配置表决定
-- 不同厂商的运行参数和默认行为，保留在配置文件和环境变量中
-
-这套方式更适合后续扩展多个厂商、多条模型、多种能力类型的统一管理。
-
-## 技能扩展示例
-
-当前仓库中的技能目录已经体现了项目的扩展方式，例如：
-
-- `skills/expense-assistant/`
-- `skills/intelligent-form-fill/`
-
-你可以继续按业务增加自己的 Skill，让 Agent 从“聊天入口”逐渐演进成“业务执行入口”。
-
-比较典型的扩展方向包括：
-
-- 制度助手
-- 知识库问答助手
-- 智能问数助手
-- 智能填报助手
-- 前端结构化展示助手
 
 ## 示例截图
 
