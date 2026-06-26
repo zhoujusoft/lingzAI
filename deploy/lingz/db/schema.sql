@@ -1,5 +1,5 @@
 -- IMPORTANT: keep this file encoded as UTF-8 (no BOM) to avoid mojibake on seed data.
--- flyway-baseline-version: 1.6.3
+-- flyway-baseline-version: 1.6.9
 -- flyway-baseline-description: schema-snapshot-baseline
 SET NAMES utf8mb4;
 
@@ -54,6 +54,76 @@ FROM `t_user`
 WHERE NOT EXISTS (
   SELECT 1 FROM `user_token_account` WHERE `user_token_account`.`user_id` = `t_user`.`id`
 );
+
+CREATE TABLE IF NOT EXISTS `service_license` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `license_id` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT 'license 业务标识',
+  `serial_no` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '序列号',
+  `revision` int NOT NULL DEFAULT '1' COMMENT '版本序号',
+  `product_code` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '产品编码',
+  `edition` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '版本类型',
+  `customer_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '客户名称',
+  `instance_code` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '实例码',
+  `issued_at` datetime DEFAULT NULL COMMENT '签发时间',
+  `effective_at` datetime DEFAULT NULL COMMENT '生效时间',
+  `expires_at` datetime DEFAULT NULL COMMENT '过期时间',
+  `max_active_users` int DEFAULT NULL COMMENT '最大启用用户数',
+  `max_total_tokens` bigint DEFAULT NULL COMMENT '最大总 token 数',
+  `status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT 'license 状态',
+  `feature_flags_json` json DEFAULT NULL COMMENT '功能开关 JSON',
+  `raw_payload` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '原始 payload',
+  `raw_signature` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '原始签名',
+  `file_sha256` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT 'license 文件 sha256',
+  `imported_by` bigint DEFAULT NULL COMMENT '导入人',
+  `imported_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '导入时间',
+  `last_verified_at` datetime DEFAULT NULL COMMENT '最近校验时间',
+  `is_current` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否当前生效',
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_service_license_license_id_revision` (`license_id`, `revision`),
+  KEY `idx_service_license_current` (`is_current`, `id`),
+  KEY `idx_service_license_status` (`status`, `id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='服务 license 主表';
+
+CREATE TABLE IF NOT EXISTS `service_license_import_log` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `license_id` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT 'license 标识',
+  `operator_user_id` bigint DEFAULT NULL COMMENT '操作人用户 ID',
+  `import_status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '导入状态',
+  `failure_reason` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '失败原因',
+  `file_sha256` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '文件 sha256',
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_service_license_import_log_created` (`created_at`, `id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='服务 license 导入日志';
+
+CREATE TABLE IF NOT EXISTS `service_license_token_account` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `license_id` bigint NOT NULL COMMENT 'license 表主键',
+  `granted_tokens` bigint NOT NULL DEFAULT '0' COMMENT '授予 token',
+  `consumed_tokens` bigint NOT NULL DEFAULT '0' COMMENT '已消耗 token',
+  `reserved_tokens` bigint NOT NULL DEFAULT '0' COMMENT '预留 token',
+  `remaining_tokens` bigint NOT NULL DEFAULT '0' COMMENT '剩余 token',
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_service_license_token_account_license_id` (`license_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='服务 license token 账户';
+
+CREATE TABLE IF NOT EXISTS `service_license_token_ledger` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `license_id` bigint NOT NULL COMMENT 'license 表主键',
+  `source_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '来源类型',
+  `source_id` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '来源标识',
+  `user_id` bigint DEFAULT NULL COMMENT '用户 ID',
+  `delta_tokens` bigint NOT NULL COMMENT '变更 token，可正可负',
+  `balance_after` bigint NOT NULL COMMENT '变更后余额',
+  `remark` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '备注',
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_service_license_token_ledger_license_created` (`license_id`, `created_at`, `id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='服务 license token 流水';
 
 CREATE TABLE IF NOT EXISTS `agent_template` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
@@ -119,6 +189,17 @@ CREATE TABLE IF NOT EXISTS `agent_template_skill_binding` (
   UNIQUE KEY `uk_template_skill` (`template_id`,`skill_id`),
   KEY `idx_template_skill_sort` (`template_id`,`sort_order`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='Agent 模板技能绑定表';
+
+CREATE TABLE IF NOT EXISTS `agent_template_tool_binding` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '绑定主键',
+  `template_id` bigint NOT NULL COMMENT '模板 ID',
+  `tool_id` bigint NOT NULL COMMENT '工具目录 ID',
+  `sort_order` int NOT NULL DEFAULT '0' COMMENT '排序值',
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_template_tool` (`template_id`,`tool_id`),
+  KEY `idx_template_tool_sort` (`template_id`,`sort_order`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='Agent 模板工具绑定表';
 
 CREATE TABLE IF NOT EXISTS `user_agent_file` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
@@ -323,7 +404,7 @@ FROM `sys_role` r
 WHERE r.`role_code` = 'manage-user';
 
 INSERT IGNORE INTO `sys_role_menu_permission` (`role_id`, `menu_key`)
-SELECT r.`id`, 'admin.integration.datasets.view'
+SELECT r.`id`, 'admin.data-assets.datasets.view'
 FROM `sys_role` r
 WHERE r.`role_code` = 'manage-user';
 
@@ -554,6 +635,244 @@ CREATE TABLE IF NOT EXISTS `integration_dataset_publish_binding` (
                                   PRIMARY KEY (`id`),
                                   UNIQUE KEY `uk_integration_dataset_publish_dataset` (`dataset_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='数据集发布态';
+CREATE TABLE IF NOT EXISTS `dataset_definition` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '数据集主键',
+  `dataset_code` varchar(64) NOT NULL COMMENT '数据集编码',
+  `name` varchar(128) NOT NULL COMMENT '数据集名称',
+  `description` varchar(1000) DEFAULT NULL COMMENT '数据集描述',
+  `data_source_id` bigint NOT NULL COMMENT '绑定 AI 平台数据源 ID',
+  `template_code` varchar(64) DEFAULT NULL COMMENT '来源模板编码',
+  `template_version` int DEFAULT NULL COMMENT '来源模板版本',
+  `lifecycle_status` varchar(32) NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE/DISABLED',
+  `publish_status` varchar(32) NOT NULL DEFAULT 'NEVER_PUBLISHED' COMMENT 'NEVER_PUBLISHED/PUBLISHED',
+  `draft_status` varchar(32) NOT NULL DEFAULT 'DIRTY' COMMENT 'CLEAN/DIRTY',
+  `health_status` varchar(32) NOT NULL DEFAULT 'HEALTHY' COMMENT 'HEALTHY/WARNING/BROKEN',
+  `latest_published_version` int NOT NULL DEFAULT 0 COMMENT '最近发布版本',
+  `draft_revision` bigint NOT NULL DEFAULT 0 COMMENT '草稿乐观锁修订号',
+  `last_schema_checked_at` datetime DEFAULT NULL COMMENT '最近结构检查时间',
+  `created_by` bigint DEFAULT NULL COMMENT '创建人',
+  `updated_by` bigint DEFAULT NULL COMMENT '修改人',
+  `published_by` bigint DEFAULT NULL COMMENT '最近发布人',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_dataset_definition_code` (`dataset_code`),
+  KEY `idx_dataset_definition_source` (`data_source_id`,`lifecycle_status`),
+  KEY `idx_dataset_definition_status` (`lifecycle_status`,`publish_status`,`draft_status`,`updated_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='新版数据集定义';
+
+CREATE TABLE IF NOT EXISTS `dataset_layer` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `dataset_id` bigint NOT NULL COMMENT '数据集 ID',
+  `layer_code` varchar(64) NOT NULL COMMENT '分层编码',
+  `name` varchar(128) NOT NULL COMMENT '分层名称',
+  `description` varchar(500) DEFAULT NULL COMMENT '分层描述',
+  `system_layer` tinyint NOT NULL DEFAULT 0 COMMENT '是否系统默认分层',
+  `default_role` varchar(32) DEFAULT NULL COMMENT '默认主业务角色',
+  `default_aggregation` varchar(32) DEFAULT NULL COMMENT '默认聚合',
+  `sort_order` int NOT NULL DEFAULT 0 COMMENT '排序',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_dataset_layer_code` (`dataset_id`,`layer_code`),
+  KEY `idx_dataset_layer_order` (`dataset_id`,`sort_order`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='新版数据集字段分层';
+
+CREATE TABLE IF NOT EXISTS `dataset_table` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `dataset_id` bigint NOT NULL COMMENT '数据集 ID',
+  `schema_name` varchar(128) NOT NULL DEFAULT '' COMMENT 'Schema 名称',
+  `table_name` varchar(128) NOT NULL COMMENT '技术表名',
+  `object_type` varchar(32) NOT NULL DEFAULT 'TABLE' COMMENT 'TABLE/VIEW',
+  `technical_comment` varchar(1000) DEFAULT NULL COMMENT '技术注释',
+  `business_name` varchar(255) DEFAULT NULL COMMENT '业务名称',
+  `business_description` varchar(1000) DEFAULT NULL COMMENT '业务描述',
+  `metadata_status` varchar(32) NOT NULL DEFAULT 'VALID' COMMENT 'VALID/CHANGED/INVALID',
+  `sort_order` int NOT NULL DEFAULT 0 COMMENT '排序',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_dataset_table_name` (`dataset_id`,`schema_name`,`table_name`),
+  KEY `idx_dataset_table_order` (`dataset_id`,`sort_order`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='新版数据集表配置';
+
+CREATE TABLE IF NOT EXISTS `dataset_field` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `dataset_id` bigint NOT NULL COMMENT '数据集 ID',
+  `table_id` bigint NOT NULL COMMENT '数据集表 ID',
+  `field_name` varchar(128) NOT NULL COMMENT '技术字段名',
+  `field_type` varchar(128) DEFAULT NULL COMMENT '数据库字段类型',
+  `jdbc_type` int DEFAULT NULL COMMENT 'JDBC 类型',
+  `technical_comment` varchar(1000) DEFAULT NULL COMMENT '技术注释',
+  `nullable` tinyint NOT NULL DEFAULT 1 COMMENT '是否可空',
+  `ordinal_position` int NOT NULL DEFAULT 0 COMMENT '技术字段顺序',
+  `business_name` varchar(255) DEFAULT NULL COMMENT '业务名称',
+  `business_description` varchar(1000) DEFAULT NULL COMMENT '业务描述',
+  `business_role` varchar(32) NOT NULL DEFAULT 'OTHER' COMMENT '主业务角色',
+  `default_aggregation` varchar(32) DEFAULT NULL COMMENT '默认聚合',
+  `ai_usable` tinyint NOT NULL DEFAULT 1 COMMENT 'AI 可用',
+  `visible` tinyint NOT NULL DEFAULT 1 COMMENT '默认展示',
+  `sensitive` tinyint NOT NULL DEFAULT 0 COMMENT '敏感字段',
+  `filterable` tinyint NOT NULL DEFAULT 1 COMMENT '支持筛选',
+  `groupable` tinyint NOT NULL DEFAULT 1 COMMENT '支持分组',
+  `sortable` tinyint NOT NULL DEFAULT 1 COMMENT '支持排序',
+  `default_time_field` tinyint NOT NULL DEFAULT 0 COMMENT '默认时间字段',
+  `layer_id` bigint DEFAULT NULL COMMENT '所属分层 ID',
+  `metadata_status` varchar(32) NOT NULL DEFAULT 'VALID' COMMENT 'VALID/CHANGED/INVALID',
+  `sort_order` int NOT NULL DEFAULT 0 COMMENT '业务排序',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_dataset_field_name` (`dataset_id`,`table_id`,`field_name`),
+  KEY `idx_dataset_field_table_order` (`table_id`,`sort_order`,`id`),
+  KEY `idx_dataset_field_layer` (`dataset_id`,`layer_id`,`sort_order`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='新版数据集字段配置';
+
+CREATE TABLE IF NOT EXISTS `dataset_fixed_dictionary_item` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `dataset_id` bigint NOT NULL COMMENT '数据集 ID',
+  `field_id` bigint NOT NULL COMMENT '数据集字段 ID',
+  `item_value` varchar(500) NOT NULL COMMENT '字典值',
+  `item_label` varchar(500) NOT NULL COMMENT '字典展示名',
+  `sort_order` int NOT NULL DEFAULT 0 COMMENT '排序',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_dataset_fixed_dictionary_value` (`field_id`,`item_value`),
+  KEY `idx_dataset_fixed_dictionary_order` (`dataset_id`,`field_id`,`sort_order`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='新版数据集固定字典项';
+
+CREATE TABLE IF NOT EXISTS `dataset_table_dictionary` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `dataset_id` bigint NOT NULL COMMENT '数据集 ID',
+  `field_id` bigint NOT NULL COMMENT '配置字典的字段 ID',
+  `dictionary_table_id` bigint NOT NULL COMMENT '字典表 ID',
+  `value_field_id` bigint NOT NULL COMMENT '字典值字段 ID',
+  `label_field_id` bigint NOT NULL COMMENT '字典展示字段 ID',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_dataset_table_dictionary_field` (`field_id`),
+  KEY `idx_dataset_table_dictionary_dataset` (`dataset_id`,`dictionary_table_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='新版数据集业务表字典';
+
+CREATE TABLE IF NOT EXISTS `dataset_relation` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `dataset_id` bigint NOT NULL COMMENT '数据集 ID',
+  `relation_code` varchar(64) NOT NULL COMMENT '关系编码',
+  `name` varchar(128) NOT NULL COMMENT '关系名称',
+  `left_table_id` bigint NOT NULL COMMENT '左表 ID',
+  `right_table_id` bigint NOT NULL COMMENT '右表 ID',
+  `join_type` varchar(32) NOT NULL DEFAULT 'LEFT' COMMENT 'LEFT/INNER/RIGHT/FULL',
+  `cardinality` varchar(32) NOT NULL DEFAULT 'MANY_TO_ONE' COMMENT '关系基数',
+  `enabled` tinyint NOT NULL DEFAULT 1 COMMENT '是否启用',
+  `ai_usable` tinyint NOT NULL DEFAULT 1 COMMENT 'AI 可用',
+  `description` varchar(1000) DEFAULT NULL COMMENT '关系说明',
+  `sort_order` int NOT NULL DEFAULT 0 COMMENT '排序',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_dataset_relation_code` (`dataset_id`,`relation_code`),
+  KEY `idx_dataset_relation_order` (`dataset_id`,`sort_order`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='新版数据集表关系';
+
+CREATE TABLE IF NOT EXISTS `dataset_relation_condition` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `dataset_id` bigint NOT NULL COMMENT '数据集 ID',
+  `relation_id` bigint NOT NULL COMMENT '关系 ID',
+  `left_field_id` bigint NOT NULL COMMENT '左字段 ID',
+  `right_field_id` bigint NOT NULL COMMENT '右字段 ID',
+  `operator` varchar(16) NOT NULL DEFAULT 'EQ' COMMENT '首版仅 EQ',
+  `sort_order` int NOT NULL DEFAULT 0 COMMENT '条件顺序',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_dataset_relation_condition` (`relation_id`,`left_field_id`,`right_field_id`),
+  KEY `idx_dataset_relation_condition_order` (`dataset_id`,`relation_id`,`sort_order`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='新版数据集联合 Join 条件';
+
+CREATE TABLE IF NOT EXISTS `dataset_template` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `template_code` varchar(64) NOT NULL COMMENT '模板编码',
+  `name` varchar(128) NOT NULL COMMENT '模板名称',
+  `description` varchar(1000) DEFAULT NULL COMMENT '模板描述',
+  `template_version` int NOT NULL COMMENT '模板版本',
+  `format_version` varchar(32) NOT NULL COMMENT 'DatasetSpec 格式版本',
+  `spec_json` longtext NOT NULL COMMENT '完整 DatasetSpec JSON',
+  `status` varchar(32) NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE/DISABLED',
+  `created_by` bigint DEFAULT NULL COMMENT '创建人',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_dataset_template_version` (`template_code`,`template_version`),
+  KEY `idx_dataset_template_status` (`status`,`template_code`,`template_version`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='新版数据集系统模板';
+
+CREATE TABLE IF NOT EXISTS `dataset_release` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `dataset_id` bigint NOT NULL COMMENT '数据集 ID',
+  `version` int NOT NULL COMMENT '发布版本',
+  `format_version` varchar(32) NOT NULL COMMENT 'DatasetSpec 格式版本',
+  `spec_json` longtext NOT NULL COMMENT '不可变 DatasetSpec JSON',
+  `validation_summary_json` longtext DEFAULT NULL COMMENT '发布校验摘要 JSON',
+  `confirmed_warning_codes_json` longtext DEFAULT NULL COMMENT '已确认警告编码 JSON',
+  `published_by` bigint DEFAULT NULL COMMENT '发布人',
+  `published_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '发布时间',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_dataset_release_version` (`dataset_id`,`version`),
+  KEY `idx_dataset_release_published` (`dataset_id`,`published_at`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='新版数据集不可变发布快照';
+
+
+CREATE TABLE IF NOT EXISTS `integration_connector` (
+                                  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '连接器主键',
+                                  `name` varchar(128) NOT NULL COMMENT '连接器名称',
+                                  `alias` varchar(128) DEFAULT NULL COMMENT '连接器别名',
+                                  `base_url` varchar(1024) NOT NULL COMMENT '外部 API 基础地址',
+                                  `auth_type` varchar(64) NOT NULL DEFAULT 'NONE' COMMENT '认证类型：NONE/API_KEY/OAUTH2_CLIENT_CREDENTIALS',
+                                  `auth_config_json` longtext COMMENT '认证配置 JSON',
+                                  `connect_params_json` longtext COMMENT '连接参数 JSON',
+                                  `owner_user_id` bigint DEFAULT NULL COMMENT '创建人用户ID（历史数据可为空）',
+                                  `permission_scope` tinyint DEFAULT NULL COMMENT '权限范围：1仅创建人可见可操作，2所有人可见仅创建人可操作，3所有人可见可操作（历史数据可为空，由代码兼容）',
+                                  `status` varchar(32) NOT NULL DEFAULT 'DRAFT' COMMENT '状态：DRAFT/ACTIVE/DISABLED',
+                                  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                                  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                                  PRIMARY KEY (`id`),
+                                  UNIQUE KEY `uk_integration_connector_name` (`name`),
+                                  KEY `idx_integration_connector_owner_user` (`owner_user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='自定义外部 API 连接器';
+
+CREATE TABLE IF NOT EXISTS `integration_connector_api` (
+                                  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '连接器 API 主键',
+                                  `connector_id` bigint NOT NULL COMMENT '所属连接器ID',
+                                  `connect_id` varchar(128) DEFAULT NULL COMMENT '绑定的鉴权ID',
+                                  `connect_name` varchar(255) DEFAULT NULL COMMENT '绑定的鉴权名称',
+                                  `api_code` varchar(128) NOT NULL COMMENT 'API 编码',
+                                  `api_name` varchar(255) NOT NULL COMMENT 'API 名称',
+                                  `description` text COMMENT 'API 描述',
+                                  `method` varchar(16) NOT NULL DEFAULT 'POST' COMMENT 'HTTP 方法',
+                                  `path_template` varchar(1024) NOT NULL COMMENT '路径模板',
+                                  `headers_json` longtext COMMENT 'Header 模板 JSON',
+                                  `query_params_json` longtext COMMENT 'Query 模板 JSON',
+                                  `body_template_json` longtext COMMENT 'Body 模板 JSON',
+                                  `content_type` varchar(128) DEFAULT NULL COMMENT '请求内容类型',
+                                  `input_schema_json` longtext COMMENT '工具输入 Schema JSON',
+                                  `output_mapping_json` longtext COMMENT '输出映射 JSON',
+                                  `identity_binding_policy_json` longtext COMMENT '身份注入策略 JSON',
+                                  `tool_name` varchar(255) DEFAULT NULL COMMENT '发布后的工具名称',
+                                  `enabled` tinyint NOT NULL DEFAULT '1' COMMENT '是否启用：1启用，0停用',
+                                  `publish_status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'DRAFT' COMMENT '发布状态：DRAFT 草稿，PUBLISHED 已发布',
+                                  `published_version` int NOT NULL DEFAULT '0' COMMENT '发布版本',
+                                  `published_at` datetime DEFAULT NULL COMMENT '最近发布时间',
+                                  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                                  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                                  PRIMARY KEY (`id`),
+                                  UNIQUE KEY `uk_integration_connector_api_connector_code` (`connector_id`,`api_code`),
+                                  UNIQUE KEY `uk_integration_connector_api_tool_name` (`tool_name`),
+                                  KEY `idx_integration_connector_api_connector` (`connector_id`,`id`),
+                                  KEY `idx_integration_connector_api_enabled` (`enabled`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='自定义外部 API 目录';
 -- knowledge_document ddl
 -- knowledge_document ddl
 CREATE TABLE `knowledge_document` (
@@ -1545,6 +1864,88 @@ SET atsb.`sort_order` = 205
 WHERE at.`agent_code` = 'leader-assistant'
   AND sc.`runtime_skill_name` = 'sales-assistant';
 
+INSERT INTO `tool_catalog` (
+    `tool_name`, `display_name`, `description`, `tool_type`, `bindable`, `enabled_global`,
+    `owner_skill_name`, `source`, `owner_user_id`, `permission_scope`, `sort_order`, `created_at`, `updated_at`
+)
+SELECT
+    CONCAT('dataset_config.', dd.`id`, '.search_dataset_summary'),
+    CONCAT(dd.`name`, ' / 摘要检索'),
+    CONCAT('基于新版数据集“', dd.`name`, '”返回发布快照中的数据集描述、表列表和表关系。'),
+    'DATASET_TOOL',
+    1,
+    0,
+    NULL,
+    CONCAT('dataset-config:', dd.`id`),
+    dd.`created_by`,
+    NULL,
+    72000,
+    NOW(),
+    
+    NOW()
+FROM `dataset_definition` dd
+WHERE dd.`publish_status` = 'PUBLISHED'
+  AND dd.`lifecycle_status` <> 'DISABLED'
+  AND dd.`latest_published_version` > 0
+  AND NOT EXISTS (
+      SELECT 1 FROM `tool_catalog` tc
+      WHERE tc.`tool_name` = CONCAT('dataset_config.', dd.`id`, '.search_dataset_summary')
+  );
+
+INSERT INTO `tool_catalog` (
+    `tool_name`, `display_name`, `description`, `tool_type`, `bindable`, `enabled_global`,
+    `owner_skill_name`, `source`, `owner_user_id`, `permission_scope`, `sort_order`, `created_at`, `updated_at`
+)
+SELECT
+    CONCAT('dataset_config.', dd.`id`, '.get_dataset_schema'),
+    CONCAT(dd.`name`, ' / 结构获取'),
+    CONCAT('基于新版数据集“', dd.`name`, '”按 objectCode 返回字段结构、字段描述和维度字典来源。SQL 中字段必须来自返回的 fieldName。'),
+    'DATASET_TOOL',
+    1,
+    0,
+    NULL,
+    CONCAT('dataset-config:', dd.`id`),
+    dd.`created_by`,
+    NULL,
+    72001,
+    NOW(),
+    NOW()
+FROM `dataset_definition` dd
+WHERE dd.`publish_status` = 'PUBLISHED'
+  AND dd.`lifecycle_status` <> 'DISABLED'
+  AND dd.`latest_published_version` > 0
+  AND NOT EXISTS (
+      SELECT 1 FROM `tool_catalog` tc
+      WHERE tc.`tool_name` = CONCAT('dataset_config.', dd.`id`, '.get_dataset_schema')
+  );
+
+INSERT INTO `tool_catalog` (
+    `tool_name`, `display_name`, `description`, `tool_type`, `bindable`, `enabled_global`,
+    `owner_skill_name`, `source`, `owner_user_id`, `permission_scope`, `sort_order`, `created_at`, `updated_at`
+)
+SELECT
+    CONCAT('dataset_config.', dd.`id`, '.execute_dataset_sql'),
+    CONCAT(dd.`name`, ' / SQL 执行'),
+    CONCAT('在新版数据集“', dd.`name`, '”发布快照允许范围内执行单条只读 SQL。只支持 SELECT/WITH；表必须使用 objectCode，字段必须来自结构获取工具返回的 fieldName。'),
+    'DATASET_TOOL',
+    1,
+    0,
+    NULL,
+    CONCAT('dataset-config:', dd.`id`),
+    dd.`created_by`,
+    NULL,
+    72002,
+    NOW(),
+    NOW()
+FROM `dataset_definition` dd
+WHERE dd.`publish_status` = 'PUBLISHED'
+  AND dd.`lifecycle_status` <> 'DISABLED'
+  AND dd.`latest_published_version` > 0
+  AND NOT EXISTS (
+      SELECT 1 FROM `tool_catalog` tc
+      WHERE tc.`tool_name` = CONCAT('dataset_config.', dd.`id`, '.execute_dataset_sql')
+  );
+
 CREATE TABLE IF NOT EXISTS `model_vendor` (
                                `id` bigint NOT NULL AUTO_INCREMENT COMMENT '模型厂商主键',
                                `vendor_code` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '模型厂商编码',
@@ -1729,75 +2130,14 @@ WHERE NOT EXISTS (
   SELECT 1 FROM `system_config` WHERE `config_key` = 'token_quota_settings'
 );
 
-CREATE TABLE IF NOT EXISTS `service_license` (
-  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
-  `license_id` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT 'license 业务标识',
-  `serial_no` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '授权流水号',
-  `revision` int NOT NULL DEFAULT '1' COMMENT '版本号',
-  `product_code` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '产品编码',
-  `edition` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '版本类型',
-  `customer_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '客户名称',
-  `instance_code` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '实例码',
-  `issued_at` datetime DEFAULT NULL COMMENT '签发时间',
-  `effective_at` datetime DEFAULT NULL COMMENT '生效时间',
-  `expires_at` datetime DEFAULT NULL COMMENT '过期时间',
-  `max_active_users` int NOT NULL DEFAULT '0' COMMENT '授权人数上限，0 表示不限制',
-  `max_total_tokens` bigint NOT NULL DEFAULT '0' COMMENT '授权 token 总量，0 表示不限制',
-  `status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT 'license 状态',
-  `feature_flags_json` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '功能开关 JSON',
-  `raw_payload` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '原始 payload',
-  `raw_signature` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '签名',
-  `file_sha256` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT 'license 文件 sha256',
-  `imported_by` bigint DEFAULT NULL COMMENT '导入人',
-  `imported_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '导入时间',
-  `last_verified_at` datetime DEFAULT NULL COMMENT '最近验签时间',
-  `is_current` tinyint NOT NULL DEFAULT '0' COMMENT '是否当前生效 license',
-  `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_service_license_license_id_revision` (`license_id`, `revision`),
-  KEY `idx_service_license_current` (`is_current`, `id`),
-  KEY `idx_service_license_status` (`status`, `id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='服务 license 主表';
-
-CREATE TABLE IF NOT EXISTS `service_license_import_log` (
-  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
-  `license_id` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT 'license 标识',
-  `operator_user_id` bigint DEFAULT NULL COMMENT '操作人',
-  `import_status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '导入状态',
-  `failure_reason` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '失败原因',
-  `file_sha256` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '文件 sha256',
-  `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  PRIMARY KEY (`id`),
-  KEY `idx_service_license_import_log_created` (`created_at`, `id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='服务 license 导入日志';
-
-CREATE TABLE IF NOT EXISTS `service_license_token_account` (
-  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
-  `license_id` bigint NOT NULL COMMENT 'license 表主键',
-  `granted_tokens` bigint NOT NULL DEFAULT '0' COMMENT '授权 token 总量',
-  `consumed_tokens` bigint NOT NULL DEFAULT '0' COMMENT '已消耗 token',
-  `reserved_tokens` bigint NOT NULL DEFAULT '0' COMMENT '预留 token',
-  `remaining_tokens` bigint NOT NULL DEFAULT '0' COMMENT '剩余 token',
-  `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_service_license_token_account_license_id` (`license_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='服务 license token 账户';
-
-CREATE TABLE IF NOT EXISTS `service_license_token_ledger` (
-  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
-  `license_id` bigint NOT NULL COMMENT 'license 表主键',
-  `source_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '来源类型',
-  `source_id` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '来源标识',
-  `user_id` bigint DEFAULT NULL COMMENT '操作用户',
-  `delta_tokens` bigint NOT NULL COMMENT 'token 变动量',
-  `balance_after` bigint NOT NULL DEFAULT '0' COMMENT '变动后余额',
-  `remark` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '备注',
-  `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  PRIMARY KEY (`id`),
-  KEY `idx_service_license_token_ledger_license_created` (`license_id`, `created_at`, `id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='服务 license token 流水';
+INSERT INTO `system_config` (`config_key`, `config_value`, `status`)
+SELECT 'service_license_bootstrap_state',
+       'Om11pqp5cAnWQSDTRDAXQXTOdIslEct7Z1d2oBeaiUVvQCRTyoWsKUZJUSXJsNAg46mMR56zzCBVndaOvH3OMCvsR8BNOytp5/ltFa+Frc/faSflKzVR9O7PaGv4H93fZpnxu4G2ZqWtXj0lxjrz2Uz+X90IsUTpv4fSCQH213cfOuq4gztu2/a+k7m4aHcDuDY0ECRJbwcr4QuUqRIbxg3/1zjl+YLB8xLKIPJMZAmYvCZ02GOjohCYnnjq+AG6D7pEYiiwMdrazcfZJe22zjnMpd4BisssrETU7gDZK3fLoM1VWI3+nkdKxEp9kSANQ0GjbSHYVbD6xxjE/rtwEA==',
+       1
+FROM DUAL
+WHERE NOT EXISTS (
+  SELECT 1 FROM `system_config` WHERE `config_key` = 'service_license_bootstrap_state'
+);
 
 CREATE TABLE IF NOT EXISTS `lowcode_api_catalog` (
                                `id` bigint NOT NULL AUTO_INCREMENT COMMENT '低代码 API 目录主键',
@@ -1952,5 +2292,5 @@ CREATE INDEX `flyway_schema_history_s_idx`
 
 INSERT INTO `flyway_schema_history`
 (`installed_rank`, `version`, `description`, `type`, `script`, `checksum`, `installed_by`, `execution_time`, `success`)
-SELECT 1, '1.6.3', 'schema-snapshot-baseline', 'BASELINE', 'schema-snapshot-baseline', NULL, 'schema.sql', 0, TRUE
+SELECT 1, '1.6.9', 'schema-snapshot-baseline', 'BASELINE', 'schema-snapshot-baseline', NULL, 'schema.sql', 0, TRUE
 WHERE NOT EXISTS (SELECT 1 FROM `flyway_schema_history` WHERE `installed_rank` = 1);
