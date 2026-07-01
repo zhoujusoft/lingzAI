@@ -54,16 +54,18 @@ show_help() {
 用法: $0 [选项] (无需 root，脚本会自动 sudo)
 
 选项:
+  --image-tag <ver>    指定镜像版本 (如 1.8.7，留空则使用 .env 默认版本)
   --skip-docker        跳过 Docker 安装/配置 (已在服务器上装好 Docker 时使用)
   --install-dir <dir>  指定灵洲安装目录 (默认: 脚本所在目录/lingz)
   --help               显示本帮助信息
 
 示例:
-  $0                                # 完整安装 (交互式引导输入版本)
-  $0 --skip-docker                  # 仅部署灵洲 (已有 Docker)
+  $0                                              # 完整安装 (交互式引导输入版本)
+  $0 --image-tag 1.8.7                            # 指定镜像版本
+  $0 --skip-docker --image-tag 1.8.7              # 已有 Docker，指定版本
 
 非交互式运行 (curl | bash):
-  curl -sSL https://gitee.com/zhoujusoft/lingzai/raw/main/deploy/lingz/deploy_lingz.sh | sudo bash -s -- --skip-docker
+  curl -sSL https://gitee.com/zhoujusoft/lingzai/raw/main/deploy/lingz/deploy_lingz.sh | sudo bash -s -- --image-tag 1.8.7 --skip-docker
 EOF
     exit 0
 }
@@ -73,6 +75,8 @@ parse_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --skip-docker)    SKIP_DOCKER=true; shift ;;
+            --image-tag|--tag)
+                IMAGE_TAG="$2"; shift 2 ;;
             --install-dir)
                 INSTALL_DIR="$2"; shift 2 ;;
             --help|-h)        show_help ;;
@@ -700,11 +704,12 @@ prompt_args() {
     echo "╚══════════════════════════════════════════════════════════╝"
     echo ""
     echo "可用参数:"
+    echo "  --image-tag <ver>    指定镜像版本 (如 1.8.7，留空使用 .env 默认)"
     echo "  --skip-docker        跳过 Docker 安装/配置 (已有 Docker 时使用)"
     echo "  --install-dir <dir>  指定灵洲安装目录 (默认: 脚本目录/lingz)"
     echo ""
     echo "非交互式运行 (curl | bash):"
-    echo "  curl -sSL https://gitee.com/zhoujusoft/lingzai/raw/main/deploy/lingz/deploy_lingz.sh | sudo bash -s -- --skip-docker"
+    echo "  curl -sSL <url> | sudo bash -s -- --image-tag 1.8.7 --skip-docker"
     echo ""
     echo "──────────────────────────────────────────────────────────"
     echo ""
