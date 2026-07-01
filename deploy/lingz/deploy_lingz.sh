@@ -60,11 +60,14 @@ show_help() {
   --help               显示本帮助信息
 
 示例:
-  $0                                              # 完整安装 (交互式引导输入版本)
+  $0                                              # 完整安装 (交互式引导)
   $0 --image-tag 1.8.7                            # 指定镜像版本
   $0 --skip-docker --image-tag 1.8.7              # 已有 Docker，指定版本
 
-非交互式运行 (curl | bash):
+curl 管道运行 (仍会提示输入版本号，不输入使用 .env 默认版本):
+  curl -sSL https://gitee.com/zhoujusoft/lingzai/raw/main/deploy/lingz/deploy_lingz.sh | sudo bash
+
+完全非交互式运行 (所有参数通过命令行指定):
   curl -sSL https://gitee.com/zhoujusoft/lingzai/raw/main/deploy/lingz/deploy_lingz.sh | sudo bash -s -- --image-tag 1.8.7 --skip-docker
 EOF
     exit 0
@@ -708,27 +711,37 @@ prompt_args() {
     echo "  --skip-docker        跳过 Docker 安装/配置 (已有 Docker 时使用)"
     echo "  --install-dir <dir>  指定灵洲安装目录 (默认: 脚本目录/lingz)"
     echo ""
-    echo "非交互式运行 (curl | bash):"
+    echo "curl 管道运行 (仍会提示输入版本号，其他参数使用默认值):"
+    echo "  curl -sSL <url> | sudo bash"
+    echo ""
+    echo "完全非交互式运行 (所有参数通过命令行指定):"
     echo "  curl -sSL <url> | sudo bash -s -- --image-tag 1.8.7 --skip-docker"
     echo ""
     echo "──────────────────────────────────────────────────────────"
     echo ""
 
-    # 非交互式（管道/cron）直接走默认配置，避免 read 读取 EOF 导致退出
-    if [[ ! -t 0 ]]; then
-        log_warn "检测到非交互式运行（stdin 不是终端），将使用默认配置继续部署"
-        log_info "如需自定义参数，请下载脚本后本地运行，或在上面的 curl 命令末尾添加参数"
-        return
-    fi
-
     # 交互式询问（所有输入直接赋值变量）
     local input_version=""
     local input_skip_docker=""
+    local input_dir=""
 
-    # 镜像版本（直接赋值变量，不再通过命令行参数传递）
-    read -rp "请输入镜像版本 IMAGE_TAG (如 1.8.7，留空则使用 .env 默认版本): " input_version
-    if [[ -n "$input_version" ]]; then
-        IMAGE_TAG="$input_version"
+    # 版本号：从 /dev/tty 读取，兼容 curl | bash 管道执行场景
+    # 即使 stdin 被管道占用，控制终端仍可交互
+    if [[ -r /dev/tty ]]; then
+        read -rp "请输入镜像版本 IMAGE_TAG (如 1.8.7，留空则使用 .env 默认版本): " input_version < /dev/tty
+        if [[ -n "$input_version" ]]; then
+            IMAGE_TAG="$input_version"
+        fi
+    else
+        log_warn "无法读取终端 (/dev/tty 不可用)，将使用 .env 默认版本"
+    fi
+
+    # 其他参数：仅在标准输入是终端时才询问
+    if [[ ! -t 0 ]]; then
+        echo ""
+        log_info "将使用参数: IMAGE_TAG=${IMAGE_TAG:-默认} SKIP_DOCKER=$SKIP_DOCKER INSTALL_DIR=$INSTALL_DIR"
+        echo ""
+        return
     fi
 
     # 是否跳过 Docker
@@ -738,7 +751,6 @@ prompt_args() {
     fi
 
     # 自定义安装目录
-    local input_dir=""
     read -rp "自定义安装目录? (留空则用默认 ./lingz): " input_dir
     if [[ -n "$input_dir" ]]; then
         INSTALL_DIR="$input_dir"
