@@ -1,6 +1,6 @@
 #!/bin/bash
 #===============================================================================
-#  灵洲 AI 平台 - 一键自动化部署脚本 v20160630
+#  灵洲 AI 平台 - 一键自动化部署脚本 v20160701
 #  文档来源: http://doc.zhoujusoft.com/docs/ai/start/installation/docker
 #
 #  功能:
@@ -61,6 +61,9 @@ show_help() {
 示例:
   $0                                # 完整安装 (交互式引导输入版本)
   $0 --skip-docker                  # 仅部署灵洲 (已有 Docker)
+
+非交互式运行 (curl | bash):
+  curl -sSL https://gitee.com/zhoujusoft/lingzai/raw/main/deploy/lingz/deploy_lingz.sh | sudo bash -s -- --skip-docker
 EOF
     exit 0
 }
@@ -700,8 +703,18 @@ prompt_args() {
     echo "  --skip-docker        跳过 Docker 安装/配置 (已有 Docker 时使用)"
     echo "  --install-dir <dir>  指定灵洲安装目录 (默认: 脚本目录/lingz)"
     echo ""
+    echo "非交互式运行 (curl | bash):"
+    echo "  curl -sSL https://gitee.com/zhoujusoft/lingzai/raw/main/deploy/lingz/deploy_lingz.sh | sudo bash -s -- --skip-docker"
+    echo ""
     echo "──────────────────────────────────────────────────────────"
     echo ""
+
+    # 非交互式（管道/cron）直接走默认配置，避免 read 读取 EOF 导致退出
+    if [[ ! -t 0 ]]; then
+        log_warn "检测到非交互式运行（stdin 不是终端），将使用默认配置继续部署"
+        log_info "如需自定义参数，请下载脚本后本地运行，或在上面的 curl 命令末尾添加参数"
+        return
+    fi
 
     # 交互式询问（所有输入直接赋值变量）
     local input_version=""
