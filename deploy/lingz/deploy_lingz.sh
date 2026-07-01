@@ -152,11 +152,11 @@ check_hardware() {
     local disk_root_gb
     disk_root_gb=$(df -BG / | awk 'NR==2 {print $4}' | tr -d 'G')
     log_info "根分区可用磁盘: ${disk_root_gb}G"
-    if [[ $disk_root_gb -lt 50 ]]; then
-        log_error "磁盘空间严重不足 (推荐: 200G 可用空间)，请清理或扩容后重试"
+    if [[ $disk_root_gb -lt 10 ]]; then
+        log_error "磁盘空间不足 (至少需要 10G 可用空间)，请清理或扩容后重试"
         exit 1
-    elif [[ $disk_root_gb -lt 100 ]]; then
-        log_warn "磁盘空间偏少 (推荐: 200G)，建议清理或扩容"
+    elif [[ $disk_root_gb -lt 20 ]]; then
+        log_warn "磁盘空间偏少 (推荐: 20G 以上)，建议清理或扩容"
     fi
 }
 
