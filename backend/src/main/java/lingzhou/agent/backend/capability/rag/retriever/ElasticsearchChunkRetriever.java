@@ -93,8 +93,7 @@ public class ElasticsearchChunkRetriever {
         BulkRequest.Builder bulk = new BulkRequest.Builder();
         for (DocumentEmbeddingService.VectorizedChunk vectorizedChunk : vectorizedChunks) {
             DocumentChunk chunk = vectorizedChunk.chunk();
-            bulk.operations(op -> op.index(idx -> idx
-                    .index(properties.getIndexName())
+            bulk.operations(op -> op.index(idx -> idx.index(properties.getIndexName())
                     .id(chunk.getIndexId())
                     .document(buildSource(document, chunk, vectorizedChunk.vector()))));
         }
@@ -113,8 +112,7 @@ public class ElasticsearchChunkRetriever {
         }
 
         try {
-            DeleteByQueryResponse response = elasticsearchClient.deleteByQuery(d -> d
-                    .index(properties.getIndexName())
+            DeleteByQueryResponse response = elasticsearchClient.deleteByQuery(d -> d.index(properties.getIndexName())
                     .query(q -> q.term(t -> t.field("docId").value(docId))));
             if (response.failures() != null && !response.failures().isEmpty()) {
                 throw new IllegalStateException("Elasticsearch delete by docId failed: " + response.failures());
@@ -129,14 +127,16 @@ public class ElasticsearchChunkRetriever {
             return;
         }
 
-        List<String> ids = indexIds.stream().filter(StringUtils::hasText).distinct().toList();
+        List<String> ids =
+                indexIds.stream().filter(StringUtils::hasText).distinct().toList();
         if (ids.isEmpty()) {
             return;
         }
 
         BulkRequest.Builder bulk = new BulkRequest.Builder();
         for (String indexId : ids) {
-            bulk.operations(op -> op.delete(del -> del.index(properties.getIndexName()).id(indexId)));
+            bulk.operations(
+                    op -> op.delete(del -> del.index(properties.getIndexName()).id(indexId)));
         }
 
         try {
@@ -170,8 +170,8 @@ public class ElasticsearchChunkRetriever {
                 return List.of();
             }
 
-            List<RetrievalCandidate> rerankInput = new ArrayList<>(
-                    fusedCandidates.subList(0, Math.min(rerankInputTopK, fusedCandidates.size())));
+            List<RetrievalCandidate> rerankInput =
+                    new ArrayList<>(fusedCandidates.subList(0, Math.min(rerankInputTopK, fusedCandidates.size())));
             RerankSelection rerankSelection = applyRerank(kbId, normalizedQuery, rerankInput, requestedTopK);
             List<RetrievalCandidate> finalCandidates = new ArrayList<>(rerankSelection.candidates());
 
@@ -196,26 +196,36 @@ public class ElasticsearchChunkRetriever {
         }
     }
 
-    public List<RetrievalCandidate> searchLawArticle(Long kbId, String lawTitleCandidate, Integer articleNo, Integer topK) {
+    public List<RetrievalCandidate> searchLawArticle(
+            Long kbId, String lawTitleCandidate, Integer articleNo, Integer topK) {
         if (kbId == null || articleNo == null || articleNo <= 0 || !indexExists()) {
             return List.of();
         }
 
         int requestedTopK = normalizeTopK(topK, 3, 10);
         try {
-            SearchResponse<Map> response = elasticsearchClient.search(s -> s
-                            .index(properties.getIndexName())
+            SearchResponse<Map> response = elasticsearchClient.search(
+                    s -> s.index(properties.getIndexName())
                             .size(requestedTopK)
                             .source(src -> src.filter(f -> f.includes(RETRIEVAL_SOURCE_FIELDS)))
                             .query(q -> q.bool(b -> {
                                 b.filter(f -> f.term(t -> t.field("kbId").value(kbId)));
-                                b.filter(f -> f.term(t -> t.field("documentDomain").value(ChunkRequest.DOCUMENT_DOMAIN_LAW)));
+                                b.filter(f ->
+                                        f.term(t -> t.field("documentDomain").value(ChunkRequest.DOCUMENT_DOMAIN_LAW)));
                                 b.filter(f -> f.term(t -> t.field("articleNo").value(articleNo)));
                                 if (StringUtils.hasText(lawTitleCandidate)) {
-                                    b.should(sh -> sh.matchPhrase(m -> m.field("lawTitle").query(lawTitleCandidate).boost(2.2f)));
-                                    b.should(sh -> sh.matchPhrase(m -> m.field("lawAlias").query(lawTitleCandidate).boost(2.0f)));
-                                    b.should(sh -> sh.matchPhrase(m -> m.field("documentName").query(lawTitleCandidate).boost(1.5f)));
-                                    b.should(sh -> sh.matchPhrase(m -> m.field("headings").query(lawTitleCandidate).boost(1.2f)));
+                                    b.should(sh -> sh.matchPhrase(m -> m.field("lawTitle")
+                                            .query(lawTitleCandidate)
+                                            .boost(2.2f)));
+                                    b.should(sh -> sh.matchPhrase(m -> m.field("lawAlias")
+                                            .query(lawTitleCandidate)
+                                            .boost(2.0f)));
+                                    b.should(sh -> sh.matchPhrase(m -> m.field("documentName")
+                                            .query(lawTitleCandidate)
+                                            .boost(1.5f)));
+                                    b.should(sh -> sh.matchPhrase(m -> m.field("headings")
+                                            .query(lawTitleCandidate)
+                                            .boost(1.2f)));
                                     b.minimumShouldMatch("1");
                                 }
                                 return b;
@@ -244,16 +254,20 @@ public class ElasticsearchChunkRetriever {
 
     private List<RetrievalCandidate> searchByBm25(Long kbId, String queryText, int size)
             throws IOException, ElasticsearchException {
-        SearchResponse<Map> response = elasticsearchClient.search(s -> s
-                        .index(properties.getIndexName())
+        SearchResponse<Map> response = elasticsearchClient.search(
+                s -> s.index(properties.getIndexName())
                         .size(size)
                         .source(src -> src.filter(f -> f.includes(RETRIEVAL_SOURCE_FIELDS)))
-                        .query(q -> q.bool(b -> b
-                                .filter(f -> f.term(t -> t.field("kbId").value(kbId)))
-                                .should(sh -> sh.match(m -> m.field("content").query(queryText).boost(1.0f)))
-                                .should(sh -> sh.match(m -> m.field("headings").query(queryText).boost(0.8f)))
-                                .should(sh -> sh.match(m -> m.field("documentName").query(queryText).boost(0.6f)))
-                                .should(sh -> sh.match(m -> m.field("keywords").query(queryText).boost(0.6f)))
+                        .query(q -> q.bool(b -> b.filter(
+                                        f -> f.term(t -> t.field("kbId").value(kbId)))
+                                .should(sh -> sh.match(
+                                        m -> m.field("content").query(queryText).boost(1.0f)))
+                                .should(sh -> sh.match(m ->
+                                        m.field("headings").query(queryText).boost(0.8f)))
+                                .should(sh -> sh.match(m ->
+                                        m.field("documentName").query(queryText).boost(0.6f)))
+                                .should(sh -> sh.match(m ->
+                                        m.field("keywords").query(queryText).boost(0.6f)))
                                 .minimumShouldMatch("1"))),
                 Map.class);
         return parseSearchCandidates(response, "bm25");
@@ -261,15 +275,13 @@ public class ElasticsearchChunkRetriever {
 
     private List<RetrievalCandidate> searchByVector(Long kbId, float[] queryVector, int size)
             throws IOException, ElasticsearchException {
-        SearchResponse<Map> response = elasticsearchClient.search(s -> s
-                        .index(properties.getIndexName())
+        SearchResponse<Map> response = elasticsearchClient.search(
+                s -> s.index(properties.getIndexName())
                         .size(size)
                         .source(src -> src.filter(f -> f.includes(RETRIEVAL_SOURCE_FIELDS)))
-                        .query(q -> q.scriptScore(ss -> ss
-                                .query(inner -> inner.bool(b -> b
-                                        .filter(f -> f.term(t -> t.field("kbId").value(kbId)))))
-                                .script(script -> script
-                                        .source("cosineSimilarity(params.queryVector, 'vector') + 1.0")
+                        .query(q -> q.scriptScore(ss -> ss.query(inner -> inner.bool(b -> b.filter(
+                                        f -> f.term(t -> t.field("kbId").value(kbId)))))
+                                .script(script -> script.source("cosineSimilarity(params.queryVector, 'vector') + 1.0")
                                         .params("queryVector", JsonData.of(toVectorList(queryVector)))))),
                 Map.class);
         return parseSearchCandidates(response, "vector");
@@ -304,10 +316,7 @@ public class ElasticsearchChunkRetriever {
     }
 
     private List<RetrievalCandidate> rrfFuse(
-            List<RetrievalCandidate> bm25Candidates,
-            List<RetrievalCandidate> vectorCandidates,
-            int rrfK,
-            int topK) {
+            List<RetrievalCandidate> bm25Candidates, List<RetrievalCandidate> vectorCandidates, int rrfK, int topK) {
         Map<String, RetrievalCandidate> merged = new LinkedHashMap<>();
         applyRrfContribution(merged, bm25Candidates, rrfK, true);
         applyRrfContribution(merged, vectorCandidates, rrfK, false);
@@ -352,11 +361,13 @@ public class ElasticsearchChunkRetriever {
         }
         if (!rerankService.isEnabled()) {
             List<RetrievalCandidate> sliced = new ArrayList<>(candidates.subList(0, Math.min(topN, candidates.size())));
-            Set<String> keys = sliced.stream().map(RetrievalCandidate::key).collect(Collectors.toCollection(LinkedHashSet::new));
+            Set<String> keys =
+                    sliced.stream().map(RetrievalCandidate::key).collect(Collectors.toCollection(LinkedHashSet::new));
             return new RerankSelection(sliced, false, keys);
         }
 
-        List<String> documents = candidates.stream().map(this::extractContentForRerank).toList();
+        List<String> documents =
+                candidates.stream().map(this::extractContentForRerank).toList();
 
         try {
             List<AlibabaRerankService.RerankResult> rerankResults =
@@ -391,7 +402,8 @@ public class ElasticsearchChunkRetriever {
             log.warn("Rerank 执行失败，降级使用 RRF 结果：kbId={}, error={}", kbId, ex.getMessage());
             List<RetrievalCandidate> fallback =
                     new ArrayList<>(candidates.subList(0, Math.min(topN, candidates.size())));
-            Set<String> keys = fallback.stream().map(RetrievalCandidate::key).collect(Collectors.toCollection(LinkedHashSet::new));
+            Set<String> keys =
+                    fallback.stream().map(RetrievalCandidate::key).collect(Collectors.toCollection(LinkedHashSet::new));
             return new RerankSelection(fallback, false, keys);
         }
     }
@@ -470,16 +482,14 @@ public class ElasticsearchChunkRetriever {
         fields.put("articleCn", Property.of(p -> p.keyword(v -> v)));
         fields.put("articleKey", Property.of(p -> p.keyword(v -> v)));
         fields.put("articleTextType", Property.of(p -> p.keyword(v -> v)));
-        fields.put("vector", Property.of(p -> p.denseVector(v -> v
-                .dims(dimensions)
-                .index(true)
-                .similarity(properties.getSimilarity()))));
+        fields.put(
+                "vector",
+                Property.of(p ->
+                        p.denseVector(v -> v.dims(dimensions).index(true).similarity(properties.getSimilarity()))));
 
         try {
-            elasticsearchClient.indices().create(CreateIndexRequest.of(c -> c
-                    .index(properties.getIndexName())
-                    .settings(s -> s
-                            .numberOfShards(String.valueOf(properties.getShards()))
+            elasticsearchClient.indices().create(CreateIndexRequest.of(c -> c.index(properties.getIndexName())
+                    .settings(s -> s.numberOfShards(String.valueOf(properties.getShards()))
                             .numberOfReplicas(String.valueOf(properties.getReplicas())))
                     .mappings(TypeMapping.of(m -> m.properties(fields)))));
         } catch (IOException | ElasticsearchException ex) {
@@ -489,7 +499,8 @@ public class ElasticsearchChunkRetriever {
 
     private boolean indexExists() {
         try {
-            return elasticsearchClient.indices()
+            return elasticsearchClient
+                    .indices()
                     .exists(ExistsRequest.of(r -> r.index(properties.getIndexName())))
                     .value();
         } catch (ElasticsearchException ex) {
@@ -523,9 +534,11 @@ public class ElasticsearchChunkRetriever {
                 || chunkLawMetadata.articleNo() != null
                 || chunkLawMetadata.chapterNo() != null
                 || StringUtils.hasText(lawDocumentInfo.lawTitle())) {
-            source.put("documentDomain", StringUtils.hasText(chunkLawMetadata.documentDomain())
-                    ? chunkLawMetadata.documentDomain()
-                    : ChunkRequest.DOCUMENT_DOMAIN_LAW);
+            source.put(
+                    "documentDomain",
+                    StringUtils.hasText(chunkLawMetadata.documentDomain())
+                            ? chunkLawMetadata.documentDomain()
+                            : ChunkRequest.DOCUMENT_DOMAIN_LAW);
             source.put("lawTitle", lawDocumentInfo.lawTitle());
             source.put("lawAlias", lawDocumentInfo.lawAlias());
             source.put("lawVersion", lawDocumentInfo.lawVersion());
@@ -622,7 +635,8 @@ public class ElasticsearchChunkRetriever {
         if (!StringUtils.hasText(documentName)) {
             return null;
         }
-        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("(20\\d{2})(\\d{2})(\\d{2})").matcher(documentName);
+        java.util.regex.Matcher matcher =
+                java.util.regex.Pattern.compile("(20\\d{2})(\\d{2})(\\d{2})").matcher(documentName);
         if (!matcher.find()) {
             return null;
         }
@@ -637,11 +651,10 @@ public class ElasticsearchChunkRetriever {
         String lawTitle = firstNonBlank(
                 metadata.get("法律名称"),
                 metadata.get("lawTitle"),
-                lawDocumentStructureAnalyzer.analyze(document.getName(), List.of(), null).lawTitle());
-        String lawAlias = firstNonBlank(
-                metadata.get("法律简称"),
-                metadata.get("lawAlias"),
-                simplifyLawAlias(lawTitle));
+                lawDocumentStructureAnalyzer
+                        .analyze(document.getName(), List.of(), null)
+                        .lawTitle());
+        String lawAlias = firstNonBlank(metadata.get("法律简称"), metadata.get("lawAlias"), simplifyLawAlias(lawTitle));
         return new LawDocumentInfo(lawTitle, lawAlias, resolveLawVersion(document.getName()));
     }
 

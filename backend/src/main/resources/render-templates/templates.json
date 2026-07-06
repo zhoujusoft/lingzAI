@@ -1,5 +1,197 @@
 [
   {
+    "templateCode": "default_form_v1",
+    "templateName": "通用表单填报",
+    "componentCode": "StructuredFormCard",
+    "dataSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    },
+    "componentSchema": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "subtitle": {
+          "type": "string"
+        },
+        "editable": {
+          "type": "boolean"
+        },
+        "fields": {
+          "type": "array"
+        },
+        "sections": {
+          "type": "array"
+        },
+        "confirmText": {
+          "type": "string"
+        },
+        "cancelText": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "defaultData": {},
+    "defaultComponentProps": {
+      "title": "智能填报草稿",
+      "subtitle": "请确认表单信息后继续后续操作",
+      "editable": true,
+      "fields": [],
+      "sections": [],
+      "confirmText": "确认",
+      "cancelText": "取消"
+    },
+    "actions": [
+      {
+        "code": "confirm",
+        "label": "确认",
+        "messageType": "event",
+        "messageTemplate": "用户已确认提交个人信息。以下是最终确认后的结构化数据，请直接继续处理：\n{{dataJson}}"
+      },
+      {
+        "code": "cancel",
+        "label": "取消",
+        "messageType": "event",
+        "messageTemplate": "用户已取消本次个人信息提交。无需继续调用提交类工具。"
+      }
+    ],
+    "templateConfig": {
+      "sourceType": "api_input"
+    }
+  },
+  {
+    "templateCode": "api_input_form_v1",
+    "templateName": "API 入参表单填报",
+    "componentCode": "StructuredFormCard",
+    "dataSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    },
+    "componentSchema": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "subtitle": {
+          "type": "string"
+        },
+        "editable": {
+          "type": "boolean"
+        },
+        "fields": {
+          "type": "array"
+        },
+        "sections": {
+          "type": "array"
+        },
+        "confirmText": {
+          "type": "string"
+        },
+        "cancelText": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "defaultData": {},
+    "defaultComponentProps": {
+      "title": "智能填报草稿",
+      "subtitle": "请确认表单信息后继续后续操作",
+      "editable": true,
+      "fields": [],
+      "sections": [],
+      "confirmText": "确认",
+      "cancelText": "取消"
+    },
+    "actions": [
+      {
+        "code": "confirm",
+        "label": "确认",
+        "messageType": "event",
+        "messageTemplate": "用户已确认提交个人信息。以下是最终确认后的结构化数据，请直接继续处理：\n{{dataJson}}"
+      },
+      {
+        "code": "cancel",
+        "label": "取消",
+        "messageType": "event",
+        "messageTemplate": "用户已取消本次个人信息提交。无需继续调用提交类工具。"
+      }
+    ],
+    "templateConfig": {
+      "sourceType": "api_input"
+    }
+  },
+  {
+    "templateCode": "order_form_fill_v1",
+    "templateName": "订单表单填报",
+    "componentCode": "StructuredFormCard",
+    "dataSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    },
+    "componentSchema": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "subtitle": {
+          "type": "string"
+        },
+        "editable": {
+          "type": "boolean"
+        },
+        "fields": {
+          "type": "array"
+        },
+        "sections": {
+          "type": "array"
+        },
+        "confirmText": {
+          "type": "string"
+        },
+        "cancelText": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "defaultData": {},
+    "defaultComponentProps": {
+      "title": "智能填报草稿",
+      "subtitle": "请确认表单信息后继续后续操作",
+      "editable": true,
+      "fields": [],
+      "sections": [],
+      "confirmText": "确认",
+      "cancelText": "取消"
+    },
+    "actions": [
+      {
+        "code": "confirm",
+        "label": "确认",
+        "messageType": "event",
+        "messageTemplate": "用户已确认提交个人信息。以下是最终确认后的结构化数据，请直接继续处理：\n{{dataJson}}"
+      },
+      {
+        "code": "cancel",
+        "label": "取消",
+        "messageType": "event",
+        "messageTemplate": "用户已取消本次个人信息提交。无需继续调用提交类工具。"
+      }
+    ],
+    "templateConfig": {
+      "sourceType": "api_input"
+    }
+  },
+  {
     "templateCode": "expense_form_fill_v1",
     "templateName": "报销表单填报",
     "componentCode": "StructuredFormCard",
@@ -23,6 +215,9 @@
         "fields": {
           "type": "array"
         },
+        "sections": {
+          "type": "array"
+        },
         "confirmText": {
           "type": "string"
         },
@@ -38,6 +233,7 @@
       "subtitle": "请确认表单信息后继续后续操作",
       "editable": true,
       "fields": [],
+      "sections": [],
       "confirmText": "确认",
       "cancelText": "取消"
     },
@@ -106,6 +302,137 @@
       "unit": "元",
       "showRankBadge": true,
       "highlightTop": 3
+    },
+    "actions": [],
+    "templateConfig": {
+      "sourceType": "custom"
+    }
+  },
+  {
+    "templateCode": "sales_customer_opportunity_overview_v1",
+    "templateName": "销售客户商机总览",
+    "componentCode": "SalesQueryPreviewCard",
+    "dataSchema": {
+      "type": "object",
+      "properties": {
+        "customer": {
+          "type": "object"
+        },
+        "summary": {
+          "type": "object"
+        },
+        "opportunities": {
+          "type": "array"
+        }
+      },
+      "additionalProperties": true
+    },
+    "componentSchema": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "subtitle": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "defaultData": {
+      "customer": {},
+      "summary": {},
+      "opportunities": []
+    },
+    "defaultComponentProps": {
+      "title": "客户商机总览",
+      "subtitle": "展示客户基础信息、商机数量和商机列表"
+    },
+    "actions": [],
+    "templateConfig": {
+      "sourceType": "custom"
+    }
+  },
+  {
+    "templateCode": "sales_opportunity_detail_contacts_v1",
+    "templateName": "销售商机详情与关系人",
+    "componentCode": "SalesQueryPreviewCard",
+    "dataSchema": {
+      "type": "object",
+      "properties": {
+        "opportunity": {
+          "type": "object"
+        },
+        "contacts": {
+          "type": "array"
+        }
+      },
+      "additionalProperties": true
+    },
+    "componentSchema": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "subtitle": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "defaultData": {
+      "opportunity": {},
+      "contacts": []
+    },
+    "defaultComponentProps": {
+      "title": "商机详情与关系人",
+      "subtitle": "展示商机关键信息和联系人列表"
+    },
+    "actions": [],
+    "templateConfig": {
+      "sourceType": "custom"
+    }
+  },
+  {
+    "templateCode": "sales_opportunity_followup_recommendation_v1",
+    "templateName": "销售商机跟进与建议",
+    "componentCode": "SalesQueryPreviewCard",
+    "dataSchema": {
+      "type": "object",
+      "properties": {
+        "opportunity": {
+          "type": "object"
+        },
+        "timeline": {
+          "type": "array"
+        },
+        "recommendations": {
+          "type": "array"
+        }
+      },
+      "additionalProperties": true
+    },
+    "componentSchema": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "subtitle": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "defaultData": {
+      "opportunity": {},
+      "timeline": [],
+      "recommendations": []
+    },
+    "defaultComponentProps": {
+      "title": "商机跟进与建议",
+      "subtitle": "展示商机跟进时间轴和下一步建议"
     },
     "actions": [],
     "templateConfig": {

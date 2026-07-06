@@ -6,13 +6,12 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import java.util.Date;
-import lingzhou.agent.backend.framework.web.BaseEntity;
 
 /**
  * 存储文档分块对象 document_chunk
  */
 @TableName("document_chunk")
-public class DocumentChunk  {
+public class DocumentChunk {
 
     private static final long serialVersionUID = 1L;
 

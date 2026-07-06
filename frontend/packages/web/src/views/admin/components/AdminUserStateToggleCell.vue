@@ -1,6 +1,10 @@
 <script setup>
 import { computed } from 'vue';
-import { resolveUserStateLabel, resolveUserStateStyle, USER_STATES } from '@/model/enums/user-state';
+import {
+    resolveUserStateLabel,
+    resolveUserStateStyle,
+    USER_STATES,
+} from '@/model/enums/user-state';
 
 const props = defineProps({
     row: {

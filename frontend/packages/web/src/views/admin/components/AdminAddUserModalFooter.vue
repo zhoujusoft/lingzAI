@@ -77,10 +77,11 @@ async function submitCreateUser() {
                     mobile: normalizeText(props.context.mobile),
                     email: normalizeText(props.context.email),
                     userType: props.context.userType,
+                    roleId: props.context.roleId || null,
                 },
                 typeof props.context.onUnauthorized === 'function'
                     ? props.context.onUnauthorized
-                    : undefined,
+                    : undefined
             );
         } else if (mode === 'edit-profile') {
             await updateUserProfile(
@@ -90,10 +91,11 @@ async function submitCreateUser() {
                     mobile: normalizeText(props.context.mobile),
                     email: normalizeText(props.context.email),
                     userType: props.context.userType,
+                    roleId: props.context.roleId || null,
                 },
                 typeof props.context.onUnauthorized === 'function'
                     ? props.context.onUnauthorized
-                    : undefined,
+                    : undefined
             );
         }
         emit('confirm', true);
@@ -107,7 +109,9 @@ async function submitCreateUser() {
 </script>
 
 <template>
-    <div class="flex items-center justify-end gap-3 border-t border-slate-100 bg-[#f8fafc]/50 px-8 py-5">
+    <div
+        class="flex items-center justify-end gap-3 border-t border-slate-100 bg-[#f8fafc]/50 px-8 py-5"
+    >
         <button
             type="button"
             class="rounded-xl px-6 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"

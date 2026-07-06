@@ -52,7 +52,7 @@ function clearFieldError(field) {
                         : 'border-slate-200 focus:border-primary focus:ring-primary/20',
                 ]"
                 @input="clearFieldError('password')"
-            >
+            />
             <p class="text-xs text-slate-400">密码至少6位，建议包含字母、数字、符号中的两种</p>
             <p v-if="formErrors.password" class="text-xs text-red-500">{{ formErrors.password }}</p>
         </div>
@@ -74,7 +74,7 @@ function clearFieldError(field) {
                         : 'border-slate-200 focus:border-primary focus:ring-primary/20',
                 ]"
                 @input="clearFieldError('confirmPassword')"
-            >
+            />
             <p v-if="formErrors.confirmPassword" class="text-xs text-red-500">
                 {{ formErrors.confirmPassword }}
             </p>

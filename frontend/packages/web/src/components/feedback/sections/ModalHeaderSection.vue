@@ -17,7 +17,13 @@ const emit = defineEmits(['close']);
 
 <template>
     <div class="flex items-center justify-between border-b border-slate-100 px-6 py-5">
-        <DialogTitle :class="showClose ? 'text-xl font-bold text-slate-800' : 'text-lg font-semibold text-slate-900'">
+        <DialogTitle
+            :class="
+                showClose
+                    ? 'text-xl font-bold text-slate-800'
+                    : 'text-lg font-semibold text-slate-900'
+            "
+        >
             {{ title }}
         </DialogTitle>
         <button

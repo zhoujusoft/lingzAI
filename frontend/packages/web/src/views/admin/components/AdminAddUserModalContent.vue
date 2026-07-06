@@ -1,7 +1,8 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import AppSelect from '@/components/AppSelect.vue';
 import { USER_TYPES } from '@/model/enums/user-type';
+import { listRoles } from '@/api/roles';
 
 const props = defineProps({
     context: {
@@ -19,6 +20,31 @@ const userTypeOptions = [
     { label: '管理员', value: USER_TYPES.ADMIN },
 ];
 
+const roles = ref([]);
+const roleOptions = computed(() => {
+    // 使用特殊值 'none' 表示不绑定角色，避免 null 值在 Headless UI 中的兼容问题
+    const options = [{ label: '不绑定角色', value: 'none' }];
+    for (const role of roles.value) {
+        options.push({
+            label: role.roleName,
+            value: role.id,
+        });
+    }
+    return options;
+});
+
+// 内部选中的角色 ID（可能是 'none' 或实际 ID）
+const internalRoleId = computed({
+    get() {
+        // 如果 context.roleId 是 null/undefined，返回 'none'
+        return props.context.roleId ?? 'none';
+    },
+    set(value) {
+        // 如果选择的是 'none'，设置为 null
+        props.context.roleId = value === 'none' ? null : value;
+    },
+});
+
 const selectedUserType = computed({
     get() {
         return props.context.userType;
@@ -27,6 +53,8 @@ const selectedUserType = computed({
         props.context.userType = value;
     },
 });
+
+const selectedRoleId = internalRoleId;
 
 const formErrors = computed(() => props.context.formErrors || {});
 const isCreateMode = computed(() => props.mode === 'create');
@@ -40,6 +68,19 @@ function clearFieldError(field) {
         props.context.submitError = '';
     }
 }
+
+async function loadRoles() {
+    try {
+        const data = await listRoles({ pageSize: 1000 });
+        roles.value = Array.isArray(data?.items) ? data.items.filter(r => r.enabled === 1) : [];
+    } catch (error) {
+        roles.value = [];
+    }
+}
+
+onMounted(() => {
+    loadRoles();
+});
 </script>
 
 <template>
@@ -66,7 +107,7 @@ function clearFieldError(field) {
                         : 'border-slate-200 focus:border-primary focus:ring-primary/20',
                 ]"
                 @input="clearFieldError('name')"
-            >
+            />
             <p v-if="formErrors.name" class="text-xs text-red-500">{{ formErrors.name }}</p>
         </div>
 
@@ -92,7 +133,7 @@ function clearFieldError(field) {
                 ]"
                 :disabled="isAccountReadonly"
                 @input="clearFieldError('account')"
-            >
+            />
             <p v-if="isAccountReadonly" class="text-xs text-slate-400">登录名不可更改</p>
             <p v-if="formErrors.account" class="text-xs text-red-500">{{ formErrors.account }}</p>
         </div>
@@ -114,7 +155,7 @@ function clearFieldError(field) {
                         : 'border-slate-200 focus:border-primary focus:ring-primary/20',
                 ]"
                 @input="clearFieldError('password')"
-            >
+            />
             <p class="text-xs text-slate-400">密码至少6位，建议包含字母、数字、符号中的两种</p>
             <p v-if="formErrors.password" class="text-xs text-red-500">{{ formErrors.password }}</p>
         </div>
@@ -127,7 +168,7 @@ function clearFieldError(field) {
                 placeholder="请输入手机号"
                 class="w-full rounded-xl border border-slate-200 bg-[#f8fafc] px-4 py-3 text-sm text-slate-700 outline-none transition-all placeholder:text-slate-400 focus:border-primary focus:ring-2 focus:ring-primary/20"
                 @input="clearFieldError('mobile')"
-            >
+            />
             <p v-if="formErrors.mobile" class="text-xs text-red-500">{{ formErrors.mobile }}</p>
         </div>
 
@@ -139,7 +180,7 @@ function clearFieldError(field) {
                 placeholder="请输入邮箱地址"
                 class="w-full rounded-xl border border-slate-200 bg-[#f8fafc] px-4 py-3 text-sm text-slate-700 outline-none transition-all placeholder:text-slate-400 focus:border-primary focus:ring-2 focus:ring-primary/20"
                 @input="clearFieldError('email')"
-            >
+            />
         </div>
 
         <div class="space-y-2">
@@ -149,6 +190,17 @@ function clearFieldError(field) {
                 :options="userTypeOptions"
                 placeholder="请选择用户类型"
                 button-class="bg-slate-50 shadow-none hover:bg-white"
+            />
+        </div>
+
+        <div class="space-y-2">
+            <label class="block text-sm font-semibold text-slate-700">角色</label>
+            <AppSelect
+                v-model="selectedRoleId"
+                :options="roleOptions"
+                placeholder="请选择角色"
+                button-class="bg-slate-50 shadow-none hover:bg-white"
+                menu-placement="top"
             />
         </div>
     </div>

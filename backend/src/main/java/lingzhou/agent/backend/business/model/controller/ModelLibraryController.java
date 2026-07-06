@@ -4,6 +4,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
 import lingzhou.agent.backend.business.model.service.ModelLibraryService;
 import lingzhou.agent.backend.common.lzException.TaskException;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -57,12 +58,23 @@ public class ModelLibraryController {
         return modelLibraryService.listModels(resolveCurrentUserId(request), keyword, capabilityType, vendorId, status);
     }
 
+    @GetMapping("/chat-options")
+    public List<ModelLibraryService.ChatModelOptionView> listAvailableChatModels() {
+        return modelLibraryService.listAvailableChatModels();
+    }
+
     @PostMapping("/models")
     public ModelLibraryService.ModelView createModel(
-            @RequestBody ModelLibraryService.UpsertModelRequest request,
-            HttpServletRequest httpRequest)
+            @RequestBody ModelLibraryService.UpsertModelRequest request, HttpServletRequest httpRequest)
             throws TaskException {
         return modelLibraryService.createModel(resolveCurrentUserId(httpRequest), request);
+    }
+
+    @PostMapping("/models/validate")
+    public ModelLibraryService.ValidationResult validateModel(
+            @RequestBody ModelLibraryService.UpsertModelRequest request, HttpServletRequest httpRequest)
+            throws TaskException {
+        return modelLibraryService.validateModel(resolveCurrentUserId(httpRequest), request);
     }
 
     @PutMapping("/models/{id}")
@@ -72,6 +84,11 @@ public class ModelLibraryController {
             HttpServletRequest httpRequest)
             throws TaskException {
         return modelLibraryService.updateModel(resolveCurrentUserId(httpRequest), id, request);
+    }
+
+    @DeleteMapping("/models/{id}")
+    public void deleteModel(@PathVariable("id") Long id, HttpServletRequest httpRequest) throws TaskException {
+        modelLibraryService.deleteModel(resolveCurrentUserId(httpRequest), id);
     }
 
     @GetMapping("/defaults")

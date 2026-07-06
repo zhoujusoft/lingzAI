@@ -1,16 +1,19 @@
 import { requestJson as doRequestJson } from '@lingzhou/core/http/request';
 
-export async function listKnowledgeBases(params = {}, onUnauthorized) {
+function buildQuery(params = {}) {
     const search = new URLSearchParams();
-    if (params.kbName) {
-        search.set('kbName', params.kbName);
-    }
-    if (params.description) {
-        search.set('description', params.description);
-    }
-
+    Object.entries(params).forEach(([key, value]) => {
+        if (value == null || value === '') {
+            return;
+        }
+        search.set(key, String(value));
+    });
     const query = search.toString();
-    const { data } = await doRequestJson(`/api/datasets/base/list${query ? `?${query}` : ''}`, {
+    return query ? `?${query}` : '';
+}
+
+export async function listKnowledgeBases(params = {}, onUnauthorized) {
+    const { data } = await doRequestJson(`/api/datasets/base/list${buildQuery(params)}`, {
         method: 'GET',
         auth: true,
         onUnauthorized,
@@ -29,8 +32,8 @@ export async function createKnowledgeBase(payload, onUnauthorized) {
 }
 
 export async function createKnowledgeBaseWithDocument(
-    { kbName, kbCode, description, file, chunkStrategy = 'AUTO', chunkConfig },
-    onUnauthorized,
+    { kbName, kbCode, description, file, chunkStrategy = 'AUTO', chunkConfig, permissionScope = 3 },
+    onUnauthorized
 ) {
     const formData = new FormData();
     formData.append('kbName', kbName);
@@ -39,6 +42,9 @@ export async function createKnowledgeBaseWithDocument(
     }
     if (description) {
         formData.append('description', description);
+    }
+    if (permissionScope != null) {
+        formData.append('permissionScope', String(permissionScope));
     }
     formData.append('file', file);
     formData.append('chunkStrategy', chunkStrategy);

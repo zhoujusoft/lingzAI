@@ -20,8 +20,8 @@ public class Rsa {
 
     public static byte[] encrypt(byte[] content, String publicKey) throws Exception {
         byte[] decoded = Base64.getDecoder().decode(publicKey);
-        RSAPublicKey pubKey = (RSAPublicKey)
-                KeyFactory.getInstance("RSA").generatePublic(new X509EncodedKeySpec(decoded));
+        RSAPublicKey pubKey =
+                (RSAPublicKey) KeyFactory.getInstance("RSA").generatePublic(new X509EncodedKeySpec(decoded));
         Cipher cipher = Cipher.getInstance("RSA");
         cipher.init(Cipher.ENCRYPT_MODE, pubKey);
         return cipher.doFinal(content);

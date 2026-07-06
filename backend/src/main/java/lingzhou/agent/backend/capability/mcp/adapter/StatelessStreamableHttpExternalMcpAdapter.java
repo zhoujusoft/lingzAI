@@ -8,9 +8,9 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import lingzhou.agent.backend.capability.mcp.support.McpServerScope;
-import lingzhou.agent.backend.capability.mcp.support.McpJsonSupport;
 import lingzhou.agent.backend.business.skill.domain.McpServer;
+import lingzhou.agent.backend.capability.mcp.support.McpJsonSupport;
+import lingzhou.agent.backend.capability.mcp.support.McpServerScope;
 import lingzhou.agent.backend.common.lzException.TaskException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -56,11 +56,8 @@ public class StatelessStreamableHttpExternalMcpAdapter implements ExternalMcpAda
         @Override
         public List<McpSchema.Tool> listTools() throws TaskException {
             ensureInitialized();
-            Map<String, Object> response = invokeForMap(Map.of(
-                    "jsonrpc", "2.0",
-                    "id", 2,
-                    "method", "tools/list",
-                    "params", Map.of()));
+            Map<String, Object> response =
+                    invokeForMap(Map.of("jsonrpc", "2.0", "id", 2, "method", "tools/list", "params", Map.of()));
             Object result = response.get("result");
             if (!(result instanceof Map<?, ?> resultMap)) {
                 return List.of();
@@ -83,12 +80,18 @@ public class StatelessStreamableHttpExternalMcpAdapter implements ExternalMcpAda
         public Object callTool(String remoteToolName, Map<String, Object> arguments) throws TaskException {
             ensureInitialized();
             Map<String, Object> response = invokeForMap(Map.of(
-                    "jsonrpc", "2.0",
-                    "id", 3,
-                    "method", "tools/call",
-                    "params", Map.of(
-                            "name", remoteToolName,
-                            "arguments", arguments == null ? Map.of() : new LinkedHashMap<>(arguments))));
+                    "jsonrpc",
+                    "2.0",
+                    "id",
+                    3,
+                    "method",
+                    "tools/call",
+                    "params",
+                    Map.of(
+                            "name",
+                            remoteToolName,
+                            "arguments",
+                            arguments == null ? Map.of() : new LinkedHashMap<>(arguments))));
             Object result = response.get("result");
             if (!(result instanceof Map<?, ?> resultMap)) {
                 return response;
@@ -123,15 +126,20 @@ public class StatelessStreamableHttpExternalMcpAdapter implements ExternalMcpAda
                 return;
             }
             invokeForMap(Map.of(
-                    "jsonrpc", "2.0",
-                    "id", 1,
-                    "method", "initialize",
-                    "params", Map.of(
+                    "jsonrpc",
+                    "2.0",
+                    "id",
+                    1,
+                    "method",
+                    "initialize",
+                    "params",
+                    Map.of(
                             "protocolVersion", MCP_PROTOCOL_VERSION,
                             "capabilities", Map.of(),
-                            "clientInfo", Map.of(
-                                    "name", "lingzhou-agent-external-mcp",
-                                    "version", "1.1.0"))));
+                            "clientInfo",
+                                    Map.of(
+                                            "name", "lingzhou-agent-external-mcp",
+                                            "version", "1.1.0"))));
             invokeForNotification(Map.of(
                     "jsonrpc", "2.0",
                     "method", "notifications/initialized",
@@ -149,10 +157,12 @@ public class StatelessStreamableHttpExternalMcpAdapter implements ExternalMcpAda
                 return Map.of();
             }
             try {
-                Map<String, Object> parsed = JSON.readValue(extractJsonPayload(body), new TypeReference<Map<String, Object>>() {});
+                Map<String, Object> parsed =
+                        JSON.readValue(extractJsonPayload(body), new TypeReference<Map<String, Object>>() {});
                 Object error = parsed.get("error");
                 if (error instanceof Map<?, ?> errorMap) {
-                    throw new TaskException("外部 MCP 返回错误：" + summarizeError(errorMap.get("message")), TaskException.Code.UNKNOWN);
+                    throw new TaskException(
+                            "外部 MCP 返回错误：" + summarizeError(errorMap.get("message")), TaskException.Code.UNKNOWN);
                 }
                 return parsed;
             } catch (TaskException ex) {
@@ -170,7 +180,10 @@ public class StatelessStreamableHttpExternalMcpAdapter implements ExternalMcpAda
                         .contentType(MediaType.APPLICATION_JSON)
                         .header(HttpHeaders.ACCEPT, STREAMABLE_ACCEPT)
                         .header(MCP_PROTOCOL_HEADER, MCP_PROTOCOL_VERSION)
-                        .headers(headers -> applyAuth(headers, server))
+                        .headers(headers -> {
+                            applyAuth(headers, server);
+                            applyHeaders(headers, server);
+                        })
                         .body(payload)
                         .retrieve()
                         .body(byte[].class);
@@ -180,7 +193,8 @@ public class StatelessStreamableHttpExternalMcpAdapter implements ExternalMcpAda
                 return new String(body, StandardCharsets.UTF_8);
             } catch (RestClientResponseException ex) {
                 throw new TaskException(
-                        "外部 MCP HTTP " + ex.getStatusCode().value() + "：" + summarizeError(ex.getResponseBodyAsString()),
+                        "外部 MCP HTTP " + ex.getStatusCode().value() + "："
+                                + summarizeError(ex.getResponseBodyAsString()),
                         TaskException.Code.UNKNOWN);
             } catch (Exception ex) {
                 throw new TaskException("外部 MCP 请求失败：" + ex.getMessage(), TaskException.Code.UNKNOWN);
@@ -294,6 +308,31 @@ public class StatelessStreamableHttpExternalMcpAdapter implements ExternalMcpAda
         String token = authConfig == null ? "" : asText(authConfig.get("token"));
         if (StringUtils.hasText(token)) {
             headers.setBearerAuth(token.trim());
+        }
+    }
+
+    private static void applyHeaders(HttpHeaders headers, McpServer server) {
+        if (headers == null || server == null) {
+            return;
+        }
+        String headersJson = server.getHeadersJson();
+        if (!StringUtils.hasText(headersJson)) {
+            return;
+        }
+        try {
+            Map<String, Object> customHeaders = McpJsonSupport.parseJsonObject(headersJson);
+            if (customHeaders == null || customHeaders.isEmpty()) {
+                return;
+            }
+            for (Map.Entry<String, Object> entry : customHeaders.entrySet()) {
+                String key = entry.getKey();
+                Object value = entry.getValue();
+                if (key != null && value != null) {
+                    headers.set(key, String.valueOf(value));
+                }
+            }
+        } catch (Exception e) {
+            // 忽略解析错误
         }
     }
 

@@ -22,6 +22,8 @@ export class KnowledgeBean {
         this.kbCode = null;
         this.name = null;
         this.description = null;
+        this.ownerUserId = null;
+        this.permissionScope = null;
         this.docCount = null;
         this.charCount = null;
         this.appCount = null;
@@ -42,6 +44,8 @@ export class KnowledgeBean {
         this.kbCode = normalizeNullableString(source.kbCode);
         this.name = normalizeNullableString(source.name ?? source.kbName);
         this.description = normalizeNullableString(source.description);
+        this.ownerUserId = normalizeNullableNumber(source.ownerUserId);
+        this.permissionScope = normalizeNullableNumber(source.permissionScope);
         this.docCount = normalizeCount(source.docCount);
         this.charCount = normalizeCount(source.charCount);
         this.appCount = normalizeCount(source.appCount);
@@ -66,6 +70,8 @@ export class KnowledgeBean {
             kbCode: this.kbCode,
             name: this.name,
             description: this.description,
+            ownerUserId: this.ownerUserId,
+            permissionScope: this.permissionScope,
             docCount: this.docCount,
             charCount: this.charCount,
             appCount: this.appCount,

@@ -1,60 +1,71 @@
 <template>
-    <div class="admin-root">
+    <div class="admin-root h-screen overflow-hidden bg-slate-50">
         <div
-            class="flex h-screen overflow-hidden bg-slate-50 text-slate-800 transition-colors duration-200"
+            class="flex h-full w-full overflow-hidden bg-slate-50 text-slate-800 transition-colors duration-200"
         >
-            <aside class="z-10 flex w-64 shrink-0 flex-col border-r border-slate-200 bg-white">
+            <aside
+                class="z-10 flex h-full min-h-0 w-64 shrink-0 flex-col border-r border-slate-200 bg-white"
+            >
                 <div class="flex items-center gap-3 p-6">
-                    <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
-                        <span class="material-symbols-outlined fill-1 text-xl text-white"
-                            >auto_awesome</span
-                        >
+                    <img
+                        :src="brandingState.logoUrl"
+                        :alt="brandingState.systemName"
+                        class="h-9 w-9 object-contain"
+                    />
+                    <div class="min-w-0">
+                        <h1 class="text-xl font-bold tracking-tight text-slate-900">
+                            {{ brandingState.systemName }}
+                        </h1>
+                        <p v-if="appVersionText" class="mt-1 text-xs font-medium text-slate-400">
+                            {{ appVersionText }}
+                        </p>
                     </div>
-                    <h1 class="text-xl font-bold tracking-tight text-slate-900">灵洲 AI 后台</h1>
                 </div>
 
-                <nav class="flex-1 space-y-1 px-3">
-                    <button
-                        v-for="item in sidebarItems"
-                        :key="item.id"
-                        type="button"
-                        class="relative flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm font-medium transition-all"
-                        :class="
-                            isActivePath(item.path)
-                                ? 'bg-[#f0f7ff] text-primary font-bold'
-                                : 'text-slate-600 hover:bg-slate-50'
-                        "
-                        @click="navigateTo(item.path)"
-                    >
-                        <span
-                            class="material-symbols-outlined"
-                            :class="isActivePath(item.path) ? 'text-primary' : 'text-slate-400'"
-                        >
-                            {{ item.icon }}
-                        </span>
-                        <span>{{ item.label }}</span>
-                    </button>
-
-                    <div
-                        v-for="item in expandedSidebarGroups"
-                        :key="`${item.id}-children`"
-                        class="relative ml-2 pl-8"
-                    >
-                        <span class="absolute bottom-0 left-3 top-0 w-0.5 bg-blue-100" />
+                <nav class="flex-1 min-h-0 overflow-y-auto px-3 pb-4">
+                    <div class="space-y-1">
                         <button
-                            v-for="child in item.children"
-                            :key="child.id"
+                            v-for="item in sidebarItems"
+                            :key="item.id"
                             type="button"
-                            class="relative z-10 flex w-full items-center rounded-lg py-2.5 pr-4 text-left text-sm font-bold text-blue-600 transition-colors"
+                            class="relative flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm font-medium transition-all"
                             :class="
-                                isActivePath(child.path)
-                                    ? 'text-blue-600'
-                                    : 'text-slate-500 hover:text-blue-600'
+                                isActivePath(item.path)
+                                    ? 'bg-[#f0f7ff] text-primary font-bold'
+                                    : 'text-slate-600 hover:bg-slate-50'
                             "
-                            @click="navigateTo(child.path)"
+                            @click="navigateTo(resolveNavigatePath(item))"
                         >
-                            {{ child.label }}
+                            <span
+                                class="material-symbols-outlined"
+                                :class="isActivePath(item.path) ? 'text-primary' : 'text-slate-400'"
+                            >
+                                {{ item.icon }}
+                            </span>
+                            <span>{{ item.label }}</span>
                         </button>
+
+                        <div
+                            v-for="item in expandedSidebarGroups"
+                            :key="`${item.id}-children`"
+                            class="relative ml-2 pl-8"
+                        >
+                            <span class="absolute bottom-0 left-3 top-0 w-0.5 bg-blue-100" />
+                            <button
+                                v-for="child in item.children"
+                                :key="child.id"
+                                type="button"
+                                class="relative z-10 flex w-full items-center rounded-lg py-2.5 pr-4 text-left text-sm font-bold text-blue-600 transition-colors"
+                                :class="
+                                    isActivePath(child.path)
+                                        ? 'text-blue-600'
+                                        : 'text-slate-500 hover:text-blue-600'
+                                "
+                                @click="navigateTo(child.path)"
+                            >
+                                {{ child.label }}
+                            </button>
+                        </div>
                     </div>
                 </nav>
 
@@ -92,6 +103,7 @@
 <script setup>
 import { computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { brandingState, ensureBrandingLoaded } from '@/composables/useBranding';
 import { confirm } from '@/composables/useModal';
 import {
     clearUserSession,
@@ -99,21 +111,54 @@ import {
     logoutCurrentUser,
 } from '@/composables/useCurrentUser';
 import { ADMIN_SIDEBAR_ITEMS } from '@/model/admin-sidebar';
+import { hasMenuPermission } from '@/model/admin-menu-permissions';
 import { ROUTE_PATHS } from '@/router/routePaths';
 import UserProfileCard from '@/components/UserProfileCard.vue';
 
 const router = useRouter();
 const route = useRoute();
-const sidebarItems = computed(() => ADMIN_SIDEBAR_ITEMS);
+const currentUserProfile = computed(() => currentUserState.profile);
+const sidebarItems = computed(() =>
+    filterSidebarItemsByPermission(ADMIN_SIDEBAR_ITEMS, currentUserProfile.value)
+);
 const expandedSidebarGroups = computed(() =>
-    ADMIN_SIDEBAR_ITEMS.filter(
+    sidebarItems.value.filter(
         item =>
             Array.isArray(item.children) &&
             item.children.length &&
             item.children.some(child => isActivePath(child.path))
     )
 );
-const currentUserProfile = computed(() => currentUserState.profile);
+const appVersionText = computed(() => {
+    const version = currentUserProfile.value?.appVersion;
+    return version ? `当前版本 v${version}` : '';
+});
+ensureBrandingLoaded();
+
+function filterSidebarItemsByPermission(items, profile) {
+    const filtered = [];
+    for (const item of items) {
+        if (Array.isArray(item.children) && item.children.length > 0) {
+            const visibleChildren = item.children.filter(child =>
+                hasMenuPermission(profile, child.permissionKey)
+            );
+            if (visibleChildren.length === 0) {
+                continue;
+            }
+            filtered.push({
+                ...item,
+                children: visibleChildren,
+            });
+            continue;
+        }
+
+        if (!hasMenuPermission(profile, item.permissionKey)) {
+            continue;
+        }
+        filtered.push(item);
+    }
+    return filtered;
+}
 
 function isActivePath(path) {
     if (!path) {
@@ -133,6 +178,16 @@ function navigateTo(path) {
         return;
     }
     router.push({ path });
+}
+
+function resolveNavigatePath(item) {
+    if (!item) {
+        return '';
+    }
+    if (Array.isArray(item.children) && item.children.length > 0) {
+        return item.children[0].path || item.path || '';
+    }
+    return item.path || '';
 }
 
 function handleUnauthorized() {

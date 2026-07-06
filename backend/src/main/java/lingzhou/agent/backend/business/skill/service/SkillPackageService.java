@@ -1,7 +1,9 @@
 package lingzhou.agent.backend.business.skill.service;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.io.InputStream;
@@ -32,17 +34,36 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import lingzhou.agent.backend.app.SkillFilesystemSupport;
 import lingzhou.agent.backend.app.SkillProperties;
-import lingzhou.agent.backend.capability.skillruntime.registry.SkillRuntimeRegistry;
-import lingzhou.agent.backend.capability.tool.registry.GlobalToolRegistry;
+import lingzhou.agent.backend.business.chat.execution.workspace.RuntimeExecutionProperties;
+import lingzhou.agent.backend.business.datasets.domain.IntegrationDataset;
+import lingzhou.agent.backend.business.datasets.domain.KnowledgeBase;
+import lingzhou.agent.backend.business.integration.mapper.IntegrationConnectorApiMapper;
+import lingzhou.agent.backend.business.datasets.mapper.IntegrationDatasetMapper;
+import lingzhou.agent.backend.business.datasets.mapper.KnowledgeBaseMapper;
+import lingzhou.agent.backend.business.skill.domain.LowcodeApiCatalog;
+import lingzhou.agent.backend.business.skill.domain.McpServer;
 import lingzhou.agent.backend.business.skill.domain.SkillCatalog;
 import lingzhou.agent.backend.business.skill.domain.SkillPackageFile;
 import lingzhou.agent.backend.business.skill.domain.SkillPackageInstall;
 import lingzhou.agent.backend.business.skill.domain.SkillToolBinding;
+import lingzhou.agent.backend.business.skill.mapper.LowcodeApiCatalogMapper;
+import lingzhou.agent.backend.business.skill.mapper.McpServerMapper;
 import lingzhou.agent.backend.business.skill.mapper.SkillCatalogMapper;
 import lingzhou.agent.backend.business.skill.mapper.SkillPackageFileMapper;
 import lingzhou.agent.backend.business.skill.mapper.SkillPackageInstallMapper;
+import lingzhou.agent.backend.business.skill.mapper.SkillPublishBindingMapper;
 import lingzhou.agent.backend.business.skill.mapper.SkillToolBindingMapper;
+import lingzhou.agent.backend.business.tool.domain.ToolCatalog;
+import lingzhou.agent.backend.business.tool.mapper.ToolCatalogMapper;
+import lingzhou.agent.backend.capability.agentruntime.v2.contract.RuntimeV2ContractSupport;
+import lingzhou.agent.backend.capability.agentruntime.v2.contract.RuntimeV2SkillContract;
+import lingzhou.agent.backend.capability.agentruntime.v2.contract.RuntimeV2SkillContractBuilder;
+import lingzhou.agent.backend.capability.mcp.naming.McpToolNaming;
+import lingzhou.agent.backend.capability.skillruntime.registry.SkillRuntimeRegistry;
+import lingzhou.agent.backend.capability.tool.registry.GlobalToolRegistry;
 import lingzhou.agent.backend.common.lzException.TaskException;
+import lingzhou.agent.backend.skillstudio.project.mapper.SkillStudioProjectMapper;
+import lingzhou.agent.spring.ai.skill.core.Skill;
 import lingzhou.agent.spring.ai.skill.core.SkillKit;
 import lingzhou.agent.spring.ai.skill.core.SkillPoolManager;
 import lingzhou.agent.spring.ai.skill.support.SimpleSkillBox;
@@ -64,48 +85,80 @@ public class SkillPackageService {
     private static final Logger logger = LoggerFactory.getLogger(SkillPackageService.class);
 
     private static final int PACKAGE_FORMAT_VERSION = 1;
+    private static final String TOOL_BINDING_STATUS_READY = "READY";
+    private static final String TOOL_BINDING_STATUS_MISSING_DEPENDENCY = "MISSING_DEPENDENCY";
+    private static final String TOOL_BINDING_STATUS_NEEDS_REBIND = "NEEDS_REBIND";
+    private static final String TOOL_BINDING_STATUS_UNSUPPORTED = "UNSUPPORTED";
     private static final Pattern SAFE_PACKAGE_ID = Pattern.compile("[A-Za-z0-9._-]+");
-    private static final Set<String> EXCLUDED_TOP_LEVEL_NAMES = Set.of(
-            "__pycache__",
-            ".venv",
-            "outputs",
-            "logs",
-            "data_collection");
+    private static final Set<String> EXCLUDED_TOP_LEVEL_NAMES =
+            Set.of("__pycache__", ".venv", "outputs", "logs", "data_collection");
     private static final Set<String> EXCLUDED_FILE_NAMES = Set.of(".DS_Store", ".env");
+    private static final String SKILL_SOURCE_SKILLSTUDIO = "skillstudio";
+    private static final String SKILL_STUDIO_PROJECT_STATUS_DRAFT = "DRAFT";
 
     private final SkillCatalogMapper skillCatalogMapper;
     private final SkillToolBindingMapper skillToolBindingMapper;
     private final SkillPackageInstallMapper skillPackageInstallMapper;
     private final SkillPackageFileMapper skillPackageFileMapper;
+    private final ToolCatalogMapper toolCatalogMapper;
+    private final IntegrationConnectorApiMapper integrationConnectorApiMapper;
+    private final LowcodeApiCatalogMapper lowcodeApiCatalogMapper;
+    private final McpServerMapper mcpServerMapper;
+    private final IntegrationDatasetMapper integrationDatasetMapper;
+    private final KnowledgeBaseMapper knowledgeBaseMapper;
     private final SkillRuntimeRegistry skillRuntimeRegistry;
     private final SkillProperties skillProperties;
+    private final RuntimeExecutionProperties runtimeExecutionProperties;
     private final ObjectMapper objectMapper;
     private final GlobalToolRegistry globalToolRegistry;
     private final SkillKit skillKit;
     private final SkillPoolManager skillPoolManager;
     private final SimpleSkillBox skillBox;
     private final SkillCatalogService skillCatalogService;
+    private final SkillPublishBindingMapper skillPublishBindingMapper;
+    private final SkillStudioProjectMapper skillStudioProjectMapper;
+    private final RuntimeV2SkillContractBuilder runtimeV2SkillContractBuilder;
+    private final RuntimeV2ContractSupport runtimeV2ContractSupport;
 
     public SkillPackageService(
             SkillCatalogMapper skillCatalogMapper,
             SkillToolBindingMapper skillToolBindingMapper,
             SkillPackageInstallMapper skillPackageInstallMapper,
             SkillPackageFileMapper skillPackageFileMapper,
+            ToolCatalogMapper toolCatalogMapper,
+            IntegrationConnectorApiMapper integrationConnectorApiMapper,
+            LowcodeApiCatalogMapper lowcodeApiCatalogMapper,
+            McpServerMapper mcpServerMapper,
+            IntegrationDatasetMapper integrationDatasetMapper,
+            KnowledgeBaseMapper knowledgeBaseMapper,
             SkillRuntimeRegistry skillRuntimeRegistry,
             SkillProperties skillProperties,
+            RuntimeExecutionProperties runtimeExecutionProperties,
             ObjectMapper objectMapper,
             GlobalToolRegistry globalToolRegistry,
             SkillKit skillKit,
             SkillPoolManager skillPoolManager,
             SimpleSkillBox skillBox,
-            SkillCatalogService skillCatalogService) {
+            SkillCatalogService skillCatalogService,
+            SkillPublishBindingMapper skillPublishBindingMapper,
+            SkillStudioProjectMapper skillStudioProjectMapper,
+            RuntimeV2SkillContractBuilder runtimeV2SkillContractBuilder,
+            RuntimeV2ContractSupport runtimeV2ContractSupport) {
         this.skillCatalogMapper = skillCatalogMapper;
         this.skillToolBindingMapper = skillToolBindingMapper;
         this.skillPackageInstallMapper = skillPackageInstallMapper;
         this.skillPackageFileMapper = skillPackageFileMapper;
+        this.toolCatalogMapper = toolCatalogMapper;
+        this.integrationConnectorApiMapper = integrationConnectorApiMapper;
+        this.lowcodeApiCatalogMapper = lowcodeApiCatalogMapper;
+        this.mcpServerMapper = mcpServerMapper;
+        this.integrationDatasetMapper = integrationDatasetMapper;
+        this.knowledgeBaseMapper = knowledgeBaseMapper;
         this.skillRuntimeRegistry = skillRuntimeRegistry;
         this.skillProperties = skillProperties;
-        this.objectMapper = objectMapper.copy()
+        this.runtimeExecutionProperties = runtimeExecutionProperties;
+        this.objectMapper = objectMapper
+                .copy()
                 .setSerializationInclusion(JsonInclude.Include.NON_NULL)
                 .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         this.globalToolRegistry = globalToolRegistry;
@@ -113,6 +166,10 @@ public class SkillPackageService {
         this.skillPoolManager = skillPoolManager;
         this.skillBox = skillBox;
         this.skillCatalogService = skillCatalogService;
+        this.skillPublishBindingMapper = skillPublishBindingMapper;
+        this.skillStudioProjectMapper = skillStudioProjectMapper;
+        this.runtimeV2SkillContractBuilder = runtimeV2SkillContractBuilder;
+        this.runtimeV2ContractSupport = runtimeV2ContractSupport;
     }
 
     public ExportedPackage exportSkillPackage(Long skillId, Long userId) throws TaskException {
@@ -120,6 +177,7 @@ public class SkillPackageService {
         if (catalog == null) {
             throw new TaskException("技能不存在", TaskException.Code.UNKNOWN);
         }
+        skillCatalogService.assertCanAccessSkillDetail(userId, catalog);
         SkillRuntimeRegistry.FilesystemSkillDescriptor descriptor =
                 skillRuntimeRegistry.findFilesystemSkill(catalog.getRuntimeSkillName());
         if (descriptor == null) {
@@ -160,7 +218,7 @@ public class SkillPackageService {
             objectMapper.writerWithDefaultPrettyPrinter().writeValue(configPath.toFile(), configSnapshot);
             manifestFiles.add(toManifestFile("config.json", configPath));
 
-            String packageVersion = resolveExportVersion(descriptor.directoryPath());
+            String packageVersion = resolveExportVersion(catalog);
             Manifest manifest = new Manifest(
                     descriptor.runtimeSkillName(),
                     descriptor.runtimeSkillName(),
@@ -179,8 +237,7 @@ public class SkillPackageService {
             objectMapper.writerWithDefaultPrettyPrinter().writeValue(manifestPath.toFile(), manifest);
 
             zipFilePath = Files.createTempFile(
-                    sanitizeFileName(descriptor.runtimeSkillName() + "-" + packageVersion),
-                    ".zip");
+                    sanitizeFileName(descriptor.runtimeSkillName() + "-" + packageVersion), ".zip");
             writeEncryptedZip(stagingDir, zipFilePath);
             return new ExportedPackage(
                     buildExportFilename(descriptor.runtimeSkillName(), packageVersion),
@@ -212,10 +269,12 @@ public class SkillPackageService {
             }
 
             Path skillRoot = SkillFilesystemSupport.resolveSkillRoot();
-            Path targetSkillDir = skillRoot.resolve(prepared.manifest.packageId()).normalize();
+            Path targetSkillDir =
+                    skillRoot.resolve(prepared.manifest.packageId()).normalize();
             Files.createDirectories(targetSkillDir);
 
-            Path backupDir = skillRoot.resolve(".backups")
+            Path backupDir = skillRoot
+                    .resolve(".backups")
                     .resolve(prepared.manifest.packageId())
                     .resolve(new SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).format(new Date()));
             List<FileChange> fileChanges = preview.fileChanges();
@@ -225,11 +284,14 @@ public class SkillPackageService {
             removeManagedFiles(targetSkillDir, fileChanges);
 
             SkillCatalog catalog = upsertCatalog(prepared);
-            List<String> appliedManualBindings = syncManualBindings(catalog.getId(), prepared.config.toolBindings());
+            applyToolBindingStatus(catalog, preview.toolBindingSummary(), preview.toolBindingResults());
+            skillCatalogMapper.updateById(catalog);
+            List<String> appliedManualBindings = syncManualBindings(catalog.getId(), preview.toolBindingResults());
 
             DependencyInstallResult dependencyResult = installDependencies(prepared, targetSkillDir);
             String installStatus = "SUCCESS";
-            if ("FAILED".equals(dependencyResult.status()) && skillProperties.getInstaller().isContinueOnDependencyError()) {
+            if ("FAILED".equals(dependencyResult.status())
+                    && skillProperties.getInstaller().isContinueOnDependencyError()) {
                 installStatus = "PARTIAL_SUCCESS";
             }
 
@@ -246,10 +308,20 @@ public class SkillPackageService {
             install.setInstalledBy(userId);
             install.setInstalledAt(new Date());
             install.setSummaryJson(toSummaryJson(Map.of(
-                    "warnings", preview.warnings(),
-                    "backupDir", Files.isDirectory(backupDir) ? backupDir.toString() : "",
-                    "dependencyMessage", dependencyResult.message(),
-                    "appliedManualBindings", appliedManualBindings)));
+                    "warnings",
+                    preview.warnings(),
+                    "backupDir",
+                    Files.isDirectory(backupDir) ? backupDir.toString() : "",
+                    "dependencyMessage",
+                    dependencyResult.message(),
+                    "appliedManualBindings",
+                    appliedManualBindings,
+                    RuntimeV2ContractSupport.EXTENSION_KEY,
+                    prepared.config.runtimeContract(),
+                    "toolBindingSummary",
+                    preview.toolBindingSummary(),
+                    "toolBindingResults",
+                    preview.toolBindingResults())));
             skillPackageInstallMapper.insert(install);
 
             recordInstalledFiles(install.getId(), prepared.manifest.packageId(), fileChanges, importedFiles);
@@ -261,7 +333,9 @@ public class SkillPackageService {
                     installStatus,
                     dependencyResult.status(),
                     Files.isDirectory(backupDir) ? backupDir.toString() : "",
-                    preview.warnings());
+                    preview.warnings(),
+                    preview.toolBindingSummary(),
+                    preview.toolBindingResults());
         } catch (IOException ex) {
             throw new TaskException("导入技能包失败：" + ex.getMessage(), TaskException.Code.UNKNOWN);
         } finally {
@@ -271,32 +345,141 @@ public class SkillPackageService {
 
     public RefreshResult refreshSkillRuntime() {
         skillRuntimeRegistry.reload(skillKit, skillPoolManager, skillBox);
-        List<SkillRuntimeRegistry.FilesystemSkillDescriptor> filesystemSkills = skillRuntimeRegistry.listFilesystemSkills();
+        List<SkillRuntimeRegistry.FilesystemSkillDescriptor> filesystemSkills =
+                skillRuntimeRegistry.listFilesystemSkills();
         return new RefreshResult(
                 filesystemSkills.size(),
                 skillCatalogService.listRuntimeSkills().size(),
-                filesystemSkills.stream().map(SkillRuntimeRegistry.FilesystemSkillDescriptor::runtimeSkillName).toList());
+                filesystemSkills.stream()
+                        .map(SkillRuntimeRegistry.FilesystemSkillDescriptor::runtimeSkillName)
+                        .toList());
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public DeleteSkillResult deleteSkill(Long skillId, Long operatorUserId) throws TaskException {
+        if (skillId == null || skillId <= 0) {
+            throw new TaskException("技能ID无效", TaskException.Code.UNKNOWN);
+        }
+        SkillCatalog catalog = skillCatalogMapper.selectById(skillId);
+        if (catalog == null) {
+            throw new TaskException("技能不存在", TaskException.Code.UNKNOWN);
+        }
+        skillCatalogService.assertCanDeleteSkill(operatorUserId, catalog);
+        String runtimeSkillName = normalizeRequired(catalog.getRuntimeSkillName(), "技能运行时名称不能为空");
+
+        Path skillRoot =
+                SkillFilesystemSupport.resolveSkillRoot().toAbsolutePath().normalize();
+        Path runtimeSkillDir = skillRoot.resolve(runtimeSkillName).normalize();
+        Path pythonSkillsRoot = Path.of(runtimeExecutionProperties.getWorkspaceBaseDir())
+                .toAbsolutePath()
+                .normalize()
+                .resolve("public")
+                .resolve("runtime-envs")
+                .resolve("python")
+                .resolve("skills")
+                .normalize();
+        Path pythonEnvDir = pythonSkillsRoot.resolve(runtimeSkillName).normalize();
+
+        boolean skillDirectoryDeleted = deleteDirectorySafely(runtimeSkillDir, skillRoot, "技能目录");
+        boolean pythonEnvDeleted = deleteDirectorySafely(pythonEnvDir, pythonSkillsRoot, "Python 运行时目录");
+
+        List<SkillPackageInstall> installs = skillPackageInstallMapper.selectByRuntimeSkillName(runtimeSkillName);
+        List<Long> installIds = installs.stream()
+                .map(SkillPackageInstall::getId)
+                .filter(Objects::nonNull)
+                .toList();
+        if (!installIds.isEmpty()) {
+            skillPackageFileMapper.deleteByInstallIds(installIds);
+        }
+        skillPackageInstallMapper.deleteByRuntimeSkillName(runtimeSkillName);
+
+        skillToolBindingMapper.deleteBySkillId(skillId);
+        skillPublishBindingMapper.deleteBySkillId(skillId);
+        int deletedCatalogRows = skillCatalogMapper.deleteById(skillId);
+        if (deletedCatalogRows <= 0) {
+            throw new TaskException("删除技能数据失败", TaskException.Code.UNKNOWN);
+        }
+
+        boolean republishRequired = false;
+        if (StringUtils.hasText(catalog.getSource())
+                && SKILL_SOURCE_SKILLSTUDIO.equalsIgnoreCase(catalog.getSource().trim())) {
+            republishRequired = skillStudioProjectMapper.updateActiveStatusByRuntimeSkillName(
+                            runtimeSkillName, SKILL_STUDIO_PROJECT_STATUS_DRAFT)
+                    > 0;
+        }
+
+        refreshSkillRuntime();
+        return new DeleteSkillResult(
+                skillId, runtimeSkillName, skillDirectoryDeleted, pythonEnvDeleted, republishRequired);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public BindingRefreshResult refreshToolBindings(Long skillId) throws TaskException {
+        if (skillId == null || skillId <= 0) {
+            throw new TaskException("技能ID无效", TaskException.Code.UNKNOWN);
+        }
+        SkillCatalog catalog = skillCatalogMapper.selectById(skillId);
+        if (catalog == null) {
+            throw new TaskException("技能不存在", TaskException.Code.UNKNOWN);
+        }
+        if (!StringUtils.hasText(catalog.getRuntimeSkillName())) {
+            throw new TaskException("技能缺少运行时标识，无法重新检测绑定", TaskException.Code.UNKNOWN);
+        }
+        SkillPackageInstall install = skillPackageInstallMapper.selectLatestSuccessfulByRuntimeSkillName(
+                catalog.getRuntimeSkillName().trim());
+        if (install == null || !StringUtils.hasText(install.getSummaryJson())) {
+            throw new TaskException("未找到可用于重新检测的导入记录", TaskException.Code.UNKNOWN);
+        }
+        List<ToolBindingSnapshot> snapshots = parseStoredToolBindingSnapshots(install.getSummaryJson());
+        if (snapshots.isEmpty()) {
+            catalog.setToolBindingStatus(TOOL_BINDING_STATUS_READY);
+            catalog.setToolBindingMessage(null);
+            catalog.setToolBindingDetails(null);
+            skillCatalogMapper.updateById(catalog);
+            skillToolBindingMapper.deleteBySkillIdAndBindingType(skillId, "MANUAL");
+            return new BindingRefreshResult(
+                    skillId,
+                    new ToolBindingRestoreSummary(0, 0, 0, 0, 0, 0),
+                    List.of(),
+                    List.of(),
+                    TOOL_BINDING_STATUS_READY,
+                    null);
+        }
+        ToolBindingAnalysis analysis = analyzeToolBindings(snapshots);
+        List<String> appliedManualBindings = syncManualBindings(skillId, analysis.results());
+        applyToolBindingStatus(catalog, analysis.summary(), analysis.results());
+        skillCatalogMapper.updateById(catalog);
+        return new BindingRefreshResult(
+                skillId,
+                analysis.summary(),
+                analysis.results(),
+                appliedManualBindings,
+                normalizeToolBindingStatus(catalog.getToolBindingStatus()),
+                catalog.getToolBindingMessage());
     }
 
     private PreviewResult buildPreview(PreparedImport prepared) throws TaskException {
         validateManifest(prepared.manifest);
-        SkillPackageInstall currentInstall = skillPackageInstallMapper.selectLatestSuccessful(prepared.manifest.packageId());
+        SkillPackageInstall currentInstall =
+                skillPackageInstallMapper.selectLatestSuccessful(prepared.manifest.packageId());
         Map<String, String> previousManagedFiles = loadPreviousManagedFiles(currentInstall);
         Map<String, InstalledFileSeed> importedFiles = collectImportedFiles(prepared);
         List<FileChange> fileChanges = buildFileChanges(previousManagedFiles, importedFiles);
-        int unmanagedFileCount = countUnmanagedExistingFiles(prepared.manifest.packageId(), previousManagedFiles.keySet());
+        int unmanagedFileCount =
+                countUnmanagedExistingFiles(prepared.manifest.packageId(), previousManagedFiles.keySet());
         ComparisonResult comparison = compareVersions(
-                currentInstall == null ? null : currentInstall.getPackageVersion(),
-                prepared.manifest.version());
+                currentInstall == null ? null : currentInstall.getPackageVersion(), prepared.manifest.version());
+        ToolBindingAnalysis bindingAnalysis = analyzeToolBindings(prepared.config.toolBindings());
 
         List<String> warnings = new ArrayList<>();
         if (comparison.downgrade()) {
             warnings.add("导入包版本低于当前已安装版本，将按降级流程处理。");
         }
         if (unmanagedFileCount > 0) {
-            warnings.add("检测到 " + unmanagedFileCount + " 个非受管本地文件，导入时将保留。");
+            warnings.add("检测到 " + unmanagedFileCount + " 个本地额外文件，不在技能包管理范围内，导入时将保留。");
         }
         warnings.addAll(prepared.validationWarnings);
+        warnings.addAll(buildBindingWarnings(bindingAnalysis.summary()));
 
         String installMode = determineInstallMode(currentInstall, comparison, fileChanges);
         return new PreviewResult(
@@ -310,7 +493,9 @@ public class SkillPackageService {
                 comparison.downgrade(),
                 unmanagedFileCount,
                 fileChanges,
-                warnings);
+                warnings,
+                bindingAnalysis.summary(),
+                bindingAnalysis.results());
     }
 
     private PreparedImport prepareImport(MultipartFile file) throws TaskException {
@@ -324,20 +509,18 @@ public class SkillPackageService {
             uploadPath = Files.createTempFile("skill-package-upload-", ".zip");
             file.transferTo(uploadPath);
             extractDir = Files.createTempDirectory("skill-package-import-");
-            ZipFile zipFile = new ZipFile(uploadPath.toFile(), skillProperties.getPackageConfig().getPassword().toCharArray());
+            ZipFile zipFile = new ZipFile(
+                    uploadPath.toFile(),
+                    skillProperties.getPackageConfig().getPassword().toCharArray());
             zipFile.extractAll(extractDir.toString());
 
-            Manifest manifest = objectMapper.readValue(extractDir.resolve("manifest.json").toFile(), Manifest.class);
+            Manifest manifest =
+                    objectMapper.readValue(extractDir.resolve("manifest.json").toFile(), Manifest.class);
             ConfigSnapshot config = Files.exists(extractDir.resolve("config.json"))
-                    ? objectMapper.readValue(extractDir.resolve("config.json").toFile(), ConfigSnapshot.class)
+                    ? parseConfigSnapshot(extractDir.resolve("config.json"), manifest.runtimeSkillName())
                     : ConfigSnapshot.empty(manifest.runtimeSkillName());
             PreparedImport prepared = new PreparedImport(
-                    uploadPath,
-                    extractDir,
-                    manifest,
-                    config,
-                    file.getOriginalFilename(),
-                    sha256(uploadPath));
+                    uploadPath, extractDir, manifest, config, file.getOriginalFilename(), sha256(uploadPath));
             validatePreparedImport(prepared);
             return prepared;
         } catch (TaskException ex) {
@@ -359,7 +542,8 @@ public class SkillPackageService {
         String runtimeNameInSkill = resolveSkillNameFromMarkdown(skillMarkdown);
         if (StringUtils.hasText(runtimeNameInSkill)
                 && !Objects.equals(runtimeNameInSkill.trim(), prepared.manifest.runtimeSkillName())) {
-            throw new TaskException("manifest.runtimeSkillName 与 skill/SKILL.md 中的 name 不一致", TaskException.Code.UNKNOWN);
+            throw new TaskException(
+                    "manifest.runtimeSkillName 与 skill/SKILL.md 中的 name 不一致", TaskException.Code.UNKNOWN);
         }
     }
 
@@ -367,7 +551,8 @@ public class SkillPackageService {
         if (manifest == null) {
             throw new TaskException("技能包缺少 manifest.json", TaskException.Code.UNKNOWN);
         }
-        if (!StringUtils.hasText(manifest.packageId()) || !SAFE_PACKAGE_ID.matcher(manifest.packageId().trim()).matches()) {
+        if (!StringUtils.hasText(manifest.packageId())
+                || !SAFE_PACKAGE_ID.matcher(manifest.packageId().trim()).matches()) {
             throw new TaskException("manifest.packageId 非法", TaskException.Code.UNKNOWN);
         }
         if (!StringUtils.hasText(manifest.runtimeSkillName())) {
@@ -405,37 +590,57 @@ public class SkillPackageService {
     }
 
     private ConfigSnapshot buildConfigSnapshot(SkillCatalog catalog) {
-        List<String> manualBindings = skillToolBindingMapper.selectBySkillIdAndBindingType(catalog.getId(), "MANUAL")
-                .stream()
-                .map(SkillToolBinding::getToolName)
-                .filter(StringUtils::hasText)
-                .sorted()
-                .toList();
+        List<ToolBindingSnapshot> manualBindings =
+                skillToolBindingMapper.selectBySkillIdAndBindingType(catalog.getId(), "MANUAL").stream()
+                        .map(binding -> buildToolBindingSnapshot(binding.getToolName(), binding.getBindingType()))
+                        .filter(Objects::nonNull)
+                        .sorted(Comparator.comparing(ToolBindingSnapshot::toolName))
+                        .toList();
         return new ConfigSnapshot(
                 new SkillCatalogSnapshot(
                         catalog.getRuntimeSkillName(),
                         catalog.getDisplayName(),
                         catalog.getDescription(),
                         catalog.getCategory(),
+                        SkillCatalogMetadataDefaults.resolveVersion(catalog.getVersion()),
+                        SkillCatalogMetadataDefaults.resolveAuthor(catalog.getAuthor()),
+                        SkillCatalogMetadataDefaults.resolveIcon(catalog.getRuntimeSkillName(), catalog.getIcon()),
+                        normalize(catalog.getIconColor(), null),
                         catalog.getVisible() == null || catalog.getVisible() == 1,
                         catalog.getSortOrder() == null ? 0 : catalog.getSortOrder()),
-                manualBindings);
+                manualBindings,
+                buildRuntimeContractSnapshot(catalog, manualBindings));
     }
 
-    private String resolveExportVersion(Path skillDir) {
-        Path skillJsonPath = skillDir.resolve("skill.json");
-        if (Files.isRegularFile(skillJsonPath)) {
-            try {
-                var tree = objectMapper.readTree(skillJsonPath.toFile());
-                String version = tree.path("version").asText("");
-                if (StringUtils.hasText(version)) {
-                    return version.trim();
-                }
-            } catch (IOException ex) {
-                logger.warn("读取 skill.json 版本失败：path={}, error={}", skillJsonPath, ex.getMessage(), ex);
-            }
+    private RuntimeV2SkillContract buildRuntimeContractSnapshot(
+            SkillCatalog catalog, List<ToolBindingSnapshot> manualBindings) {
+        if (catalog == null || !StringUtils.hasText(catalog.getRuntimeSkillName())) {
+            return null;
         }
-        return DateTimeFormatter.ofPattern("yyyy.MM.dd.HHmmss").format(OffsetDateTime.now());
+        Skill skill = skillKit.getSkill(catalog.getRuntimeSkillName().trim());
+        if (skill == null) {
+            return null;
+        }
+        List<String> boundToolNames = manualBindings == null
+                ? List.of()
+                : manualBindings.stream()
+                        .map(ToolBindingSnapshot::toolName)
+                        .filter(StringUtils::hasText)
+                        .toList();
+        List<String> toolNames =
+                skillCatalogService.mergeToolCallbacksForExport(skill.getTools(), boundToolNames).stream()
+                        .filter(tool -> tool != null && tool.getToolDefinition() != null)
+                        .map(tool -> tool.getToolDefinition().name())
+                        .filter(StringUtils::hasText)
+                        .map(String::trim)
+                        .distinct()
+                        .toList();
+        return runtimeV2ContractSupport.normalize(runtimeV2SkillContractBuilder.build(
+                catalog.getRuntimeSkillName(), catalog.getDisplayName(), toolNames));
+    }
+
+    private String resolveExportVersion(SkillCatalog catalog) {
+        return SkillCatalogMetadataDefaults.resolveVersion(catalog == null ? null : catalog.getVersion());
     }
 
     private void writeEncryptedZip(Path sourceDir, Path zipFilePath) throws TaskException {
@@ -467,25 +672,30 @@ public class SkillPackageService {
             for (Path file : stream.filter(Files::isRegularFile).sorted().toList()) {
                 Path relative = skillDir.relativize(file);
                 String relativePath = toUnixPath(relative);
-                files.put(relativePath, new InstalledFileSeed(
+                files.put(
                         relativePath,
-                        file,
-                        sha256(file),
-                        Files.size(file),
-                        "requirements.txt".equals(relativePath) ? "DEPENDENCY" : "SKILL_CONTENT"));
+                        new InstalledFileSeed(
+                                relativePath,
+                                file,
+                                sha256(file),
+                                Files.size(file),
+                                "requirements.txt".equals(relativePath) ? "DEPENDENCY" : "SKILL_CONTENT"));
             }
         } catch (IOException ex) {
             throw new TaskException("读取技能包文件失败：" + ex.getMessage(), TaskException.Code.UNKNOWN);
         }
-        Path dependencyRequirements = prepared.extractDir.resolve("dependencies").resolve("requirements.txt");
+        Path dependencyRequirements =
+                prepared.extractDir.resolve("dependencies").resolve("requirements.txt");
         if (Files.isRegularFile(dependencyRequirements) && !files.containsKey("requirements.txt")) {
             try {
-                files.put("requirements.txt", new InstalledFileSeed(
+                files.put(
                         "requirements.txt",
-                        dependencyRequirements,
-                        sha256(dependencyRequirements),
-                        Files.size(dependencyRequirements),
-                        "DEPENDENCY"));
+                        new InstalledFileSeed(
+                                "requirements.txt",
+                                dependencyRequirements,
+                                sha256(dependencyRequirements),
+                                Files.size(dependencyRequirements),
+                                "DEPENDENCY"));
             } catch (IOException ex) {
                 throw new TaskException("读取依赖清单失败：" + ex.getMessage(), TaskException.Code.UNKNOWN);
             }
@@ -547,7 +757,8 @@ public class SkillPackageService {
         return left.compareToIgnoreCase(right);
     }
 
-    private String determineInstallMode(SkillPackageInstall currentInstall, ComparisonResult comparison, List<FileChange> changes) {
+    private String determineInstallMode(
+            SkillPackageInstall currentInstall, ComparisonResult comparison, List<FileChange> changes) {
         if (currentInstall == null) {
             return "INSTALL";
         }
@@ -590,7 +801,8 @@ public class SkillPackageService {
         return fileMap;
     }
 
-    private void backupManagedFiles(Path targetSkillDir, Path backupDir, List<FileChange> fileChanges) throws IOException {
+    private void backupManagedFiles(Path targetSkillDir, Path backupDir, List<FileChange> fileChanges)
+            throws IOException {
         for (FileChange change : fileChanges) {
             if (!Set.of("UPDATED", "REMOVED").contains(change.operation())) {
                 continue;
@@ -604,7 +816,8 @@ public class SkillPackageService {
         }
     }
 
-    private void applyImportedFiles(Path targetSkillDir, Map<String, InstalledFileSeed> importedFiles) throws IOException {
+    private void applyImportedFiles(Path targetSkillDir, Map<String, InstalledFileSeed> importedFiles)
+            throws IOException {
         for (InstalledFileSeed file : importedFiles.values()) {
             Path target = targetSkillDir.resolve(file.relativePath()).normalize();
             copyFile(file.sourcePath(), target);
@@ -642,26 +855,859 @@ public class SkillPackageService {
         catalog.setDisplayName(normalize(snapshot == null ? null : snapshot.displayName(), manifest.displayName()));
         catalog.setDescription(normalize(snapshot == null ? null : snapshot.description(), manifest.displayName()));
         catalog.setCategory(normalize(snapshot == null ? null : snapshot.category(), "通用能力"));
+        catalog.setVersion(SkillCatalogMetadataDefaults.resolveVersion(snapshot == null ? null : snapshot.version()));
+        catalog.setAuthor(SkillCatalogMetadataDefaults.resolveAuthor(snapshot == null ? null : snapshot.author()));
+        if (StringUtils.hasText(snapshot == null ? null : snapshot.icon())) {
+            catalog.setIcon(snapshot.icon().trim());
+        } else if (!StringUtils.hasText(catalog.getIcon())) {
+            catalog.setIcon(SkillCatalogMetadataDefaults.resolveIcon(manifest.runtimeSkillName(), null));
+        }
+        if (StringUtils.hasText(snapshot == null ? null : snapshot.iconColor())) {
+            catalog.setIconColor(snapshot.iconColor().trim());
+        }
         catalog.setVisible(snapshot != null && !snapshot.visible() ? 0 : 1);
         catalog.setSortOrder(snapshot == null || snapshot.sortOrder() == null ? 0 : snapshot.sortOrder());
         catalog.setSource("filesystem");
+        if (!StringUtils.hasText(catalog.getToolBindingStatus())) {
+            catalog.setToolBindingStatus(TOOL_BINDING_STATUS_READY);
+        }
     }
 
-    private List<String> syncManualBindings(Long skillId, List<String> requestedToolNames) {
+    private void applyToolBindingStatus(
+            SkillCatalog catalog, ToolBindingRestoreSummary summary, List<ToolBindingRestoreResult> bindingResults) {
+        if (catalog == null) {
+            return;
+        }
+        if (summary == null
+                || (summary.missingDependencyCount() <= 0
+                        && summary.needsRebindCount() <= 0
+                        && summary.unsupportedCount() <= 0)) {
+            catalog.setToolBindingStatus(TOOL_BINDING_STATUS_READY);
+            catalog.setToolBindingMessage(null);
+            catalog.setToolBindingDetails(null);
+            return;
+        }
+        if (summary.missingDependencyCount() > 0) {
+            catalog.setToolBindingStatus(TOOL_BINDING_STATUS_MISSING_DEPENDENCY);
+        } else if (summary.needsRebindCount() > 0) {
+            catalog.setToolBindingStatus(TOOL_BINDING_STATUS_NEEDS_REBIND);
+        } else {
+            catalog.setToolBindingStatus(TOOL_BINDING_STATUS_UNSUPPORTED);
+        }
+        catalog.setToolBindingMessage(buildToolBindingStatusMessage(summary));
+        catalog.setToolBindingDetails(toSummaryJson(buildToolBindingIssueViews(bindingResults)));
+        catalog.setVisible(0);
+    }
+
+    private String buildToolBindingStatusMessage(ToolBindingRestoreSummary summary) {
+        if (summary == null) {
+            return null;
+        }
+        List<String> parts = new ArrayList<>();
+        if (summary.missingDependencyCount() > 0) {
+            parts.add("缺失依赖 " + summary.missingDependencyCount() + " 项");
+        }
+        if (summary.needsRebindCount() > 0) {
+            parts.add("需要重绑 " + summary.needsRebindCount() + " 项");
+        }
+        if (summary.unsupportedCount() > 0) {
+            parts.add("暂不支持恢复 " + summary.unsupportedCount() + " 项");
+        }
+        return parts.isEmpty() ? null : String.join("，", parts);
+    }
+
+    private String normalizeToolBindingStatus(String status) {
+        return StringUtils.hasText(status) ? status.trim() : TOOL_BINDING_STATUS_READY;
+    }
+
+    private List<SkillCatalogService.ToolBindingIssueView> buildToolBindingIssueViews(
+            List<ToolBindingRestoreResult> bindingResults) {
+        if (bindingResults == null || bindingResults.isEmpty()) {
+            return List.of();
+        }
+        return bindingResults.stream()
+                .filter(Objects::nonNull)
+                .filter(result -> StringUtils.hasText(result.restoreStatus())
+                        && !Objects.equals(result.restoreStatus(), "RESTORED"))
+                .map(result -> new SkillCatalogService.ToolBindingIssueView(
+                        result.toolName(),
+                        result.resolvedToolName(),
+                        result.toolSourceType(),
+                        result.restoreStatus(),
+                        result.message()))
+                .toList();
+    }
+
+    private List<ToolBindingSnapshot> parseStoredToolBindingSnapshots(String summaryJson) throws TaskException {
+        try {
+            JsonNode root = objectMapper.readTree(summaryJson);
+            JsonNode node = root == null ? null : root.path("toolBindingResults");
+            if (node == null || node.isMissingNode() || !node.isArray()) {
+                return List.of();
+            }
+            List<ToolBindingSnapshot> snapshots = new ArrayList<>();
+            for (JsonNode item : node) {
+                String toolName = textValue(item.path("toolName"));
+                if (!StringUtils.hasText(toolName)) {
+                    continue;
+                }
+                snapshots.add(new ToolBindingSnapshot(
+                        toolName.trim(),
+                        normalize(textValue(item.path("bindingType")), "MANUAL"),
+                        normalizeToolSourceType(textValue(item.path("toolSourceType")), toolName),
+                        normalize(
+                                textValue(item.path("exportMode")),
+                                defaultExportMode(textValue(item.path("toolSourceType")))),
+                        "BOUND",
+                        parseReferenceMeta(item.path("referenceMeta"))));
+            }
+            return List.copyOf(snapshots);
+        } catch (IOException ex) {
+            throw new TaskException("解析历史导入绑定记录失败：" + ex.getMessage(), TaskException.Code.UNKNOWN);
+        }
+    }
+
+    private ConfigSnapshot parseConfigSnapshot(Path configPath, String runtimeSkillName) throws TaskException {
+        try {
+            JsonNode root = objectMapper.readTree(configPath.toFile());
+            JsonNode skillCatalogNode = root == null ? null : root.path("skillCatalog");
+            SkillCatalogSnapshot snapshot = parseSkillCatalogSnapshot(skillCatalogNode, runtimeSkillName);
+            List<ToolBindingSnapshot> toolBindings =
+                    parseToolBindingSnapshots(root == null ? null : root.path("toolBindings"));
+            RuntimeV2SkillContract runtimeContract =
+                    runtimeV2ContractSupport.readSkillContract(root == null ? null : root.path("runtimeContract"));
+            return new ConfigSnapshot(snapshot, toolBindings, runtimeContract);
+        } catch (IOException ex) {
+            throw new TaskException("读取技能包配置失败：" + ex.getMessage(), TaskException.Code.UNKNOWN);
+        }
+    }
+
+    private SkillCatalogSnapshot parseSkillCatalogSnapshot(JsonNode node, String runtimeSkillName) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return ConfigSnapshot.empty(runtimeSkillName).skillCatalog();
+        }
+        String resolvedRuntimeSkillName = textValue(node.path("runtimeSkillName"));
+        return new SkillCatalogSnapshot(
+                StringUtils.hasText(resolvedRuntimeSkillName) ? resolvedRuntimeSkillName : runtimeSkillName,
+                textValue(node.path("displayName")),
+                textValue(node.path("description")),
+                textValue(node.path("category")),
+                SkillCatalogMetadataDefaults.resolveVersion(textValue(node.path("version"))),
+                SkillCatalogMetadataDefaults.resolveAuthor(textValue(node.path("author"))),
+                SkillCatalogMetadataDefaults.resolveIcon(runtimeSkillName, textValue(node.path("icon"))),
+                textValue(node.path("iconColor")),
+                booleanValue(node.path("visible"), true),
+                integerValue(node.path("sortOrder"), 0));
+    }
+
+    private List<ToolBindingSnapshot> parseToolBindingSnapshots(JsonNode node) {
+        if (node == null || node.isMissingNode() || !node.isArray()) {
+            return List.of();
+        }
+        List<ToolBindingSnapshot> snapshots = new ArrayList<>();
+        for (JsonNode item : node) {
+            if (item == null || item.isNull()) {
+                continue;
+            }
+            if (item.isTextual()) {
+                ToolBindingSnapshot legacySnapshot = buildToolBindingSnapshot(item.asText(), "MANUAL");
+                if (legacySnapshot != null) {
+                    snapshots.add(legacySnapshot);
+                }
+                continue;
+            }
+            String toolName = textValue(item.path("toolName"));
+            if (!StringUtils.hasText(toolName)) {
+                continue;
+            }
+            String bindingType = normalize(textValue(item.path("bindingType")), "MANUAL");
+            String toolSourceType = normalizeToolSourceType(textValue(item.path("toolSourceType")), toolName);
+            String exportMode = normalize(textValue(item.path("exportMode")), defaultExportMode(toolSourceType));
+            String referenceStatus = normalize(textValue(item.path("referenceStatus")), "BOUND");
+            Map<String, Object> referenceMeta = parseReferenceMeta(item.path("referenceMeta"));
+            if (referenceMeta.isEmpty()) {
+                referenceMeta = buildReferenceMeta(toolName, toolSourceType);
+            }
+            snapshots.add(new ToolBindingSnapshot(
+                    toolName.trim(), bindingType, toolSourceType, exportMode, referenceStatus, referenceMeta));
+        }
+        return List.copyOf(snapshots);
+    }
+
+    private Map<String, Object> parseReferenceMeta(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull() || !node.isObject()) {
+            return Map.of();
+        }
+        return objectMapper.convertValue(node, new TypeReference<Map<String, Object>>() {});
+    }
+
+    private ToolBindingSnapshot buildToolBindingSnapshot(String toolName, String bindingType) {
+        if (!StringUtils.hasText(toolName)) {
+            return null;
+        }
+        String normalizedToolName = toolName.trim();
+        String toolSourceType = normalizeToolSourceType("", normalizedToolName);
+        return new ToolBindingSnapshot(
+                normalizedToolName,
+                normalize(bindingType, "MANUAL"),
+                toolSourceType,
+                defaultExportMode(toolSourceType),
+                "BOUND",
+                buildReferenceMeta(normalizedToolName, toolSourceType));
+    }
+
+    private ToolBindingAnalysis analyzeToolBindings(List<ToolBindingSnapshot> toolBindings) {
+        if (toolBindings == null || toolBindings.isEmpty()) {
+            return new ToolBindingAnalysis(new ToolBindingRestoreSummary(0, 0, 0, 0, 0, 0), List.of());
+        }
+        List<ToolBindingRestoreResult> results =
+                toolBindings.stream().map(this::analyzeToolBinding).toList();
+        int restoredCount = 0;
+        int missingDependencyCount = 0;
+        int unsupportedCount = 0;
+        int needsRebindCount = 0;
+        int skippedCount = 0;
+        for (ToolBindingRestoreResult result : results) {
+            if (result == null) {
+                continue;
+            }
+            switch (normalize(result.restoreStatus(), "")) {
+                case "RESTORED" -> restoredCount++;
+                case "MISSING_DEPENDENCY" -> missingDependencyCount++;
+                case "UNSUPPORTED" -> unsupportedCount++;
+                case "NEEDS_REBIND" -> needsRebindCount++;
+                case "SKIPPED" -> skippedCount++;
+                default -> {}
+            }
+        }
+        return new ToolBindingAnalysis(
+                new ToolBindingRestoreSummary(
+                        results.size(),
+                        restoredCount,
+                        missingDependencyCount,
+                        unsupportedCount,
+                        needsRebindCount,
+                        skippedCount),
+                results);
+    }
+
+    private ToolBindingRestoreResult analyzeToolBinding(ToolBindingSnapshot snapshot) {
+        if (snapshot == null || !StringUtils.hasText(snapshot.toolName())) {
+            return new ToolBindingRestoreResult(
+                    "", "", "MANUAL", "UNKNOWN", "REFERENCE_ONLY", "SKIPPED", "空绑定项已跳过", Map.of());
+        }
+        String toolName = snapshot.toolName().trim();
+        String bindingType = normalize(snapshot.bindingType(), "MANUAL");
+        String toolSourceType = normalizeToolSourceType(snapshot.toolSourceType(), toolName);
+        String exportMode = normalize(snapshot.exportMode(), defaultExportMode(toolSourceType));
+        Map<String, Object> referenceMeta = snapshot.referenceMeta() == null ? Map.of() : snapshot.referenceMeta();
+        return switch (toolSourceType) {
+            case "GLOBAL" -> analyzeGlobalBinding(toolName, bindingType, exportMode, referenceMeta);
+            case "LOWCODE_API" -> analyzeLowcodeBinding(snapshot, bindingType, exportMode, referenceMeta);
+            case "CONNECTOR_API" -> analyzeConnectorBinding(snapshot, bindingType, exportMode, referenceMeta);
+            case "DATASET_TOOL" -> analyzeDatasetBinding(snapshot, bindingType, exportMode, referenceMeta);
+            case "KNOWLEDGE_BASE_TOOL" -> analyzeKnowledgeBaseBinding(snapshot, bindingType, exportMode, referenceMeta);
+            case "MCP_REMOTE" -> analyzeMcpBinding(snapshot, bindingType, exportMode, referenceMeta);
+            default -> new ToolBindingRestoreResult(
+                    toolName,
+                    "",
+                    bindingType,
+                    toolSourceType,
+                    exportMode,
+                    "UNSUPPORTED",
+                    "当前版本暂不支持自动恢复该类绑定",
+                    referenceMeta);
+        };
+    }
+
+    private ToolBindingRestoreResult analyzeGlobalBinding(
+            String toolName, String bindingType, String exportMode, Map<String, Object> referenceMeta) {
+        if (!globalToolRegistry.containsBindable(toolName)) {
+            return new ToolBindingRestoreResult(
+                    toolName,
+                    "",
+                    bindingType,
+                    "GLOBAL",
+                    exportMode,
+                    "MISSING_DEPENDENCY",
+                    "目标环境未找到可绑定公共工具",
+                    referenceMeta);
+        }
+        return new ToolBindingRestoreResult(
+                toolName, toolName, bindingType, "GLOBAL", exportMode, "RESTORED", "已恢复公共工具绑定", referenceMeta);
+    }
+
+    private ToolBindingRestoreResult analyzeLowcodeBinding(
+            ToolBindingSnapshot snapshot, String bindingType, String exportMode, Map<String, Object> referenceMeta) {
+        String requestedToolName = snapshot.toolName().trim();
+        ToolCatalog directCatalog = toolCatalogMapper.selectBindableByToolName(requestedToolName);
+        if (directCatalog != null && Objects.equals(directCatalog.getToolType(), "LOWCODE_API")) {
+            return new ToolBindingRestoreResult(
+                    requestedToolName,
+                    requestedToolName,
+                    bindingType,
+                    "LOWCODE_API",
+                    exportMode,
+                    "RESTORED",
+                    "已恢复低代码 API 工具绑定",
+                    referenceMeta);
+        }
+        String platformKey = stringMeta(referenceMeta, "platformKey");
+        String apiCode = stringMeta(referenceMeta, "apiCode");
+        if (!StringUtils.hasText(platformKey) || !StringUtils.hasText(apiCode)) {
+            String[] parts = requestedToolName.split("\\.", 3);
+            if (parts.length >= 3 && "lowcode".equals(parts[0])) {
+                platformKey = parts[1];
+                apiCode = parts[2];
+            }
+        }
+        if (!StringUtils.hasText(platformKey) || !StringUtils.hasText(apiCode)) {
+            return new ToolBindingRestoreResult(
+                    requestedToolName,
+                    "",
+                    bindingType,
+                    "LOWCODE_API",
+                    exportMode,
+                    "UNSUPPORTED",
+                    "低代码 API 绑定缺少 platformKey/apiCode，暂无法自动恢复",
+                    referenceMeta);
+        }
+        LowcodeApiCatalog catalog = lowcodeApiCatalogMapper.selectByPlatformKeyAndApiCode(platformKey, apiCode);
+        if (catalog == null) {
+            return new ToolBindingRestoreResult(
+                    requestedToolName,
+                    "",
+                    bindingType,
+                    "LOWCODE_API",
+                    exportMode,
+                    "MISSING_DEPENDENCY",
+                    "目标环境未找到对应低代码 API 资源",
+                    referenceMeta);
+        }
+        if (catalog.getEnabled() == null || catalog.getEnabled() != 1 || !StringUtils.hasText(catalog.getToolName())) {
+            return new ToolBindingRestoreResult(
+                    requestedToolName,
+                    "",
+                    bindingType,
+                    "LOWCODE_API",
+                    exportMode,
+                    "NEEDS_REBIND",
+                    "已找到低代码 API 资源，但当前未发布为可绑定工具",
+                    referenceMeta);
+        }
+        return new ToolBindingRestoreResult(
+                requestedToolName,
+                catalog.getToolName().trim(),
+                bindingType,
+                "LOWCODE_API",
+                exportMode,
+                "RESTORED",
+                "已根据目标环境低代码 API 资源恢复绑定",
+                referenceMeta);
+    }
+
+    private ToolBindingRestoreResult analyzeConnectorBinding(
+            ToolBindingSnapshot snapshot, String bindingType, String exportMode, Map<String, Object> referenceMeta) {
+        String requestedToolName = snapshot.toolName().trim();
+        ToolCatalog directCatalog = toolCatalogMapper.selectBindableByToolName(requestedToolName);
+        if (directCatalog != null && Objects.equals(directCatalog.getToolType(), "CONNECTOR_API")) {
+            return new ToolBindingRestoreResult(
+                    requestedToolName,
+                    requestedToolName,
+                    bindingType,
+                    "CONNECTOR_API",
+                    exportMode,
+                    "RESTORED",
+                    "已恢复连接器 API 工具绑定",
+                    referenceMeta);
+        }
+        String connectorId = stringMeta(referenceMeta, "connectorId");
+        String apiCode = stringMeta(referenceMeta, "apiCode");
+        if ((!StringUtils.hasText(connectorId) || !StringUtils.hasText(apiCode)) && requestedToolName.startsWith("connector.")) {
+            String[] parts = requestedToolName.split("\\.", 3);
+            if (parts.length >= 3) {
+                connectorId = parts[1];
+                apiCode = parts[2];
+            }
+        }
+        if (!StringUtils.hasText(connectorId) || !StringUtils.hasText(apiCode)) {
+            return new ToolBindingRestoreResult(
+                    requestedToolName,
+                    "",
+                    bindingType,
+                    "CONNECTOR_API",
+                    exportMode,
+                    "UNSUPPORTED",
+                    "连接器 API 绑定缺少 connectorId/apiCode，暂无法自动恢复",
+                    referenceMeta);
+        }
+        lingzhou.agent.backend.business.integration.domain.IntegrationConnectorApi catalog =
+                integrationConnectorApiMapper.selectByConnectorIdAndApiCode(Long.valueOf(connectorId), apiCode);
+        if (catalog == null) {
+            return new ToolBindingRestoreResult(
+                    requestedToolName,
+                    "",
+                    bindingType,
+                    "CONNECTOR_API",
+                    exportMode,
+                    "MISSING_DEPENDENCY",
+                    "目标环境未找到对应连接器 API 资源",
+                    referenceMeta);
+        }
+        if (catalog.getEnabled() == null || catalog.getEnabled() != 1 || !StringUtils.hasText(catalog.getToolName())) {
+            return new ToolBindingRestoreResult(
+                    requestedToolName,
+                    "",
+                    bindingType,
+                    "CONNECTOR_API",
+                    exportMode,
+                    "NEEDS_REBIND",
+                    "已找到连接器 API 资源，但当前未发布为可绑定工具",
+                    referenceMeta);
+        }
+        return new ToolBindingRestoreResult(
+                requestedToolName,
+                catalog.getToolName().trim(),
+                bindingType,
+                "CONNECTOR_API",
+                exportMode,
+                "RESTORED",
+                "已根据目标环境连接器 API 资源恢复绑定",
+                referenceMeta);
+    }
+
+    private ToolBindingRestoreResult analyzeDatasetBinding(
+            ToolBindingSnapshot snapshot, String bindingType, String exportMode, Map<String, Object> referenceMeta) {
+        String datasetCode = stringMeta(referenceMeta, "datasetCode");
+        if (!StringUtils.hasText(datasetCode)
+                && StringUtils.hasText(snapshot.toolName())
+                && snapshot.toolName().startsWith("dataset.")) {
+            String[] parts = snapshot.toolName().split("\\.", 3);
+            if (parts.length >= 3) {
+                datasetCode = parts[1];
+            }
+        }
+        return analyzeSourceBackedBinding(
+                snapshot.toolName(),
+                bindingType,
+                "DATASET_TOOL",
+                exportMode,
+                referenceMeta,
+                datasetSource(referenceMeta, snapshot.toolName()),
+                datasetSuffix(snapshot.toolName()),
+                integrationDatasetMapper.selectByDatasetCode(datasetCode),
+                "目标环境未找到对应数据集",
+                "已找到数据集，但数据集工具尚未发布");
+    }
+
+    private ToolBindingRestoreResult analyzeKnowledgeBaseBinding(
+            ToolBindingSnapshot snapshot, String bindingType, String exportMode, Map<String, Object> referenceMeta) {
+        String kbCode = stringMeta(referenceMeta, "knowledgeBaseCode");
+        if (!StringUtils.hasText(kbCode)
+                && StringUtils.hasText(snapshot.toolName())
+                && snapshot.toolName().startsWith("knowledge_base.")) {
+            String[] parts = snapshot.toolName().split("\\.", 3);
+            if (parts.length >= 3) {
+                kbCode = parts[1];
+            }
+        }
+        return analyzeSourceBackedBinding(
+                snapshot.toolName(),
+                bindingType,
+                "KNOWLEDGE_BASE_TOOL",
+                exportMode,
+                referenceMeta,
+                knowledgeBaseSource(referenceMeta, snapshot.toolName()),
+                datasetSuffix(snapshot.toolName()),
+                knowledgeBaseMapper.selectKnowledgeBaseByKbCode(kbCode),
+                "目标环境未找到对应知识库",
+                "已找到知识库，但知识库工具尚未发布");
+    }
+
+    private ToolBindingRestoreResult analyzeMcpBinding(
+            ToolBindingSnapshot snapshot, String bindingType, String exportMode, Map<String, Object> referenceMeta) {
+        String requestedToolName = snapshot.toolName().trim();
+        ToolCatalog directCatalog = toolCatalogMapper.selectBindableByToolName(requestedToolName);
+        if (directCatalog != null && Objects.equals(directCatalog.getToolType(), "MCP_REMOTE")) {
+            return new ToolBindingRestoreResult(
+                    requestedToolName,
+                    requestedToolName,
+                    bindingType,
+                    "MCP_REMOTE",
+                    exportMode,
+                    "RESTORED",
+                    "已恢复 MCP 工具绑定",
+                    referenceMeta);
+        }
+        String serverKey = stringMeta(referenceMeta, "serverKey");
+        if (!StringUtils.hasText(serverKey)) {
+            serverKey = McpToolNaming.extractServerKey(requestedToolName);
+        }
+        if (!StringUtils.hasText(serverKey)) {
+            return new ToolBindingRestoreResult(
+                    requestedToolName,
+                    "",
+                    bindingType,
+                    "MCP_REMOTE",
+                    exportMode,
+                    "UNSUPPORTED",
+                    "MCP 绑定缺少 serverKey，暂无法自动恢复",
+                    referenceMeta);
+        }
+        String remoteToolName = stringMeta(referenceMeta, "remoteToolName");
+        if (!StringUtils.hasText(remoteToolName)) {
+            remoteToolName = McpToolNaming.extractRemoteToolName(requestedToolName);
+        }
+        String source = McpToolNaming.source(serverKey);
+        String resolvedToolName = resolveToolNameBySourceAndSuffix(source, remoteToolName, requestedToolName);
+        if (StringUtils.hasText(resolvedToolName)) {
+            return new ToolBindingRestoreResult(
+                    requestedToolName,
+                    resolvedToolName,
+                    bindingType,
+                    "MCP_REMOTE",
+                    exportMode,
+                    "RESTORED",
+                    "已根据目标环境 MCP server 恢复工具绑定",
+                    referenceMeta);
+        }
+        McpServer server = mcpServerMapper.selectByServerKey(serverKey);
+        if (server == null) {
+            return new ToolBindingRestoreResult(
+                    requestedToolName,
+                    "",
+                    bindingType,
+                    "MCP_REMOTE",
+                    exportMode,
+                    "MISSING_DEPENDENCY",
+                    "目标环境未找到对应 MCP server",
+                    referenceMeta);
+        }
+        return new ToolBindingRestoreResult(
+                requestedToolName,
+                "",
+                bindingType,
+                "MCP_REMOTE",
+                exportMode,
+                "NEEDS_REBIND",
+                "已找到 MCP server，但当前未同步到对应远程工具",
+                referenceMeta);
+    }
+
+    private ToolBindingRestoreResult analyzeSourceBackedBinding(
+            String requestedToolName,
+            String bindingType,
+            String toolSourceType,
+            String exportMode,
+            Map<String, Object> referenceMeta,
+            String source,
+            String suffix,
+            Object resource,
+            String missingMessage,
+            String needsRebindMessage) {
+        ToolCatalog directCatalog = toolCatalogMapper.selectBindableByToolName(requestedToolName.trim());
+        if (directCatalog != null && Objects.equals(directCatalog.getToolType(), toolSourceType)) {
+            return new ToolBindingRestoreResult(
+                    requestedToolName.trim(),
+                    requestedToolName.trim(),
+                    bindingType,
+                    toolSourceType,
+                    exportMode,
+                    "RESTORED",
+                    "已恢复工具绑定",
+                    referenceMeta);
+        }
+        String resolvedToolName = resolveToolNameBySourceAndSuffix(source, suffix, requestedToolName);
+        if (StringUtils.hasText(resolvedToolName)) {
+            return new ToolBindingRestoreResult(
+                    requestedToolName.trim(),
+                    resolvedToolName,
+                    bindingType,
+                    toolSourceType,
+                    exportMode,
+                    "RESTORED",
+                    "已根据目标环境资源恢复工具绑定",
+                    referenceMeta);
+        }
+        if (resource == null) {
+            return new ToolBindingRestoreResult(
+                    requestedToolName.trim(),
+                    "",
+                    bindingType,
+                    toolSourceType,
+                    exportMode,
+                    "MISSING_DEPENDENCY",
+                    missingMessage,
+                    referenceMeta);
+        }
+        return new ToolBindingRestoreResult(
+                requestedToolName.trim(),
+                "",
+                bindingType,
+                toolSourceType,
+                exportMode,
+                "NEEDS_REBIND",
+                needsRebindMessage,
+                referenceMeta);
+    }
+
+    private String resolveToolNameBySourceAndSuffix(String source, String suffix, String requestedToolName) {
+        if (!StringUtils.hasText(source)) {
+            return "";
+        }
+        List<ToolCatalog> candidates = toolCatalogMapper.selectBySource(source).stream()
+                .filter(item -> item.getBindable() != null && item.getBindable() == 1)
+                .toList();
+        if (candidates.isEmpty()) {
+            return "";
+        }
+        for (ToolCatalog candidate : candidates) {
+            if (Objects.equals(candidate.getToolName(), requestedToolName)) {
+                return requestedToolName;
+            }
+        }
+        if (StringUtils.hasText(suffix)) {
+            for (ToolCatalog candidate : candidates) {
+                if (candidate.getToolName() != null && candidate.getToolName().endsWith(suffix)) {
+                    return candidate.getToolName().trim();
+                }
+            }
+        }
+        return candidates.size() == 1 ? normalize(candidates.get(0).getToolName(), "") : "";
+    }
+
+    private List<String> buildBindingWarnings(ToolBindingRestoreSummary summary) {
+        if (summary == null || summary.totalCount() <= 0) {
+            return List.of();
+        }
+        List<String> warnings = new ArrayList<>();
+        if (summary.missingDependencyCount() > 0 || summary.needsRebindCount() > 0 || summary.unsupportedCount() > 0) {
+            warnings.add("工具绑定恢复分析：共 " + summary.totalCount()
+                    + " 项，已恢复 " + summary.restoredCount()
+                    + " 项，缺失依赖 " + summary.missingDependencyCount()
+                    + " 项，需要重绑 " + summary.needsRebindCount()
+                    + " 项，不支持 " + summary.unsupportedCount() + " 项。");
+        }
+        return warnings;
+    }
+
+    private String normalizeToolSourceType(String declaredType, String toolName) {
+        if (StringUtils.hasText(declaredType)) {
+            return declaredType.trim();
+        }
+        if (globalToolRegistry.containsBindable(toolName)) {
+            return "GLOBAL";
+        }
+        ToolCatalog catalog = toolCatalogMapper.selectByToolName(toolName);
+        if (catalog != null && StringUtils.hasText(catalog.getToolType())) {
+            return catalog.getToolType().trim();
+        }
+        if (McpToolNaming.isMcpToolName(toolName)) {
+            return "MCP_REMOTE";
+        }
+        if (toolName != null && toolName.startsWith("lowcode.")) {
+            return "LOWCODE_API";
+        }
+        if (toolName != null && toolName.startsWith("connector.")) {
+            return "CONNECTOR_API";
+        }
+        if (toolName != null && toolName.startsWith("dataset.")) {
+            return "DATASET_TOOL";
+        }
+        if (toolName != null && toolName.startsWith("knowledge_base.")) {
+            return "KNOWLEDGE_BASE_TOOL";
+        }
+        return "UNKNOWN";
+    }
+
+    private String defaultExportMode(String toolSourceType) {
+        return Objects.equals(toolSourceType, "GLOBAL") ? "INLINE" : "REFERENCE_ONLY";
+    }
+
+    private Map<String, Object> buildReferenceMeta(String toolName, String toolSourceType) {
+        Map<String, Object> meta = new LinkedHashMap<>();
+        meta.put("toolName", toolName);
+        switch (toolSourceType) {
+            case "CONNECTOR_API" -> {
+                lingzhou.agent.backend.business.integration.domain.IntegrationConnectorApi connectorApi =
+                        integrationConnectorApiMapper.selectByToolName(toolName);
+                if (connectorApi != null) {
+                    meta.put("connectorId", connectorApi.getConnectorId());
+                    putIfText(meta, "apiCode", connectorApi.getApiCode());
+                    putIfText(meta, "apiName", connectorApi.getApiName());
+                } else if (toolName.startsWith("connector.")) {
+                    String[] parts = toolName.split("\\.", 3);
+                    if (parts.length >= 3) {
+                        putIfText(meta, "connectorId", parts[1]);
+                        putIfText(meta, "apiCode", parts[2]);
+                    }
+                }
+            }
+            case "LOWCODE_API" -> {
+                LowcodeApiCatalog catalog = lowcodeApiCatalogMapper.selectByToolName(toolName);
+                if (catalog != null) {
+                    putIfText(meta, "platformKey", catalog.getPlatformKey());
+                    putIfText(meta, "appId", catalog.getAppId());
+                    putIfText(meta, "apiId", catalog.getApiId());
+                    putIfText(meta, "apiCode", catalog.getApiCode());
+                } else if (toolName.startsWith("lowcode.")) {
+                    String[] parts = toolName.split("\\.", 3);
+                    if (parts.length >= 3) {
+                        putIfText(meta, "platformKey", parts[1]);
+                        putIfText(meta, "apiCode", parts[2]);
+                    }
+                }
+            }
+            case "DATASET_TOOL" -> {
+                String datasetCode = extractSourceSuffix(toolCatalogMapper.selectByToolName(toolName), "dataset:");
+                if (!StringUtils.hasText(datasetCode) && toolName.startsWith("dataset.")) {
+                    String[] parts = toolName.split("\\.", 3);
+                    if (parts.length >= 3) {
+                        datasetCode = parts[1];
+                    }
+                }
+                putIfText(meta, "datasetCode", datasetCode);
+                if (StringUtils.hasText(datasetCode)) {
+                    IntegrationDataset dataset = integrationDatasetMapper.selectByDatasetCode(datasetCode);
+                    if (dataset != null) {
+                        meta.put("datasetId", dataset.getId());
+                        putIfText(meta, "datasetName", dataset.getName());
+                    }
+                }
+            }
+            case "KNOWLEDGE_BASE_TOOL" -> {
+                String kbCode = extractSourceSuffix(toolCatalogMapper.selectByToolName(toolName), "knowledge_base:");
+                if (!StringUtils.hasText(kbCode) && toolName.startsWith("knowledge_base.")) {
+                    String[] parts = toolName.split("\\.", 3);
+                    if (parts.length >= 3) {
+                        kbCode = parts[1];
+                    }
+                }
+                putIfText(meta, "knowledgeBaseCode", kbCode);
+                if (StringUtils.hasText(kbCode)) {
+                    KnowledgeBase knowledgeBase = knowledgeBaseMapper.selectKnowledgeBaseByKbCode(kbCode);
+                    if (knowledgeBase != null) {
+                        meta.put("knowledgeBaseId", knowledgeBase.getKbId());
+                        putIfText(meta, "knowledgeBaseName", knowledgeBase.getKbName());
+                    }
+                }
+            }
+            case "MCP_REMOTE" -> {
+                ToolCatalog catalog = toolCatalogMapper.selectByToolName(toolName);
+                String serverKey = extractSourceSuffix(catalog, "mcp:");
+                if (!StringUtils.hasText(serverKey)) {
+                    serverKey = McpToolNaming.extractServerKey(toolName);
+                }
+                putIfText(meta, "serverKey", serverKey);
+                putIfText(meta, "remoteToolName", McpToolNaming.extractRemoteToolName(toolName));
+                if (StringUtils.hasText(serverKey)) {
+                    McpServer server = mcpServerMapper.selectByServerKey(serverKey);
+                    if (server != null) {
+                        meta.put("serverId", server.getId());
+                        putIfText(meta, "serverName", server.getDisplayName());
+                    }
+                }
+            }
+            default -> {}
+        }
+        return Map.copyOf(meta);
+    }
+
+    private String extractSourceSuffix(ToolCatalog catalog, String prefix) {
+        if (catalog == null
+                || !StringUtils.hasText(catalog.getSource())
+                || !catalog.getSource().startsWith(prefix)) {
+            return "";
+        }
+        return catalog.getSource().substring(prefix.length()).trim();
+    }
+
+    private String datasetSource(Map<String, Object> referenceMeta, String toolName) {
+        String datasetCode = stringMeta(referenceMeta, "datasetCode");
+        if (!StringUtils.hasText(datasetCode) && toolName.startsWith("dataset.")) {
+            String[] parts = toolName.split("\\.", 3);
+            if (parts.length >= 3) {
+                datasetCode = parts[1];
+            }
+        }
+        return StringUtils.hasText(datasetCode) ? "dataset:" + datasetCode.trim() : "";
+    }
+
+    private String knowledgeBaseSource(Map<String, Object> referenceMeta, String toolName) {
+        String kbCode = stringMeta(referenceMeta, "knowledgeBaseCode");
+        if (!StringUtils.hasText(kbCode) && toolName.startsWith("knowledge_base.")) {
+            String[] parts = toolName.split("\\.", 3);
+            if (parts.length >= 3) {
+                kbCode = parts[1];
+            }
+        }
+        return StringUtils.hasText(kbCode) ? "knowledge_base:" + kbCode.trim() : "";
+    }
+
+    private String datasetSuffix(String toolName) {
+        if (!StringUtils.hasText(toolName)) {
+            return "";
+        }
+        int lastDot = toolName.lastIndexOf('.');
+        return lastDot >= 0 ? toolName.substring(lastDot) : toolName;
+    }
+
+    private void putIfText(Map<String, Object> target, String key, String value) {
+        if (target != null && StringUtils.hasText(key) && StringUtils.hasText(value)) {
+            target.put(key, value.trim());
+        }
+    }
+
+    private String stringMeta(Map<String, Object> meta, String key) {
+        if (meta == null || !StringUtils.hasText(key)) {
+            return "";
+        }
+        Object value = meta.get(key);
+        return value == null ? "" : String.valueOf(value).trim();
+    }
+
+    private String textValue(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return "";
+        }
+        return node.isTextual() ? node.asText("").trim() : node.asText("").trim();
+    }
+
+    private boolean booleanValue(JsonNode node, boolean defaultValue) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return defaultValue;
+        }
+        return node.asBoolean(defaultValue);
+    }
+
+    private Integer integerValue(JsonNode node, Integer defaultValue) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return defaultValue;
+        }
+        return node.canConvertToInt() ? node.intValue() : defaultValue;
+    }
+
+    private List<String> syncManualBindings(Long skillId, List<ToolBindingRestoreResult> bindingResults) {
         List<String> applied = new ArrayList<>();
         skillToolBindingMapper.deleteBySkillIdAndBindingType(skillId, "MANUAL");
-        if (requestedToolNames == null) {
+        if (bindingResults == null) {
             return applied;
         }
-        for (String toolName : requestedToolNames.stream()
+        for (String toolName : bindingResults.stream()
+                .filter(Objects::nonNull)
+                .filter(result -> Objects.equals(result.restoreStatus(), "RESTORED"))
+                .map(ToolBindingRestoreResult::resolvedToolName)
                 .filter(StringUtils::hasText)
                 .map(String::trim)
                 .distinct()
                 .sorted()
                 .toList()) {
-            if (!globalToolRegistry.contains(toolName)) {
-                logger.warn("跳过未知公共工具绑定：toolName={}", toolName);
-                continue;
+            if (!globalToolRegistry.containsBindable(toolName)) {
+                ToolCatalog catalog = toolCatalogMapper.selectBindableByToolName(toolName);
+                if (catalog == null) {
+                    logger.warn("跳过未知可绑定工具：toolName={}", toolName);
+                    continue;
+                }
             }
             SkillToolBinding binding = new SkillToolBinding();
             binding.setSkillId(skillId);
@@ -699,6 +1745,10 @@ public class SkillPackageService {
         ProcessBuilder builder = new ProcessBuilder(command);
         builder.directory(targetSkillDir.toFile());
         builder.redirectErrorStream(true);
+        if (StringUtils.hasText(installer.getPipIndexUrl())) {
+            builder.environment()
+                    .put("PIP_INDEX_URL", installer.getPipIndexUrl().trim());
+        }
         try {
             Process process = builder.start();
             String output;
@@ -709,11 +1759,9 @@ public class SkillPackageService {
             if (exitCode == 0) {
                 return new DependencyInstallResult("SUCCESS", output.isEmpty() ? "依赖安装完成" : output);
             }
-            logger.warn("技能依赖安装失败：packageId={}, exitCode={}, output={}",
-                    prepared.manifest.packageId(), exitCode, output);
-            return new DependencyInstallResult(
-                    "FAILED",
-                    output.isEmpty() ? "依赖安装失败，exitCode=" + exitCode : output);
+            logger.warn(
+                    "技能依赖安装失败：packageId={}, exitCode={}, output={}", prepared.manifest.packageId(), exitCode, output);
+            return new DependencyInstallResult("FAILED", output.isEmpty() ? "依赖安装失败，exitCode=" + exitCode : output);
         } catch (IOException ex) {
             logger.warn("执行依赖安装失败：packageId={}, error={}", prepared.manifest.packageId(), ex.getMessage(), ex);
             return new DependencyInstallResult("SKIPPED", "依赖安装器不可用：" + ex.getMessage());
@@ -852,7 +1900,50 @@ public class SkillPackageService {
         }
     }
 
+    private static String normalizeRequired(String value, String message) throws TaskException {
+        if (!StringUtils.hasText(value)) {
+            throw new TaskException(message, TaskException.Code.UNKNOWN);
+        }
+        return value.trim();
+    }
+
+    private boolean deleteDirectorySafely(Path targetDir, Path allowedRoot, String targetLabel) throws TaskException {
+        if (targetDir == null || allowedRoot == null) {
+            return false;
+        }
+        Path normalizedRoot = allowedRoot.toAbsolutePath().normalize();
+        Path normalizedTarget = targetDir.toAbsolutePath().normalize();
+        if (!normalizedTarget.startsWith(normalizedRoot)) {
+            throw new TaskException(targetLabel + "路径非法，无法删除", TaskException.Code.UNKNOWN);
+        }
+        if (!Files.exists(normalizedTarget)) {
+            return false;
+        }
+        if (!Files.isDirectory(normalizedTarget)) {
+            throw new TaskException(targetLabel + "结构异常，无法删除", TaskException.Code.UNKNOWN);
+        }
+        try {
+            try (Stream<Path> stream = Files.walk(normalizedTarget)) {
+                for (Path path : stream.sorted(
+                                Comparator.comparingInt(Path::getNameCount).reversed())
+                        .toList()) {
+                    Files.deleteIfExists(path);
+                }
+            }
+            return true;
+        } catch (IOException ex) {
+            throw new TaskException(targetLabel + "删除失败: " + ex.getMessage(), TaskException.Code.UNKNOWN);
+        }
+    }
+
     public record ExportedPackage(String filename, byte[] content) {}
+
+    public record DeleteSkillResult(
+            Long skillId,
+            String runtimeSkillName,
+            boolean skillDirectoryDeleted,
+            boolean pythonEnvDeleted,
+            boolean skillStudioRepublishRequired) {}
 
     public record PreviewResult(
             String packageId,
@@ -865,7 +1956,9 @@ public class SkillPackageService {
             boolean requiresDowngradeConfirmation,
             int unmanagedFileCount,
             List<FileChange> fileChanges,
-            List<String> warnings) {}
+            List<String> warnings,
+            ToolBindingRestoreSummary toolBindingSummary,
+            List<ToolBindingRestoreResult> toolBindingResults) {}
 
     public record ImportResult(
             String packageId,
@@ -874,7 +1967,17 @@ public class SkillPackageService {
             String installStatus,
             String dependencyStatus,
             String backupDir,
-            List<String> warnings) {}
+            List<String> warnings,
+            ToolBindingRestoreSummary toolBindingSummary,
+            List<ToolBindingRestoreResult> toolBindingResults) {}
+
+    public record BindingRefreshResult(
+            Long skillId,
+            ToolBindingRestoreSummary toolBindingSummary,
+            List<ToolBindingRestoreResult> toolBindingResults,
+            List<String> appliedManualBindings,
+            String toolBindingStatus,
+            String toolBindingMessage) {}
 
     public record RefreshResult(int filesystemSkillCount, int runtimeSkillCount, List<String> runtimeSkillNames) {}
 
@@ -895,19 +1998,63 @@ public class SkillPackageService {
 
     public record ManifestFile(String path, String sha256, Long size) {}
 
-    public record ConfigSnapshot(SkillCatalogSnapshot skillCatalog, List<String> toolBindings) {
+    public record ConfigSnapshot(
+            SkillCatalogSnapshot skillCatalog,
+            List<ToolBindingSnapshot> toolBindings,
+            RuntimeV2SkillContract runtimeContract) {
         static ConfigSnapshot empty(String runtimeSkillName) {
             return new ConfigSnapshot(
-                    new SkillCatalogSnapshot(runtimeSkillName, runtimeSkillName, "", "通用能力", true, 0),
-                    List.of());
+                    new SkillCatalogSnapshot(
+                            runtimeSkillName,
+                            runtimeSkillName,
+                            "",
+                            "通用能力",
+                            SkillCatalogMetadataDefaults.DEFAULT_SKILL_VERSION,
+                            SkillCatalogMetadataDefaults.DEFAULT_SKILL_AUTHOR,
+                            SkillCatalogMetadataDefaults.defaultIcon(runtimeSkillName),
+                            null,
+                            true,
+                            0),
+                    List.of(),
+                    null);
         }
     }
+
+    public record ToolBindingSnapshot(
+            String toolName,
+            String bindingType,
+            String toolSourceType,
+            String exportMode,
+            String referenceStatus,
+            Map<String, Object> referenceMeta) {}
+
+    public record ToolBindingRestoreSummary(
+            int totalCount,
+            int restoredCount,
+            int missingDependencyCount,
+            int unsupportedCount,
+            int needsRebindCount,
+            int skippedCount) {}
+
+    public record ToolBindingRestoreResult(
+            String toolName,
+            String resolvedToolName,
+            String bindingType,
+            String toolSourceType,
+            String exportMode,
+            String restoreStatus,
+            String message,
+            Map<String, Object> referenceMeta) {}
 
     public record SkillCatalogSnapshot(
             String runtimeSkillName,
             String displayName,
             String description,
             String category,
+            String version,
+            String author,
+            String icon,
+            String iconColor,
             boolean visible,
             Integer sortOrder) {}
 
@@ -942,4 +2089,6 @@ public class SkillPackageService {
     private record DependencyInstallResult(String status, String message) {}
 
     private record ComparisonResult(int compareValue, boolean downgrade) {}
+
+    private record ToolBindingAnalysis(ToolBindingRestoreSummary summary, List<ToolBindingRestoreResult> results) {}
 }

@@ -1,8 +1,8 @@
 package lingzhou.agent.backend.business.tool.mapper;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import java.util.Collection;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import lingzhou.agent.backend.business.tool.domain.ToolCatalog;
@@ -66,6 +66,23 @@ public interface ToolCatalogMapper extends BaseMapper<ToolCatalog> {
         return this.selectList(wrapper);
     }
 
+    default List<ToolCatalog> selectGlobalEnabledOrdered() {
+        QueryWrapper<ToolCatalog> wrapper = new QueryWrapper<>();
+        wrapper.eq("enabled_global", 1).orderByAsc("sort_order").orderByAsc("id");
+        return this.selectList(wrapper);
+    }
+
+    default List<ToolCatalog> selectGlobalEnabledOrPermittedOrdered(List<Long> permittedToolIds) {
+        QueryWrapper<ToolCatalog> wrapper = new QueryWrapper<>();
+        wrapper.and(w -> {
+            w.eq("enabled_global", 1);
+            if (permittedToolIds != null && !permittedToolIds.isEmpty()) {
+                w.or().in("id", permittedToolIds);
+            }
+        }).orderByAsc("sort_order").orderByAsc("id");
+        return this.selectList(wrapper);
+    }
+
     default ToolCatalog selectBindableByToolName(String toolName) {
         if (!StringUtils.hasText(toolName)) {
             return null;
@@ -76,6 +93,8 @@ public interface ToolCatalogMapper extends BaseMapper<ToolCatalog> {
     }
 
     default Set<String> selectToolNamesBySources(Collection<String> sources) {
-        return this.selectBySources(sources).stream().map(ToolCatalog::getToolName).collect(java.util.stream.Collectors.toSet());
+        return this.selectBySources(sources).stream()
+                .map(ToolCatalog::getToolName)
+                .collect(java.util.stream.Collectors.toSet());
     }
 }

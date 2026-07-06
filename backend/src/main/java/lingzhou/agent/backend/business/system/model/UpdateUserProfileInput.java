@@ -8,6 +8,7 @@ public class UpdateUserProfileInput {
     private String email;
     private Integer userType;
     private String password;
+    private Long roleId;
 
     public Long getId() {
         return id;
@@ -55,5 +56,13 @@ public class UpdateUserProfileInput {
 
     public void setPassword(String password) {
         this.password = password;
+    }
+
+    public Long getRoleId() {
+        return roleId;
+    }
+
+    public void setRoleId(Long roleId) {
+        this.roleId = roleId;
     }
 }

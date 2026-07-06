@@ -9,6 +9,10 @@ public class UserListItemDto {
     private String email;
     private Integer userType;
     private Integer state;
+    private Long roleId;
+    private String roleName;
+    private String avatarUrl;
+    private UserTokenQuotaSummaryDto tokenQuota;
 
     public Long getId() {
         return id;
@@ -64,5 +68,37 @@ public class UserListItemDto {
 
     public void setState(Integer state) {
         this.state = state;
+    }
+
+    public Long getRoleId() {
+        return roleId;
+    }
+
+    public void setRoleId(Long roleId) {
+        this.roleId = roleId;
+    }
+
+    public String getRoleName() {
+        return roleName;
+    }
+
+    public void setRoleName(String roleName) {
+        this.roleName = roleName;
+    }
+
+    public String getAvatarUrl() {
+        return avatarUrl;
+    }
+
+    public void setAvatarUrl(String avatarUrl) {
+        this.avatarUrl = avatarUrl;
+    }
+
+    public UserTokenQuotaSummaryDto getTokenQuota() {
+        return tokenQuota;
+    }
+
+    public void setTokenQuota(UserTokenQuotaSummaryDto tokenQuota) {
+        this.tokenQuota = tokenQuota;
     }
 }

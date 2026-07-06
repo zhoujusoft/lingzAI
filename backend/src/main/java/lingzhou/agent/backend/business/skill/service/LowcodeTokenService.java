@@ -9,9 +9,9 @@ import java.time.Instant;
 import java.util.Base64;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import lingzhou.agent.backend.capability.api.client.LowcodePlatformClient;
 import lingzhou.agent.backend.business.system.model.PlatformAuthConfig;
 import lingzhou.agent.backend.business.system.model.PlatformEndpointItem;
+import lingzhou.agent.backend.capability.api.client.LowcodePlatformClient;
 import lingzhou.agent.backend.common.lzException.TaskException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -85,7 +85,8 @@ public class LowcodeTokenService {
                 }
             }
             String serialized = objectMapper.writeValueAsString(result);
-            Map<String, Object> parsed = objectMapper.readValue(serialized, new TypeReference<Map<String, Object>>() {});
+            Map<String, Object> parsed =
+                    objectMapper.readValue(serialized, new TypeReference<Map<String, Object>>() {});
             Object tokenValue = parsed.get("token");
             if (tokenValue == null) {
                 tokenValue = parsed.get("access_token");
@@ -111,9 +112,12 @@ public class LowcodeTokenService {
             return fallback;
         }
         try {
-            Claims claims = Jwts.parser().parseClaimsJwt(extractUnsignedJwt(token)).getBody();
+            Claims claims =
+                    Jwts.parser().parseClaimsJwt(extractUnsignedJwt(token)).getBody();
             if (claims.getExpiration() != null) {
-                return Math.max(Instant.now().getEpochSecond() + 120, claims.getExpiration().toInstant().getEpochSecond() - EARLY_REFRESH_SECONDS);
+                return Math.max(
+                        Instant.now().getEpochSecond() + 120,
+                        claims.getExpiration().toInstant().getEpochSecond() - EARLY_REFRESH_SECONDS);
             }
         } catch (Exception ignored) {
         }
@@ -121,7 +125,8 @@ public class LowcodeTokenService {
             String[] parts = token.split("\\.");
             if (parts.length >= 2) {
                 String payload = new String(Base64.getUrlDecoder().decode(parts[1]), StandardCharsets.UTF_8);
-                Map<String, Object> payloadMap = objectMapper.readValue(payload, new TypeReference<Map<String, Object>>() {});
+                Map<String, Object> payloadMap =
+                        objectMapper.readValue(payload, new TypeReference<Map<String, Object>>() {});
                 Object exp = payloadMap.get("exp");
                 if (exp instanceof Number number) {
                     return Math.max(Instant.now().getEpochSecond() + 120, number.longValue() - EARLY_REFRESH_SECONDS);
@@ -145,8 +150,7 @@ public class LowcodeTokenService {
             return false;
         }
         PlatformAuthConfig authConfig = platform.getAuthConfig();
-        return StringUtils.hasText(authConfig.getAppKey())
-                && StringUtils.hasText(authConfig.getAppSecret());
+        return StringUtils.hasText(authConfig.getAppKey()) && StringUtils.hasText(authConfig.getAppSecret());
     }
 
     private record TokenHolder(String token, long expiresAtEpochSeconds) {

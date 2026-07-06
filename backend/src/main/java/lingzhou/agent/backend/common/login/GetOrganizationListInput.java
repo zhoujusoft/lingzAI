@@ -18,4 +18,14 @@ public class GetOrganizationListInput {
     /// 是否记住我（影响 refreshToken 过期时间）
     /// </summary>
     private boolean rememberMe;
+
+    /// <summary>
+    /// 验证码 key
+    /// </summary>
+    private String captchaKey;
+
+    /// <summary>
+    /// 验证码文本
+    /// </summary>
+    private String captchaCode;
 }

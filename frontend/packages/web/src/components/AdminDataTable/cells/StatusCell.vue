@@ -21,12 +21,7 @@ const style = computed(() => resolveUserStateStyle(normalizedState.value));
 <template>
     <div class="flex items-center gap-1.5">
         <span :class="['h-1.5 w-1.5 rounded-full', style.dotClass]" />
-        <span
-            :class="[
-                'rounded px-2 py-0.5 text-sm font-medium',
-                style.badgeClass,
-            ]"
-        >
+        <span :class="['rounded px-2 py-0.5 text-sm font-medium', style.badgeClass]">
             {{ label }}
         </span>
     </div>

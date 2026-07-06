@@ -23,16 +23,16 @@
                 <path class="node-line" d="M 80% 100 L 80% 80 L 70% 70 L 0% 70" fill="none"></path>
             </svg>
 
-            <div class="relative z-10 flex w-3/5 flex-col justify-center px-24">
+            <div class="relative z-10 flex w-[54%] flex-col justify-center px-24">
                 <div class="max-w-xl">
                     <div class="mb-8 flex items-center gap-4">
-                        <div
-                            class="flex h-12 w-12 items-center justify-center rounded-lg bg-primary"
-                        >
-                            <span class="material-symbols-outlined text-3xl text-white">hub</span>
-                        </div>
+                        <img
+                            :src="branding.logoUrl"
+                            :alt="branding.systemName"
+                            class="h-12 w-12 object-contain"
+                        />
                         <h1 class="text-5xl font-bold tracking-tight text-white">
-                            灵洲 AI 平台
+                            {{ branding.systemName }}
                         </h1>
                     </div>
                     <p class="text-xl font-light leading-relaxed text-blue-100/60">
@@ -52,16 +52,16 @@
                 </div>
             </div>
 
-            <div class="z-20 flex w-2/5 items-center justify-center p-12">
-                <div class="flex w-full max-w-[380px] flex-col rounded-2xl bg-white p-10 shadow-xl">
+            <div class="z-20 flex w-[46%] items-center justify-center p-12">
+                <div
+                    class="flex h-[600px] w-full max-w-[450px] flex-col rounded-2xl bg-white p-10 shadow-xl"
+                >
                     <div class="mb-10 flex flex-col items-center">
-                        <div
-                            class="flex h-16 w-16 items-center justify-center rounded-2xl border border-slate-100 bg-slate-50 shadow-sm"
-                        >
-                            <span class="material-symbols-outlined text-4xl text-primary"
-                                >center_focus_strong</span
-                            >
-                        </div>
+                        <img
+                            :src="branding.logoUrl"
+                            :alt="branding.systemName"
+                            class="h-16 w-16 object-contain"
+                        />
                     </div>
 
                     <form class="space-y-5" @submit.prevent="handleLogin">
@@ -109,7 +109,52 @@
                             </div>
                         </div>
 
-                        <div class="flex items-center pt-2">
+                        <div class="space-y-1.5">
+                            <label
+                                class="ml-1 text-xs font-medium uppercase tracking-wider text-slate-500"
+                                >验证码</label
+                            >
+                            <div class="flex items-stretch gap-3">
+                                <div class="relative min-w-0 flex-1">
+                                    <div
+                                        class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-4 text-slate-400"
+                                    >
+                                        <span class="material-symbols-outlined text-xl"
+                                            >shield_lock</span
+                                        >
+                                    </div>
+                                    <input
+                                        v-model.trim="loginForm.captchaCode"
+                                        type="text"
+                                        autocomplete="off"
+                                        maxlength="4"
+                                        placeholder="请输入验证码"
+                                        class="block w-full rounded-lg border border-slate-200 bg-slate-50 py-3 pl-11 pr-4 uppercase text-slate-800 placeholder-transparent transition-all focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                                    />
+                                </div>
+                                <button
+                                    type="button"
+                                    class="captcha-button overflow-hidden rounded-lg border border-slate-200 bg-slate-50 transition-all hover:border-primary/40 disabled:cursor-not-allowed disabled:opacity-60"
+                                    :disabled="captchaLoading || loginLoading"
+                                    @click="refreshCaptcha"
+                                >
+                                    <img
+                                        v-if="captchaImageData"
+                                        :src="captchaImageData"
+                                        alt="登录验证码"
+                                        class="h-full w-full object-cover"
+                                    />
+                                    <span
+                                        v-else
+                                        class="flex h-full w-full items-center justify-center text-xs font-medium tracking-wide text-slate-500"
+                                    >
+                                        {{ captchaLoading ? '加载中...' : '刷新验证码' }}
+                                    </span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="flex items-center justify-between gap-4 pt-2">
                             <label class="group flex cursor-pointer items-center gap-2">
                                 <input
                                     v-model="loginForm.remember"
@@ -121,6 +166,9 @@
                                     >记住我</span
                                 >
                             </label>
+                            <p v-if="loginError" class="text-right text-sm leading-5 text-red-600">
+                                {{ loginError }}
+                            </p>
                         </div>
 
                         <button
@@ -131,7 +179,16 @@
                             {{ loginLoading ? '登录中...' : '立即登录' }}
                         </button>
 
-                        <p v-if="loginError" class="text-sm text-red-600">{{ loginError }}</p>
+                        <div class="pt-1 text-center text-sm text-slate-500">
+                            没有账号？
+                            <button
+                                type="button"
+                                class="font-medium text-primary transition-colors hover:text-primary-hover"
+                                @click="goToRegister"
+                            >
+                                前往注册
+                            </button>
+                        </div>
                     </form>
                 </div>
             </div>
@@ -141,8 +198,11 @@
 
 <script>
 import { setStoredToken } from '@lingzhou/core/auth';
-import { requestJson } from '@lingzhou/core/http/request';
 import { encryptPassword } from '@/utils/password-encrypt';
+import { fetchLoginCaptcha, loginWithPassword } from '@/api/auth';
+import { brandingState, ensureBrandingLoaded } from '@/composables/useBranding';
+import { resetAgentConfig } from '@/composables/useAgentConfig';
+import { resetCurrentUser } from '@/composables/useCurrentUser';
 import { ROUTE_PATHS } from '../../router/routePaths';
 
 export default {
@@ -153,12 +213,54 @@ export default {
                 code: '',
                 password: '',
                 remember: true,
+                captchaKey: '',
+                captchaCode: '',
             },
             loginLoading: false,
+            captchaLoading: false,
+            captchaImageData: '',
             loginError: '',
         };
     },
+    mounted() {
+        this.refreshCaptcha();
+        ensureBrandingLoaded();
+    },
+    computed: {
+        branding() {
+            return brandingState;
+        },
+    },
     methods: {
+        goToRegister() {
+            this.$router.push(ROUTE_PATHS.register);
+        },
+        async refreshCaptcha(options = {}) {
+            const { preserveError = false } = options;
+            if (this.captchaLoading) {
+                return;
+            }
+            this.captchaLoading = true;
+            if (!preserveError) {
+                this.loginError = '';
+            }
+            try {
+                const captcha = await fetchLoginCaptcha();
+                this.loginForm.captchaKey = captcha?.captchaKey || '';
+                this.loginForm.captchaCode = '';
+                this.captchaImageData = captcha?.imageData || '';
+                if (!this.loginForm.captchaKey || !this.captchaImageData) {
+                    throw new Error('验证码加载失败，请刷新后重试');
+                }
+            } catch (error) {
+                this.loginForm.captchaKey = '';
+                this.loginForm.captchaCode = '';
+                this.captchaImageData = '';
+                this.loginError = error?.message || '验证码加载失败，请刷新后重试';
+            } finally {
+                this.captchaLoading = false;
+            }
+        },
         async handleLogin() {
             if (this.loginLoading) {
                 return;
@@ -167,21 +269,26 @@ export default {
                 this.loginError = '请输入账号和密码';
                 return;
             }
+            if (!this.loginForm.captchaCode) {
+                this.loginError = '请输入验证码';
+                return;
+            }
+            if (!this.loginForm.captchaKey) {
+                await this.refreshCaptcha({ preserveError: true });
+                this.loginError = '验证码已失效，请刷新后重试';
+                return;
+            }
 
             this.loginLoading = true;
             this.loginError = '';
             try {
-                const encryptedPassword = await encryptPassword(
-                    this.loginForm.password,
-                );
-                const { data: bizData } = await requestJson('/api/user/getUseStateForLogin', {
-                    method: 'POST',
-                    auth: false,
-                    body: {
-                        code: this.loginForm.code,
-                        password: encryptedPassword,
-                        rememberMe: this.loginForm.remember,
-                    },
+                const encryptedPassword = await encryptPassword(this.loginForm.password);
+                const bizData = await loginWithPassword({
+                    code: this.loginForm.code,
+                    password: encryptedPassword,
+                    rememberMe: this.loginForm.remember,
+                    captchaKey: this.loginForm.captchaKey,
+                    captchaCode: this.loginForm.captchaCode,
                 });
 
                 const state = bizData.State ?? bizData.state;
@@ -195,14 +302,19 @@ export default {
                     throw new Error('登录成功但未返回 token');
                 }
 
+                resetCurrentUser();
+                resetAgentConfig();
                 setStoredToken(accessToken, refreshToken || accessToken);
+
+                const defaultRedirect = ROUTE_PATHS.frontChat;
                 const redirect =
                     typeof this.$route.query.redirect === 'string'
                         ? this.$route.query.redirect
-                        : ROUTE_PATHS.frontChat;
-                this.$router.replace(redirect || ROUTE_PATHS.frontChat);
+                        : defaultRedirect;
+                this.$router.replace(redirect || defaultRedirect);
             } catch (error) {
                 this.loginError = error.message || '登录失败';
+                await this.refreshCaptcha({ preserveError: true });
             } finally {
                 this.loginLoading = false;
             }
@@ -250,5 +362,10 @@ export default {
 .grid-pattern {
     background-image: radial-gradient(rgba(59, 130, 246, 0.1) 1px, transparent 1px);
     background-size: 40px 40px;
+}
+
+.captcha-button {
+    width: 124px;
+    min-height: 48px;
 }
 </style>

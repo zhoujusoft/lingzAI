@@ -22,9 +22,9 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
-import lingzhou.agent.backend.capability.mcp.support.McpServerScope;
-import lingzhou.agent.backend.capability.mcp.support.McpJsonSupport;
 import lingzhou.agent.backend.business.skill.domain.McpServer;
+import lingzhou.agent.backend.capability.mcp.support.McpJsonSupport;
+import lingzhou.agent.backend.capability.mcp.support.McpServerScope;
 import lingzhou.agent.backend.common.lzException.TaskException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,9 +43,7 @@ public class SseMessageEndpointExternalMcpAdapter implements ExternalMcpAdapter 
 
     @Override
     public boolean supports(McpServer server) {
-        return server != null
-                && McpServerScope.isExternal(server.getServerScope())
-                && isSse(server.getTransportType());
+        return server != null && McpServerScope.isExternal(server.getServerScope()) && isSse(server.getTransportType());
     }
 
     @Override
@@ -106,8 +104,10 @@ public class SseMessageEndpointExternalMcpAdapter implements ExternalMcpAdapter 
             Map<String, Object> response = invokeForMap(
                     "tools/call",
                     Map.of(
-                            "name", remoteToolName,
-                            "arguments", arguments == null ? Map.of() : new LinkedHashMap<>(arguments)));
+                            "name",
+                            remoteToolName,
+                            "arguments",
+                            arguments == null ? Map.of() : new LinkedHashMap<>(arguments)));
             Object result = response.get("result");
             if (!(result instanceof Map<?, ?> resultMap)) {
                 return response;
@@ -161,9 +161,10 @@ public class SseMessageEndpointExternalMcpAdapter implements ExternalMcpAdapter 
                     Map.of(
                             "protocolVersion", MCP_PROTOCOL_VERSION,
                             "capabilities", Map.of(),
-                            "clientInfo", Map.of(
-                                    "name", "lingzhou-agent-external-mcp",
-                                    "version", "1.1.0")));
+                            "clientInfo",
+                                    Map.of(
+                                            "name", "lingzhou-agent-external-mcp",
+                                            "version", "1.1.0")));
             invokeNotification("notifications/initialized", Map.of());
             initialized = true;
         }
@@ -175,11 +176,10 @@ public class SseMessageEndpointExternalMcpAdapter implements ExternalMcpAdapter 
                         .header(HttpHeaders.ACCEPT, "text/event-stream")
                         .GET();
                 applyAuth(builder, server);
-                HttpResponse<InputStream> response = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofInputStream());
+                HttpResponse<InputStream> response =
+                        httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofInputStream());
                 if (response.statusCode() != 200) {
-                    throw new TaskException(
-                            "外部 SSE MCP HTTP " + response.statusCode(),
-                            TaskException.Code.UNKNOWN);
+                    throw new TaskException("外部 SSE MCP HTTP " + response.statusCode(), TaskException.Code.UNKNOWN);
                 }
                 this.streamBody = response.body();
                 Thread thread = new Thread(this::readSseLoop, "external-mcp-sse-" + server.getServerKey());
@@ -195,7 +195,8 @@ public class SseMessageEndpointExternalMcpAdapter implements ExternalMcpAdapter 
         }
 
         private void readSseLoop() {
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(streamBody, StandardCharsets.UTF_8))) {
+            try (BufferedReader reader =
+                    new BufferedReader(new InputStreamReader(streamBody, StandardCharsets.UTF_8))) {
                 String event = null;
                 StringBuilder data = new StringBuilder();
                 String line;
@@ -260,14 +261,12 @@ public class SseMessageEndpointExternalMcpAdapter implements ExternalMcpAdapter 
             pendingResponses.put(id, future);
             try {
                 postMessage(Map.of(
-                        "jsonrpc", "2.0",
-                        "id", id,
-                        "method", method,
-                        "params", params == null ? Map.of() : params));
+                        "jsonrpc", "2.0", "id", id, "method", method, "params", params == null ? Map.of() : params));
                 Map<String, Object> payload = future.get(30, TimeUnit.SECONDS);
                 Object error = payload.get("error");
                 if (error instanceof Map<?, ?> errorMap) {
-                    throw new TaskException("外部 MCP 返回错误：" + summarizeError(errorMap.get("message")), TaskException.Code.UNKNOWN);
+                    throw new TaskException(
+                            "外部 MCP 返回错误：" + summarizeError(errorMap.get("message")), TaskException.Code.UNKNOWN);
                 }
                 return payload;
             } catch (TaskException ex) {
@@ -288,10 +287,7 @@ public class SseMessageEndpointExternalMcpAdapter implements ExternalMcpAdapter 
         }
 
         private void invokeNotification(String method, Map<String, Object> params) throws TaskException {
-            postMessage(Map.of(
-                    "jsonrpc", "2.0",
-                    "method", method,
-                    "params", params == null ? Map.of() : params));
+            postMessage(Map.of("jsonrpc", "2.0", "method", method, "params", params == null ? Map.of() : params));
         }
 
         private void postMessage(Map<String, Object> payload) throws TaskException {
@@ -305,7 +301,8 @@ public class SseMessageEndpointExternalMcpAdapter implements ExternalMcpAdapter 
                         .header(MCP_PROTOCOL_HEADER, MCP_PROTOCOL_VERSION)
                         .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));
                 applyAuth(builder, server);
-                HttpResponse<String> response = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+                HttpResponse<String> response =
+                        httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
                 int status = response.statusCode();
                 if (status != 200 && status != 202) {
                     throw new TaskException(

@@ -1,34 +1,25 @@
-import {
-    requestJson as doRequestJson,
-    requestRaw as doRequestRaw,
-} from '@lingzhou/core/http/request';
+import { requestJson as doRequestJson } from '@lingzhou/core/http/request';
 import { SKILL_CHAT_SESSION_STORAGE_KEY } from '@/model/session';
-
-function createRequestOptions(options = {}, onUnauthorized) {
-    return {
-        ...options,
-        onUnauthorized,
-    };
-}
-
-function normalizeSkillId(value) {
-    if (value == null) {
-        return null;
-    }
-    if (typeof value === 'number' && Number.isFinite(value)) {
-        return value;
-    }
-    const text = String(value).trim();
-    if (!text || !/^\d+$/.test(text)) {
-        return null;
-    }
-    return Number(text);
-}
+import {
+    createRequestOptions,
+    buildRuntimeChatBody,
+    sendRuntimeSseRequest,
+    fetchConversationListRequest,
+    fetchConversationMessagesRequest,
+    deleteConversationRequest,
+    renameConversationRequest,
+    normalizeNumericId,
+    parseSseEventPayload,
+    createUploadProgressHandler,
+    normalizeUploadedFileResponse,
+} from './sseChatAdapterShared';
 
 const SESSION_TYPE = 'SKILL_CHAT';
+const PUBLISHED_SESSION_TYPE = 'PUBLISHED_SKILL_CHAT';
 
 export const skillChatAdapter = {
     sessionStorageKey: SKILL_CHAT_SESSION_STORAGE_KEY,
+    continuationSessionTypes: [SESSION_TYPE, PUBLISHED_SESSION_TYPE],
 
     async sendStream({
         message,
@@ -37,36 +28,38 @@ export const skillChatAdapter = {
         selectedKnowledge,
         messageType,
         eventPayload,
+        systemPromptAppend,
+        options,
         onUnauthorized,
     }) {
-        const skillId = normalizeSkillId(selectedKnowledge);
+        const skillId = normalizeNumericId(selectedKnowledge);
         if (skillId == null) {
             throw new Error('未选择技能，请先从技能市场进入或在当前页面选择技能。');
         }
-        return doRequestRaw(
-            '/api/skills/chat',
-            createRequestOptions(
-                {
-                    method: 'POST',
-                    responseType: 'stream',
-                    auth: true,
-                    body: {
-                        skillId,
-                        message,
-                        fileIds,
-                        sessionId,
-                        messageType: messageType || '',
-                        eventPayload: eventPayload || null,
-                    },
+        return sendRuntimeSseRequest('/api/skills/chat', {
+            auth: true,
+            onUnauthorized,
+            body: buildRuntimeChatBody({
+                message,
+                fileIds,
+                sessionId,
+                messageType,
+                eventPayload,
+                systemPromptAppend,
+                options,
+                extraBody: {
+                    skillId,
                 },
-                onUnauthorized,
-            ),
-        );
+            }),
+        });
     },
 
-    async uploadFile({ file, onUnauthorized }) {
+    async uploadFile({ file, sessionId, onUnauthorized, onProgress }) {
         const formData = new FormData();
         formData.append('file', file);
+        if (sessionId) {
+            formData.append('sessionId', sessionId);
+        }
 
         const { data } = await doRequestJson(
             '/api/files/upload',
@@ -75,35 +68,23 @@ export const skillChatAdapter = {
                     method: 'POST',
                     auth: true,
                     body: formData,
+                    onUploadProgress: createUploadProgressHandler(file, onProgress),
                 },
-                onUnauthorized,
-            ),
+                onUnauthorized
+            )
         );
 
-        return {
-            id: data.id,
-            name: data.name || file.name,
-            size: data.size || file.size,
-        };
+        return normalizeUploadedFileResponse(data, file);
     },
 
-    async fetchConversationList({ selectedKnowledge, onUnauthorized } = {}) {
-        const { data } = await doRequestJson(
-            '/api/chat/sessions?limit=50',
-            createRequestOptions(
-                {
-                    method: 'GET',
-                    auth: true,
-                },
-                onUnauthorized,
-            ),
-        );
-
-        return {
-            data: {
-                items: Array.isArray(data?.items) ? data.items : [],
-            },
-        };
+    async fetchConversationList({ pageNo = 1, pageSize = 20, onUnauthorized } = {}) {
+        return fetchConversationListRequest('/api/chat/sessions', {
+            auth: true,
+            onUnauthorized,
+            sessionType: SESSION_TYPE,
+            pageNo,
+            pageSize,
+        });
     },
 
     async fetchMessages({
@@ -115,32 +96,22 @@ export const skillChatAdapter = {
         scopeId,
         onUnauthorized,
     } = {}) {
-        const encoded = encodeURIComponent(String(conversationId || '').trim());
-        if (!encoded) {
-            return { data: { items: [] } };
-        }
         const resolvedSessionType = String(sessionType || SESSION_TYPE).trim() || SESSION_TYPE;
         const skillId =
-            resolvedSessionType === SESSION_TYPE
-                ? (scopeId == null ? normalizeSkillId(selectedKnowledge) : normalizeSkillId(scopeId))
+            resolvedSessionType === SESSION_TYPE || resolvedSessionType === PUBLISHED_SESSION_TYPE
+                ? scopeId == null
+                    ? normalizeNumericId(selectedKnowledge)
+                    : normalizeNumericId(scopeId)
                 : null;
-        const scopeQuery = skillId == null ? '' : `&scopeId=${encodeURIComponent(String(skillId))}`;
-        const { data } = await doRequestJson(
-            `/api/chat/sessions/${encoded}/messages?sessionType=${encodeURIComponent(resolvedSessionType)}${scopeQuery}&pageNo=${pageNo}&pageSize=${pageSize}`,
-            createRequestOptions(
-                {
-                    method: 'GET',
-                    auth: true,
-                },
-                onUnauthorized,
-            ),
-        );
-
-        return {
-            data: {
-                items: Array.isArray(data?.items) ? data.items : [],
-            },
-        };
+        return fetchConversationMessagesRequest('/api/chat/sessions', {
+            conversationId,
+            sessionType: resolvedSessionType,
+            scopeId: skillId,
+            pageNo,
+            pageSize,
+            auth: true,
+            onUnauthorized,
+        });
     },
 
     async deleteConversation({
@@ -150,27 +121,20 @@ export const skillChatAdapter = {
         scopeId,
         onUnauthorized,
     } = {}) {
-        const encoded = encodeURIComponent(String(conversationId || '').trim());
-        if (!encoded) {
-            return { data: { success: true, alreadyDeleted: true } };
-        }
         const resolvedSessionType = String(sessionType || SESSION_TYPE).trim() || SESSION_TYPE;
         const skillId =
-            resolvedSessionType === SESSION_TYPE
-                ? (scopeId == null ? normalizeSkillId(selectedKnowledge) : normalizeSkillId(scopeId))
+            resolvedSessionType === SESSION_TYPE || resolvedSessionType === PUBLISHED_SESSION_TYPE
+                ? scopeId == null
+                    ? normalizeNumericId(selectedKnowledge)
+                    : normalizeNumericId(scopeId)
                 : null;
-        const scopeQuery = skillId == null ? '' : `&scopeId=${encodeURIComponent(String(skillId))}`;
-        const { data } = await doRequestJson(
-            `/api/chat/sessions/${encoded}?sessionType=${encodeURIComponent(resolvedSessionType)}${scopeQuery}`,
-            createRequestOptions(
-                {
-                    method: 'DELETE',
-                    auth: true,
-                },
-                onUnauthorized,
-            ),
-        );
-        return { data };
+        return deleteConversationRequest('/api/chat/sessions', {
+            conversationId,
+            sessionType: resolvedSessionType,
+            scopeId: skillId,
+            auth: true,
+            onUnauthorized,
+        });
     },
 
     async renameConversation({
@@ -181,46 +145,22 @@ export const skillChatAdapter = {
         name,
         onUnauthorized,
     } = {}) {
-        const encoded = encodeURIComponent(String(conversationId || '').trim());
-        if (!encoded) {
-            return { data: { success: false } };
-        }
         const resolvedSessionType = String(sessionType || SESSION_TYPE).trim() || SESSION_TYPE;
         const skillId =
-            resolvedSessionType === SESSION_TYPE
-                ? (scopeId == null ? normalizeSkillId(selectedKnowledge) : normalizeSkillId(scopeId))
+            resolvedSessionType === SESSION_TYPE || resolvedSessionType === PUBLISHED_SESSION_TYPE
+                ? scopeId == null
+                    ? normalizeNumericId(selectedKnowledge)
+                    : normalizeNumericId(scopeId)
                 : null;
-        const scopeQuery = skillId == null ? '' : `&scopeId=${encodeURIComponent(String(skillId))}`;
-        const { data } = await doRequestJson(
-            `/api/chat/sessions/${encoded}/name?sessionType=${encodeURIComponent(resolvedSessionType)}${scopeQuery}`,
-            createRequestOptions(
-                {
-                    method: 'PUT',
-                    auth: true,
-                    body: {
-                        name,
-                    },
-                },
-                onUnauthorized,
-            ),
-        );
-        return { data };
+        return renameConversationRequest('/api/chat/sessions', {
+            conversationId,
+            name,
+            sessionType: resolvedSessionType,
+            scopeId: skillId,
+            auth: true,
+            onUnauthorized,
+        });
     },
 
-    parseEventPayload(data) {
-        try {
-            const parsed = JSON.parse(data);
-            if (parsed && typeof parsed === 'object' && parsed.type) {
-                return parsed;
-            }
-        } catch (error) {
-            // fall through
-        }
-
-        if (data === '[DONE]') {
-            return { type: 'done', content: '' };
-        }
-
-        return { type: 'message', content: data };
-    },
+    parseEventPayload: parseSseEventPayload,
 };

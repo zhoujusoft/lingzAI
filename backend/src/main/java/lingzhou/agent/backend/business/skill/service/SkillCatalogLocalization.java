@@ -24,16 +24,8 @@ final class SkillCatalogLocalization {
             Map.entry("ui-ux-pro-max", new SkillLabel("UI/UX 设计专家", "提供界面设计、交互优化和前端体验改进建议。")),
             Map.entry("market-research", new SkillLabel("市场研究", "开展市场调研、竞品分析、投资人尽调和行业研究，输出带来源依据的决策建议。")),
             Map.entry("contract-review-pro", new SkillLabel("专业合同审核", "基于合同审核方法论提供合同审阅、风险识别和建议输出。")),
-            Map.entry(
-                    "legal-consultation",
-                    new SkillLabel(
-                            "法律案件查询",
-                            "根据案件描述分析法律风险、识别相关法条，并提供处理建议、证据收集指导和立案条件说明。")),
-            Map.entry(
-                    "form-app-assistant",
-                    new SkillLabel(
-                            "表单应用助手",
-                            "引导创建或扩展表单应用，结合文字、Excel 与参考资料生成标准化表单模型。")));
+            Map.entry("legal-consultation", new SkillLabel("法律案件查询", "根据案件描述分析法律风险、识别相关法条，并提供处理建议、证据收集指导和立案条件说明。")),
+            Map.entry("form-app-assistant", new SkillLabel("表单应用助手", "引导创建或扩展表单应用，结合文字、Excel 与参考资料生成标准化表单模型。")));
 
     private static final Map<String, String> SKILL_CATEGORY_LABELS = Map.ofEntries(
             Map.entry("inventory", "库存管理"),
@@ -56,18 +48,23 @@ final class SkillCatalogLocalization {
             Map.entry("brand-guidelines", "品牌规范"),
             Map.entry("form-app-assistant", "表单搭建"));
 
-    private static final Map<String, String> RAW_CATEGORY_LABELS = Map.ofEntries(
-            Map.entry("retail", "零售经营"),
-            Map.entry("information", "信息查询"));
+    private static final Map<String, String> RAW_CATEGORY_LABELS =
+            Map.ofEntries(Map.entry("retail", "零售经营"), Map.entry("information", "信息查询"));
 
     private static final Map<String, ToolLabel> TOOL_LABELS = Map.ofEntries(
+            Map.entry("file_read", new ToolLabel("读取文本文件", "读取运行时工作区中的 UTF-8 文本文件内容，不适用于 Excel、Word、PDF 等二进制文件。")),
+            Map.entry("file_write", new ToolLabel("写入文本文件", "将 UTF-8 文本写入运行时工作区文件，适合生成 Python 脚本或中间文本结果。")),
+            Map.entry("list_dir", new ToolLabel("列出目录", "列出运行时工作区目录下的文件和子目录。")),
+            Map.entry("stat", new ToolLabel("查看路径信息", "查看运行时文件或目录的存在性、类型和大小等元数据。")),
+            Map.entry("run_python", new ToolLabel("执行 Python 脚本", "执行运行时工作区中的 Python 脚本，并通过 args 传入逻辑路径参数。")),
+            Map.entry("write_artifact", new ToolLabel("生成下载产物", "发布最终下载文件，优先通过 sourcePath 引用脚本已生成的文件。")),
             Map.entry("readFile", new ToolLabel("读取文件", "读取本地 UTF-8 文本文件内容。")),
             Map.entry("writeFile", new ToolLabel("写入文件", "将 UTF-8 文本写入本地文件，必要时自动创建目录。")),
             Map.entry("runPython", new ToolLabel("执行 Python", "执行指定 Python 脚本并返回标准输出。")),
             Map.entry("get_render_template", new ToolLabel("获取渲染模板", "根据模板编码返回前端渲染模板定义，可选结合目标 API 工具生成有效 dataSchema。")),
             Map.entry("build_frontend_render_payload", new ToolLabel("封装前端渲染结果", "根据模板、业务数据和组件配置封装统一的前端渲染结果。")),
             Map.entry("generate_frontend_render", new ToolLabel("生成前端渲染", "将结构化 JSON 数据封装成前端组件可直接消费的渲染结果。")),
-            Map.entry("listActiveSkills", new ToolLabel("查看已激活技能", "列出当前已激活技能及其说明，便于判断可调用能力。")),
+            Map.entry("listActiveSkills", new ToolLabel("查看可用技能", "列出当前用户可用的全部技能，并标记哪些技能已在当前 runtime 中加载。")),
             Map.entry("loadSkillContent", new ToolLabel("读取技能内容", "读取指定技能的完整内容，用于查看技能说明和可用工具。")),
             Map.entry("loadSkillReference", new ToolLabel("读取技能参考资料", "读取指定技能的参考资料条目，用于补充技能上下文。")),
             Map.entry("checkInventory", new ToolLabel("查询库存", "查询指定品类或全部商品的库存、尺码和库存状态。")),

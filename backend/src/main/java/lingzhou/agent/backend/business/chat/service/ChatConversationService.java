@@ -1,204 +1,200 @@
 package lingzhou.agent.backend.business.chat.service;
 
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.TypeReference;
 import jakarta.servlet.http.HttpServletRequest;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.function.BiConsumer;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
-import lingzhou.agent.backend.business.chat.attachment.AttachmentParseResult;
-import lingzhou.agent.backend.business.chat.attachment.AttachmentParseService;
 import lingzhou.agent.backend.business.chat.domain.enums.ConversationSessionType;
+import lingzhou.agent.backend.business.chat.runtime.ChatRuntimePreparedRequest;
+import lingzhou.agent.backend.business.chat.runtime.ChatRuntimePreparedRequestAssembler;
+import lingzhou.agent.backend.business.chat.runtime.ChatRuntimeRequestMapper;
+import lingzhou.agent.backend.business.chat.runtime.LingzRuntimeRequest;
+import lingzhou.agent.backend.business.chat.runtime.LingzRuntimeScopeType;
 import lingzhou.agent.backend.business.datasets.service.IntegrationDatasetService;
-import lingzhou.agent.backend.business.integration.domain.IntegrationDataSource;
-import lingzhou.agent.backend.business.integration.mapper.IntegrationDataSourceMapper;
-import lingzhou.agent.backend.app.ChatModelProperties;
-import lingzhou.agent.backend.capability.modelruntime.ModelRuntimeClientFactory;
-import lingzhou.agent.backend.capability.modelruntime.ModelRuntimeErrorMessageResolver;
-import lingzhou.agent.backend.capability.modelruntime.ModelRuntimeConfigResolver;
 import lingzhou.agent.backend.business.skill.service.SkillCatalogService;
-import lingzhou.agent.backend.capability.dataset.runtime.IntegrationDatasetAgentToolRegistry;
+import lingzhou.agent.backend.business.skill.service.SkillPublishService;
+import lingzhou.agent.backend.business.system.model.AgentDetailDto;
+import lingzhou.agent.backend.business.system.service.AgentTemplateService;
+import lingzhou.agent.backend.capability.agentruntime.v2.RuntimeV2RequestHints;
+import lingzhou.agent.backend.capability.agentruntime.v2.engine.RuntimeV2ExecutionGateway;
 import lingzhou.agent.backend.common.lzException.TaskException;
-import lingzhou.agent.spring.ai.skill.core.SkillKit;
-import lingzhou.agent.spring.ai.skill.spi.SkillAwareToolCallbackResolver;
-import lingzhou.agent.spring.ai.skill.spi.SkillAwareToolCallingManager;
-import org.springframework.ai.chat.messages.AssistantMessage;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
-import org.springframework.ai.chat.memory.ChatMemory;
-import org.springframework.ai.model.tool.DefaultToolCallingManager;
-import org.springframework.ai.model.tool.ToolCallingManager;
-import org.springframework.ai.tool.ToolCallback;
-import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
-import org.springframework.util.StringUtils;
-import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.SignalType;
-import reactor.core.publisher.Sinks;
-import reactor.util.context.Context;
-import org.springframework.ai.tool.resolution.DelegatingToolCallbackResolver;
-import org.springframework.ai.tool.resolution.StaticToolCallbackResolver;
 
 @Service
 public class ChatConversationService {
 
-    private static final Logger logger = LoggerFactory.getLogger(ChatConversationService.class);
-
-    private final ModelRuntimeClientFactory modelRuntimeClientFactory;
-    private final ChatMemory chatMemory;
-    private final ConversationHistoryService conversationHistoryService;
-    private final ChatFileService chatFileService;
-    private final AttachmentParseService attachmentParseService;
     private final SkillCatalogService skillCatalogService;
+    private final SkillPublishService skillPublishService;
     private final IntegrationDatasetService integrationDatasetService;
-    private final IntegrationDataSourceMapper integrationDataSourceMapper;
-    private final IntegrationDatasetAgentToolRegistry integrationDatasetAgentToolRegistry;
-    private final SkillKit skillKit;
-    private final ChatModelProperties chatModelProperties;
+    private final AgentTemplateService agentTemplateService;
+    private final ChatRuntimeExecutor chatRuntimeExecutor;
+    private final ChatRuntimePreparedRequestAssembler chatRuntimePreparedRequestAssembler;
+    private final RuntimeV2ExecutionGateway runtimeV2ExecutionGateway;
 
     public ChatConversationService(
-            ModelRuntimeClientFactory modelRuntimeClientFactory,
-            ChatMemory chatMemory,
-            ConversationHistoryService conversationHistoryService,
-            ChatFileService chatFileService,
-            AttachmentParseService attachmentParseService,
             SkillCatalogService skillCatalogService,
+            SkillPublishService skillPublishService,
             IntegrationDatasetService integrationDatasetService,
-            IntegrationDataSourceMapper integrationDataSourceMapper,
-            IntegrationDatasetAgentToolRegistry integrationDatasetAgentToolRegistry,
-            SkillKit skillKit,
-            ChatModelProperties chatModelProperties) {
-        this.modelRuntimeClientFactory = modelRuntimeClientFactory;
-        this.chatMemory = chatMemory;
-        this.conversationHistoryService = conversationHistoryService;
-        this.chatFileService = chatFileService;
-        this.attachmentParseService = attachmentParseService;
+            AgentTemplateService agentTemplateService,
+            ChatRuntimeExecutor chatRuntimeExecutor,
+            ChatRuntimePreparedRequestAssembler chatRuntimePreparedRequestAssembler,
+            RuntimeV2ExecutionGateway runtimeV2ExecutionGateway) {
         this.skillCatalogService = skillCatalogService;
+        this.skillPublishService = skillPublishService;
         this.integrationDatasetService = integrationDatasetService;
-        this.integrationDataSourceMapper = integrationDataSourceMapper;
-        this.integrationDatasetAgentToolRegistry = integrationDatasetAgentToolRegistry;
-        this.skillKit = skillKit;
-        this.chatModelProperties = chatModelProperties;
+        this.agentTemplateService = agentTemplateService;
+        this.chatRuntimeExecutor = chatRuntimeExecutor;
+        this.chatRuntimePreparedRequestAssembler = chatRuntimePreparedRequestAssembler;
+        this.runtimeV2ExecutionGateway = runtimeV2ExecutionGateway;
     }
 
     public Flux<ServerSentEvent<String>> streamGeneral(GeneralChatRequest request, Long userId) {
-        if (!hasRequestContent(request == null ? null : request.message(), request == null ? null : request.fileIds())) {
-            return Flux.just(errorEvent("message or file is required"));
+        return streamGeneralBySessionType(request, userId, ConversationSessionType.GENERAL_CHAT);
+    }
+
+    public Flux<ServerSentEvent<String>> streamChannelGeneral(GeneralChatRequest request, Long userId) {
+        return streamGeneralBySessionType(request, userId, ConversationSessionType.CHANNEL_CHAT);
+    }
+
+    private Flux<ServerSentEvent<String>> streamGeneralBySessionType(
+            GeneralChatRequest request, Long userId, ConversationSessionType sessionType) {
+        LingzRuntimeRequest normalized = ChatRuntimeRequestMapper.forGeneral(request);
+        if (!chatRuntimePreparedRequestAssembler.hasRequestContent(normalized.message(), normalized.fileIds())) {
+            return persistFrontFailure(
+                    buildFallbackPrepared(sessionType, normalized), userId, "message or file is required");
         }
-        String query = resolveQuery(
-                request == null ? null : request.message(),
-                request == null ? null : request.fileIds(),
-                null);
-        String fileListJson = chatFileService.buildFileListJson(request.fileIds());
-        PreparedChat prepared = new PreparedChat(
-                ConversationSessionType.GENERAL_CHAT,
-                request.sessionId(),
-                null,
-                null,
-                query,
-                chatFileService.buildUserMessage(query.equals(normalizeMessage(request.message())) ? query : "", request.fileIds(), false),
-                "normal",
-                ConversationSessionType.GENERAL_CHAT.name(),
-                JSON.toJSONString(Map.of("mode", "general")),
-                fileListJson,
-                List.of(),
-                null,
-                null);
+        ChatRuntimePreparedRequest prepared =
+                chatRuntimePreparedRequestAssembler.buildGeneral(sessionType, normalized, userId);
         return streamPrepared(prepared, userId);
     }
 
     public Flux<ServerSentEvent<String>> streamSkill(SkillChatRequest request, Long userId) {
-        if (!hasSkillRequestContent(request)) {
-            return Flux.just(errorEvent("message or file is required"));
+        if (request == null) {
+            LingzRuntimeRequest normalized = ChatRuntimeRequestMapper.forSkill(null, LingzRuntimeScopeType.SKILL);
+            return persistFrontFailure(
+                    buildFallbackPrepared(ConversationSessionType.SKILL_CHAT, normalized),
+                    userId,
+                    "message or file is required");
         }
         try {
-            SkillCatalogService.SkillChatContext context = skillCatalogService.resolveSkillChatContext(request.skillId());
-            String messageType = normalizeMessageType(request == null ? null : request.messageType());
-            String query = resolveSkillQuery(request, context.runtimeSkillName(), messageType);
-            String fileListJson = chatFileService.buildFileListJson(request.fileIds());
-            List<AttachmentParseResult> parsedAttachments = attachmentParseService.parseUploads(request.fileIds());
-            Map<String, Object> params = new LinkedHashMap<>();
-            params.put("skillId", context.skillId());
-            params.put("runtimeSkillName", context.runtimeSkillName());
-            params.put("fileIds", request.fileIds() == null ? List.of() : request.fileIds());
-            params.put("parsedAttachments", attachmentParseService.toSerializablePayload(parsedAttachments));
-            params.put("messageType", messageType);
-            if (request != null && request.eventPayload() != null) {
-                params.put("eventPayload", request.eventPayload());
-            }
-            String rawMessage = normalizeMessage(request.message());
-            String userMessage = buildSkillUserMessage(
-                    request,
-                    rawMessage,
-                    messageType,
-                    parsedAttachments,
-                    context.readFileAvailable());
-
-            PreparedChat prepared = new PreparedChat(
-                    ConversationSessionType.SKILL_CHAT,
-                    request.sessionId(),
-                    context.skillId(),
-                    context.displayName(),
-                    query,
-                    userMessage,
-                    StringUtils.hasText(messageType) ? messageType : "normal",
-                    context.runtimeSkillName(),
-                    JSON.toJSONString(params),
-                    fileListJson,
-                    context.toolCallbacks(),
-                    context.systemPrompt(),
-                    context.runtimeSkillName());
-            return streamPrepared(prepared, userId);
+            SkillCatalogService.SkillChatContext context =
+                    skillCatalogService.resolveSkillChatContext(request.skillId());
+            return streamSkillByContext(request, userId, context, ConversationSessionType.SKILL_CHAT);
         } catch (TaskException ex) {
-            return Flux.just(errorEvent(ex.getMessage()));
+            LingzRuntimeRequest normalized = ChatRuntimeRequestMapper.forSkill(request, LingzRuntimeScopeType.SKILL);
+            return persistFrontFailure(
+                    buildFallbackPrepared(ConversationSessionType.SKILL_CHAT, normalized), userId, ex.getMessage());
         }
+    }
+
+    public Flux<ServerSentEvent<String>> streamChannelSkill(SkillChatRequest request, Long userId) {
+        if (request == null) {
+            LingzRuntimeRequest normalized = ChatRuntimeRequestMapper.forSkill(null, LingzRuntimeScopeType.SKILL);
+            return persistFrontFailure(
+                    buildFallbackPrepared(ConversationSessionType.CHANNEL_CHAT, normalized),
+                    userId,
+                    "message or file is required");
+        }
+        try {
+            SkillCatalogService.SkillChatContext context =
+                    skillCatalogService.resolveSkillChatContext(request.skillId());
+            return streamSkillByContext(request, userId, context, ConversationSessionType.CHANNEL_CHAT);
+        } catch (TaskException ex) {
+            LingzRuntimeRequest normalized = ChatRuntimeRequestMapper.forSkill(request, LingzRuntimeScopeType.SKILL);
+            return persistFrontFailure(
+                    buildFallbackPrepared(ConversationSessionType.CHANNEL_CHAT, normalized), userId, ex.getMessage());
+        }
+    }
+
+    public Flux<ServerSentEvent<String>> streamPublishedSkill(String appCode, SkillChatRequest request, Long userId) {
+        try {
+            SkillPublishService.PublishedSkillContext publishedContext =
+                    skillPublishService.resolvePublishedSkillContext(appCode);
+            SkillCatalogService.SkillChatContext context = skillCatalogService.resolveSkillChatContextForPublished(
+                    publishedContext.skillId(), publishedContext.displayName(), publishedContext.description());
+            return streamSkillByContext(request, userId, context, ConversationSessionType.PUBLISHED_SKILL_CHAT);
+        } catch (TaskException ex) {
+            LingzRuntimeRequest normalized =
+                    ChatRuntimeRequestMapper.forSkill(request, LingzRuntimeScopeType.PUBLISHED_SKILL);
+            return persistFrontFailure(
+                    buildFallbackPrepared(ConversationSessionType.PUBLISHED_SKILL_CHAT, normalized),
+                    userId,
+                    ex.getMessage());
+        }
+    }
+
+    private Flux<ServerSentEvent<String>> streamSkillByContext(
+            SkillChatRequest request,
+            Long userId,
+            SkillCatalogService.SkillChatContext context,
+            ConversationSessionType sessionType) {
+        LingzRuntimeRequest normalized = ChatRuntimeRequestMapper.forSkill(
+                request,
+                sessionType == ConversationSessionType.PUBLISHED_SKILL_CHAT
+                        ? LingzRuntimeScopeType.PUBLISHED_SKILL
+                        : LingzRuntimeScopeType.SKILL);
+        if (!chatRuntimePreparedRequestAssembler.hasSkillRequestContent(normalized)) {
+            return persistFrontFailure(
+                    buildFallbackPrepared(sessionType, normalized), userId, "message or file is required");
+        }
+        ChatRuntimePreparedRequest prepared =
+                chatRuntimePreparedRequestAssembler.buildSkill(sessionType, normalized, context);
+        return streamPrepared(prepared, userId);
+    }
+
+    public Flux<ServerSentEvent<String>> streamExpertPackage(ExpertPackageChatRequest request, Long userId) {
+        LingzRuntimeRequest normalized = ChatRuntimeRequestMapper.forExpertPackage(request);
+        if (request == null || request.packageId() == null) {
+            return persistFrontFailure(
+                    buildFallbackPrepared(ConversationSessionType.EXPERT_SKILL_PACKAGE_CHAT, normalized),
+                    userId,
+                    "expert package is required");
+        }
+        if (!chatRuntimePreparedRequestAssembler.hasRequestContent(normalized.message(), normalized.fileIds())) {
+            return persistFrontFailure(
+                    buildFallbackPrepared(ConversationSessionType.EXPERT_SKILL_PACKAGE_CHAT, normalized),
+                    userId,
+                    "message or file is required");
+        }
+        AgentDetailDto expertPackage = agentTemplateService.getEnabledAgentDetail(request.packageId());
+        if (expertPackage == null) {
+            return persistFrontFailure(
+                    buildFallbackPrepared(ConversationSessionType.EXPERT_SKILL_PACKAGE_CHAT, normalized),
+                    userId,
+                    "专家技能包不存在或未启用");
+        }
+        ChatRuntimePreparedRequest prepared =
+                chatRuntimePreparedRequestAssembler.buildExpertPackage(
+                        ConversationSessionType.EXPERT_SKILL_PACKAGE_CHAT, normalized, expertPackage);
+        return streamPrepared(prepared, userId);
     }
 
     public Flux<ServerSentEvent<String>> streamDataset(Long datasetId, DatasetChatRequest request, Long userId) {
-        if (!hasRequestContent(request == null ? null : request.message(), null)) {
-            return Flux.just(errorEvent("message or file is required"));
-        }
-        try {
-            IntegrationDatasetService.DatasetDetail dataset = integrationDatasetService.getDataset(datasetId);
-            String rawMessage = normalizeMessage(request.message());
-            String query = StringUtils.hasText(rawMessage) ? rawMessage : "请分析当前数据集并回答问题";
-            Map<String, Object> params = new LinkedHashMap<>();
-            params.put("datasetId", dataset.id());
-            params.put("datasetCode", dataset.datasetCode());
-            params.put("datasetName", dataset.name());
-            params.put("sourceKind", dataset.sourceKind());
-            params.put("sqlDialect", resolveDatasetSqlDialect(dataset));
-            PreparedChat prepared = new PreparedChat(
-                    ConversationSessionType.DATASET_CHAT,
-                    request == null ? null : request.sessionId(),
-                    dataset.id(),
-                    dataset.name(),
-                    query,
-                    rawMessage,
-                    "normal",
-                    ConversationSessionType.DATASET_CHAT.name(),
-                    JSON.toJSONString(params),
-                    null,
-                    integrationDatasetAgentToolRegistry.buildCallbacks(dataset.datasetCode()),
-                    buildDatasetSystemPrompt(dataset),
-                    null);
-            return streamPrepared(prepared, userId);
-        } catch (TaskException ex) {
-            return Flux.just(errorEvent(ex.getMessage()));
-        }
+        return streamDatasetBySessionType(datasetId, request, userId, ConversationSessionType.DATASET_CHAT);
     }
 
+    public Flux<ServerSentEvent<String>> streamChannelDataset(Long datasetId, DatasetChatRequest request, Long userId) {
+        return streamDatasetBySessionType(datasetId, request, userId, ConversationSessionType.CHANNEL_CHAT);
+    }
+
+    private Flux<ServerSentEvent<String>> streamDatasetBySessionType(
+            Long datasetId, DatasetChatRequest request, Long userId, ConversationSessionType sessionType) {
+        LingzRuntimeRequest normalized = ChatRuntimeRequestMapper.forDataset(request);
+        if (!chatRuntimePreparedRequestAssembler.hasRequestContent(normalized.message(), null)) {
+            return persistFrontFailure(
+                    buildFallbackPrepared(sessionType, normalized), userId, "message or file is required");
+        }
+        try {
+            IntegrationDatasetService.DatasetDetail dataset = integrationDatasetService.getDataset(datasetId, userId);
+            ChatRuntimePreparedRequest prepared =
+                    chatRuntimePreparedRequestAssembler.buildDataset(sessionType, normalized, dataset);
+            return streamPrepared(prepared, userId);
+        } catch (TaskException ex) {
+            return persistFrontFailure(buildFallbackPrepared(sessionType, normalized), userId, ex.getMessage());
+        }
+    }
 
     public Long resolveUserId(HttpServletRequest request) {
         Object value = request.getAttribute("UserId");
@@ -211,672 +207,86 @@ public class ChatConversationService {
         return Long.valueOf(String.valueOf(value));
     }
 
-    private Flux<ServerSentEvent<String>> streamPrepared(PreparedChat prepared, Long userId) {
-        ConversationHistoryService.ConversationContext context;
-        try {
-            context = conversationHistoryService.startMessage(
-                    userId,
-                    prepared.sessionType(),
-                    prepared.sessionId(),
-                    prepared.scopeId(),
-                    prepared.scopeDisplayName(),
-                    prepared.query(),
-                    prepared.messageType(),
-                    prepared.query(),
-                    prepared.questionType(),
-                    prepared.paramsJson(),
-                    prepared.fileListJson());
-        } catch (Exception ex) {
-            logger.error("初始化会话消息失败：error={}", ex.getMessage(), ex);
-            return Flux.just(errorEvent("会话初始化失败，请稍后重试"));
+    private Flux<ServerSentEvent<String>> streamPrepared(ChatRuntimePreparedRequest prepared, Long userId) {
+        if (RuntimeV2RequestHints.readBooleanFlag(prepared == null ? null : prepared.paramsJson(), "artifactRequired")) {
+            return runtimeV2ExecutionGateway.stream(prepared, userId);
         }
-
-        logSkillContextStats(prepared);
-        Flux<ServerSentEvent<String>> meta = Flux.just(metaEvent(conversationHistoryService.buildMetaPayload(context)));
-        if (prepared.sessionType() == ConversationSessionType.SKILL_CHAT
-                || prepared.sessionType() == ConversationSessionType.DATASET_CHAT) {
-            return meta.concatWith(buildSkillStreamingResponse(context, prepared));
-        }
-
-        ModelRuntimeClientFactory.ChatRuntimeBundle chatRuntimeBundle =
-                modelRuntimeClientFactory.createChatBundleWithSystemPrompt(chatModelProperties.getGeneralSystemPrompt());
-        AtomicReference<String> last = new AtomicReference<>("");
-        AtomicBoolean finalized = new AtomicBoolean(false);
-        long startedAt = System.currentTimeMillis();
-        Flux<ServerSentEvent<String>> stream =
-                buildGeneralStreamingResponse(chatRuntimeBundle.chatClient(), context, prepared, last);
-        stream = finalizeResponse(
-                        stream,
-                        context,
-                        prepared,
-                        chatRuntimeBundle.config(),
-                        last,
-                        List.of(),
-                        finalized,
-                        startedAt)
-                .concatWithValues(doneEvent());
-        return meta.concatWith(stream);
+        return chatRuntimeExecutor.stream(prepared, userId);
     }
 
-    private Flux<ServerSentEvent<String>> buildGeneralStreamingResponse(
-            ChatClient chatClient,
-            ConversationHistoryService.ConversationContext context,
-            PreparedChat prepared,
-            AtomicReference<String> last) {
-        ChatClient.ChatClientRequestSpec spec = buildRequestSpec(chatClient, context, prepared);
-        return spec.stream().content().flatMap(chunk -> {
-            String delta = normalizeDelta(chunk);
-//            if (!StringUtils.hasText(delta)) {
-//                return Flux.empty();
-//            }
-            last.updateAndGet(existing -> existing + delta);
-            logger.info(
-                    "SSE chat chunk length={}, sessionType={}, scopeId={}, contentType={}",
-                    delta.length(),
-                    prepared.sessionType().name(),
-                    prepared.scopeId(),
-                    MediaType.TEXT_EVENT_STREAM_VALUE);
-            return Flux.just(messageEvent(delta));
-        });
+    private Flux<ServerSentEvent<String>> persistFrontFailure(
+            ChatRuntimePreparedRequest prepared, Long userId, String errorMessage) {
+        return chatRuntimeExecutor.persistPreRuntimeFailure(prepared, userId, errorMessage);
     }
 
-    private Flux<ServerSentEvent<String>> buildSkillStreamingResponse(
-            ConversationHistoryService.ConversationContext context, PreparedChat prepared) {
-        AtomicReference<String> last = new AtomicReference<>("");
-        AtomicReference<String> previousResponseText = new AtomicReference<>("");
-        AtomicBoolean finalized = new AtomicBoolean(false);
-        AtomicInteger modelRound = new AtomicInteger(1);
-        AtomicInteger currentRoundOutputLength = new AtomicInteger(0);
-        AtomicLong currentRoundStartedAt = new AtomicLong(System.currentTimeMillis());
-        List<Map<String, Object>> toolEvents = Collections.synchronizedList(new ArrayList<>());
-        long startedAt = System.currentTimeMillis();
-        ModelRuntimeClientFactory.ChatRuntimeBundle skillChatBundle = createSkillChatBundle(prepared);
-        ChatClient.ChatClientRequestSpec spec = buildRequestSpec(skillChatBundle.chatClient(), context, prepared);
-        Sinks.Many<ServerSentEvent<String>> toolSink = Sinks.many().unicast().onBackpressureBuffer();
-        BiConsumer<String, String> publisher = (eventType, payload) -> {
-            String normalizedPayload = enrichToolEventPayload(payload);
-            recordToolEvent(eventType, normalizedPayload, toolEvents);
-            toolSink.tryEmitNext(ServerSentEvent.builder(normalizedPayload).event(eventType).build());
-        };
-
-        Flux<ServerSentEvent<String>> stream = spec.stream()
-                .chatResponse()
-                .flatMap(chatResponse -> {
-                    if (chatResponse == null
-                            || chatResponse.getResult() == null
-                            || chatResponse.getResult().getOutput() == null) {
-                        return Flux.empty();
-                    }
-                    AssistantMessage output = chatResponse.getResult().getOutput();
-                    String current = output.getText();
-                    if (current == null) {
-                        current = "";
-                    }
-                    String previous = previousResponseText.get();
-                    boolean newModelRound = StringUtils.hasText(previous) && !current.startsWith(previous);
-                    if (newModelRound) {
-                        logModelRoundThroughput(
-                                context,
-                                prepared,
-                                modelRound.getAndIncrement(),
-                                currentRoundOutputLength.get(),
-                                currentRoundStartedAt.getAndSet(System.currentTimeMillis()));
-                        currentRoundOutputLength.set(0);
-                    }
-                    String delta = current.startsWith(previous) ? current.substring(previous.length()) : current;
-                    previousResponseText.set(current);
-//                    if (!StringUtils.hasText(delta)) {
-//                        return Flux.empty();
-//                    }
-                    last.updateAndGet(existing -> existing + delta);
-                    currentRoundOutputLength.addAndGet(safeLength(delta));
-//                    logger.info(
-//                            "SSE skill chat chunk length={}, sessionType={}, scopeId={}, hasToolCalls={}",
-//                            current.length(),
-//                            prepared.sessionType().name(),
-//                            prepared.scopeId(),
-//                            output.hasToolCalls());
-                    return Flux.just(messageEvent(delta));
-                })
-                .onErrorResume(error -> {
-                    String friendlyMessage = ModelRuntimeErrorMessageResolver.resolve(error);
-                    logStreamingError("skill", prepared, skillChatBundle.config(), error);
-                    if (finalized.compareAndSet(false, true)) {
-                        String paramsJson = mergeParamsJson(prepared.paramsJson(), toolEvents);
-                        conversationHistoryService.failMessage(
-                                context,
-                                friendlyMessage,
-                                last.get(),
-                                paramsJson,
-                                System.currentTimeMillis() - startedAt);
-                    }
-                    return Flux.just(errorEvent(friendlyMessage));
-                })
-                .doOnComplete(() -> {
-                    if (finalized.compareAndSet(false, true)) {
-                        String paramsJson = mergeParamsJson(prepared.paramsJson(), toolEvents);
-                        conversationHistoryService.completeMessage(
-                                context,
-                                last.get(),
-                                null,
-                                prepared.fileListJson(),
-                                paramsJson,
-                                System.currentTimeMillis() - startedAt);
-                        logModelRoundThroughput(
-                                context,
-                                prepared,
-                                modelRound.get(),
-                                currentRoundOutputLength.get(),
-                                currentRoundStartedAt.get());
-                        logSkillConversationStats(context, prepared, last.get(), startedAt, modelRound.get());
-                    }
-                })
-                .doFinally(signalType -> {
-                    if (signalType == SignalType.CANCEL && finalized.compareAndSet(false, true)) {
-                        String paramsJson = mergeParamsJson(prepared.paramsJson(), toolEvents);
-                        conversationHistoryService.interruptMessage(
-                                context,
-                                last.get(),
-                                paramsJson,
-                                System.currentTimeMillis() - startedAt);
-                    }
-                })
-                .concatWithValues(doneEvent())
-                .contextWrite(Context.of("toolEventPublisher", publisher));
-
-        return Flux.merge(stream, toolSink.asFlux());
+    private ChatRuntimePreparedRequest buildFallbackPrepared(
+            ConversationSessionType sessionType, LingzRuntimeRequest normalized) {
+        String resolvedMessage = resolveFallbackMessage(normalized);
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("mode", "fallback-error");
+        params.put(
+                "scopeType",
+                normalized == null || normalized.scopeType() == null
+                        ? null
+                        : normalized.scopeType().name());
+        params.put("fileIds", normalized == null || normalized.fileIds() == null ? List.of() : normalized.fileIds());
+        if (normalized != null && normalized.eventPayload() != null) {
+            params.put("eventPayload", normalized.eventPayload());
+        }
+        return new ChatRuntimePreparedRequest(
+                sessionType,
+                normalized == null ? LingzRuntimeScopeType.GENERAL : normalized.scopeType(),
+                normalized == null ? null : normalized.sessionId(),
+                normalized == null ? null : normalized.scopeId(),
+                null,
+                resolvedMessage,
+                resolvedMessage,
+                normalized == null
+                        ? "normal"
+                        : chatRuntimePreparedRequestAssembler.resolveRuntimeMessageType(normalized.messageType()),
+                sessionType.name(),
+                com.alibaba.fastjson.JSON.toJSONString(params),
+                null,
+                List.of(),
+                null,
+                normalized == null ? null : normalized.systemPromptAppend(),
+                normalized == null ? null : normalized.runtimeSkillName(),
+                List.of(),
+                List.of(),
+                normalized == null ? null : normalized.chatModelId(),
+                normalized != null && normalized.isPersonalAgentRequest(),
+                normalized == null ? "" : normalized.resolvePersonalAgentMode());
     }
 
-    private ChatClient.ChatClientRequestSpec buildRequestSpec(
-            ChatClient chatClient, ConversationHistoryService.ConversationContext context, PreparedChat prepared) {
-        ChatClient.ChatClientRequestSpec spec = chatClient
-                .prompt()
-                .advisors(MessageChatMemoryAdvisor.builder(chatMemory)
-                        .conversationId(context.sessionCode())
-                        .build())
-                .user(prepared.userMessage());
-
-        if (StringUtils.hasText(prepared.systemPrompt())) {
-            spec.system(prepared.systemPrompt());
+    private String resolveFallbackMessage(LingzRuntimeRequest normalized) {
+        if (normalized == null) {
+            return "[系统异常前置失败]";
         }
-        if (!prepared.toolCallbacks().isEmpty()) {
-            spec.toolCallbacks(prepared.toolCallbacks());
+        String message = String.valueOf(normalized.message() == null ? "" : normalized.message())
+                .trim();
+        if (!message.isEmpty()) {
+            return message;
         }
-        return spec;
-    }
-
-    private ModelRuntimeClientFactory.ChatRuntimeBundle createSkillChatBundle(PreparedChat prepared) {
-        ToolCallingManager delegate = DefaultToolCallingManager.builder()
-                .toolCallbackResolver(new DelegatingToolCallbackResolver(List.of(
-                        new StaticToolCallbackResolver(prepared.toolCallbacks()),
-                        SkillAwareToolCallbackResolver.builder().skillKit(skillKit).build())))
-                .build();
-        ToolCallingManager toolCallingManager = SkillAwareToolCallingManager.builder()
-                .skillKit(skillKit)
-                .delegate(delegate)
-                .build();
-        return modelRuntimeClientFactory.createChatBundle(toolCallingManager);
-    }
-
-    private Flux<ServerSentEvent<String>> finalizeResponse(
-            Flux<ServerSentEvent<String>> stream,
-            ConversationHistoryService.ConversationContext context,
-            PreparedChat prepared,
-            ModelRuntimeConfigResolver.ResolvedChatModelConfig chatConfig,
-            AtomicReference<String> last,
-            List<Map<String, Object>> toolEvents,
-            AtomicBoolean finalized,
-            long startedAt) {
-        return stream.onErrorResume(error -> {
-                    String friendlyMessage = ModelRuntimeErrorMessageResolver.resolve(error);
-                    logStreamingError("general", prepared, chatConfig, error);
-                    if (finalized.compareAndSet(false, true)) {
-                        String paramsJson = mergeParamsJson(prepared.paramsJson(), toolEvents);
-                        conversationHistoryService.failMessage(
-                                context,
-                                friendlyMessage,
-                                last.get(),
-                                paramsJson,
-                                System.currentTimeMillis() - startedAt);
-                    }
-                    return Flux.just(errorEvent(friendlyMessage));
-                })
-                .doOnComplete(() -> {
-                    if (finalized.compareAndSet(false, true)) {
-                        String paramsJson = mergeParamsJson(prepared.paramsJson(), toolEvents);
-                        conversationHistoryService.completeMessage(
-                                context,
-                                last.get(),
-                                null,
-                                prepared.fileListJson(),
-                                paramsJson,
-                                System.currentTimeMillis() - startedAt);
-                    }
-                })
-                .doFinally(signalType -> {
-                    if (signalType == SignalType.CANCEL && finalized.compareAndSet(false, true)) {
-                        String paramsJson = mergeParamsJson(prepared.paramsJson(), toolEvents);
-                        conversationHistoryService.interruptMessage(
-                                context,
-                                last.get(),
-                                paramsJson,
-                                System.currentTimeMillis() - startedAt);
-                    }
-                });
-    }
-
-    private void logStreamingError(
-            String scene,
-            PreparedChat prepared,
-            ModelRuntimeConfigResolver.ResolvedChatModelConfig chatConfig,
-            Throwable error) {
-        if (error instanceof WebClientResponseException responseException) {
-            logger.error(
-                    "聊天流式请求失败：scene={}, provider={}, model={}, sessionType={}, scopeId={}, status={}, responseBody={}",
-                    scene,
-                    chatConfig.provider(),
-                    chatConfig.model(),
-                    prepared.sessionType().name(),
-                    prepared.scopeId(),
-                    responseException.getStatusCode().value(),
-                    responseException.getResponseBodyAsString(),
-                    error);
-            return;
+        if (normalized.fileIds() != null && !normalized.fileIds().isEmpty()) {
+            return "[仅附件请求]";
         }
-        logger.error(
-                "聊天流式请求失败：scene={}, provider={}, model={}, sessionType={}, scopeId={}, error={}",
-                scene,
-                chatConfig.provider(),
-                chatConfig.model(),
-                prepared.sessionType().name(),
-                prepared.scopeId(),
-                error.getMessage(),
-                error);
-    }
-
-    private void logSkillContextStats(PreparedChat prepared) {
-        if (prepared == null || prepared.sessionType() != ConversationSessionType.SKILL_CHAT) {
-            return;
-        }
-        int systemPromptLength = safeLength(prepared.systemPrompt());
-        int userMessageLength = safeLength(prepared.userMessage());
-        int queryLength = safeLength(prepared.query());
-        int totalContextLength = systemPromptLength + userMessageLength;
-//        logger.info(
-//                "技能对话上下文统计：runtimeSkillName={}, scopeId={}, sessionId={}, queryLength={}, userMessageLength={}, systemPromptLength={}, totalContextLength={}, toolCount={}",
-//                prepared.runtimeSkillName(),
-//                prepared.scopeId(),
-//                prepared.sessionId(),
-//                queryLength,
-//                userMessageLength,
-//                systemPromptLength,
-//                totalContextLength,
-//                prepared.toolCallbacks() == null ? 0 : prepared.toolCallbacks().size());
-    }
-
-    private void logSkillConversationStats(
-            ConversationHistoryService.ConversationContext context,
-            PreparedChat prepared,
-            String content,
-            long startedAt,
-            int modelRoundCount) {
-        if (prepared == null || prepared.sessionType() != ConversationSessionType.SKILL_CHAT) {
-            return;
-        }
-        long durationMs = Math.max(1L, System.currentTimeMillis() - startedAt);
-        int outputLength = safeLength(content);
-        double outputCharsPerSecond = outputLength * 1000.0 / durationMs;
-//        logger.info(
-//                "技能对话整体统计：runtimeSkillName={}, scopeId={}, sessionCode={}, modelRoundCount={}, outputLength={}, durationMs={}, outputCharsPerSecond={}",
-//                prepared.runtimeSkillName(),
-//                prepared.scopeId(),
-//                context == null ? "" : context.sessionCode(),
-//                modelRoundCount,
-//                outputLength,
-//                durationMs,
-//                String.format(java.util.Locale.ROOT, "%.2f", outputCharsPerSecond));
-    }
-
-    private void logModelRoundThroughput(
-            ConversationHistoryService.ConversationContext context,
-            PreparedChat prepared,
-            int roundIndex,
-            int outputLength,
-            long roundStartedAt) {
-        if (prepared == null || prepared.sessionType() != ConversationSessionType.SKILL_CHAT || outputLength <= 0) {
-            return;
-        }
-        long durationMs = Math.max(1L, System.currentTimeMillis() - roundStartedAt);
-        double outputCharsPerSecond = outputLength * 1000.0 / durationMs;
-//        logger.info(
-//                "技能对话模型轮次统计：runtimeSkillName={}, scopeId={}, sessionCode={}, roundIndex={}, roundOutputLength={}, roundDurationMs={}, roundOutputCharsPerSecond={}",
-//                prepared.runtimeSkillName(),
-//                prepared.scopeId(),
-//                context == null ? "" : context.sessionCode(),
-//                roundIndex,
-//                outputLength,
-//                durationMs,
-//                String.format(java.util.Locale.ROOT, "%.2f", outputCharsPerSecond));
-    }
-
-    private void recordToolEvent(String eventType, String payload, List<Map<String, Object>> toolEvents) {
-        if (toolEvents == null || (!"tool".equals(eventType) && !"result".equals(eventType))) {
-            return;
-        }
-        try {
-            Map<String, Object> wrapper = JSON.parseObject(payload, new TypeReference<Map<String, Object>>() {});
-            Object content = wrapper == null ? null : wrapper.get("content");
-            Map<String, Object> event = new LinkedHashMap<>();
-            event.put("type", eventType);
-            if (content instanceof Map<?, ?> contentMap) {
-                event.put("content", new LinkedHashMap<>(contentMap));
-            } else if (content != null) {
-                event.put("content", content);
-            }
-            toolEvents.add(event);
-        } catch (Exception ex) {
-            logger.warn("记录工具事件失败：eventType={}, error={}", eventType, ex.getMessage());
-        }
-    }
-
-    private String enrichToolEventPayload(String payload) {
-        if (!StringUtils.hasText(payload)) {
-            return payload;
-        }
-        try {
-            Map<String, Object> wrapper = JSON.parseObject(payload, new TypeReference<Map<String, Object>>() {});
-            Object content = wrapper == null ? null : wrapper.get("content");
-            if (!(content instanceof Map<?, ?> contentMap)) {
-                return payload;
-            }
-            Object rawName = contentMap.get("name");
-            String toolName = rawName == null ? "" : String.valueOf(rawName).trim();
-            if (!StringUtils.hasText(toolName)) {
-                return payload;
-            }
-            Map<String, Object> normalizedContent = new LinkedHashMap<>();
-            for (Map.Entry<?, ?> entry : contentMap.entrySet()) {
-                Object key = entry.getKey();
-                if (key == null) {
-                    continue;
-                }
-                normalizedContent.put(String.valueOf(key), entry.getValue());
-            }
-            normalizedContent.put("displayName", resolveToolDisplayName(toolName));
-            wrapper.put("content", normalizedContent);
-            return JSON.toJSONString(wrapper);
-        } catch (Exception ex) {
-            logger.warn("补充工具展示名称失败：error={}", ex.getMessage());
-            return payload;
-        }
-    }
-
-    private String resolveToolDisplayName(String toolName) {
-        String normalizedToolName = StringUtils.hasText(toolName) ? toolName.trim() : "";
-        if (!StringUtils.hasText(normalizedToolName)) {
-            return "";
-        }
-        return switch (normalizedToolName) {
-            case "search_dataset_summary" -> "查看数据集摘要";
-            case "get_dataset_schema" -> "查看数据集结构";
-            case "execute_dataset_sql" -> "执行数据集 SQL";
-            default -> skillCatalogService.resolveToolDisplayName(normalizedToolName);
-        };
-    }
-
-    private String mergeParamsJson(String paramsJson, List<Map<String, Object>> toolEvents) {
-        Map<String, Object> payload = new LinkedHashMap<>();
-        if (StringUtils.hasText(paramsJson)) {
-            try {
-                Map<String, Object> parsed = JSON.parseObject(paramsJson, new TypeReference<Map<String, Object>>() {});
-                if (parsed != null) {
-                    payload.putAll(parsed);
-                }
-            } catch (Exception ex) {
-                logger.warn("解析参数 JSON 失败，将重建参数：error={}", ex.getMessage());
-            }
-        }
-        payload.put("toolEvents", toolEvents == null ? List.of() : List.copyOf(toolEvents));
-        return JSON.toJSONString(payload);
-    }
-
-    private boolean hasRequestContent(String message, List<String> fileIds) {
-        return StringUtils.hasText(message) || (fileIds != null && !fileIds.isEmpty());
-    }
-
-    private boolean hasSkillRequestContent(SkillChatRequest request) {
-        if (request == null) {
-            return false;
-        }
-        if (hasRequestContent(request.message(), request.fileIds())) {
-            return true;
-        }
-        return StringUtils.hasText(normalizeMessageType(request.messageType())) && request.eventPayload() != null;
-    }
-
-    private String normalizeMessageType(String messageType) {
-        return StringUtils.hasText(messageType) ? messageType.trim() : "";
-    }
-
-    private String resolveSkillQuery(SkillChatRequest request, String runtimeSkillName, String messageType) {
-        String rawMessage = normalizeMessage(request == null ? null : request.message());
-        if (StringUtils.hasText(rawMessage)) {
-            return rawMessage;
-        }
-        if ("event".equals(messageType) && request != null && request.eventPayload() != null) {
-            return JSON.toJSONString(request.eventPayload());
-        }
-        return resolveQuery(request == null ? null : request.message(), request == null ? null : request.fileIds(), runtimeSkillName);
-    }
-
-    private String buildSkillUserMessage(
-            SkillChatRequest request,
-            String rawMessage,
-            String messageType,
-            List<AttachmentParseResult> parsedAttachments,
-            boolean readFileAvailable) {
-        if ("event".equals(messageType)) {
-            return StringUtils.hasText(rawMessage)
-                    ? rawMessage
-                    : (request != null && request.eventPayload() != null ? JSON.toJSONString(request.eventPayload()) : "");
-        }
-        return chatFileService.buildUserMessage(rawMessage, request == null ? null : request.fileIds(), readFileAvailable)
-                + attachmentParseService.buildPromptContext(parsedAttachments);
-    }
-
-    private String resolveQuery(String message, List<String> fileIds, String runtimeSkillName) {
-        String normalized = normalizeMessage(message);
-        if (StringUtils.hasText(normalized)) {
-            return normalized;
-        }
-        List<ChatFileService.UploadedFile> files = chatFileService.resolveFiles(fileIds);
-        if (files.isEmpty()) {
-            return "请基于我上传的附件继续分析";
-        }
-        String joinedNames = files.stream()
-                .map(ChatFileService.UploadedFile::name)
-                .filter(StringUtils::hasText)
-                .limit(3)
-                .reduce((left, right) -> left + "、" + right)
-                .orElse("附件");
-        if ("form-app-assistant".equals(StringUtils.trimWhitespace(runtimeSkillName))) {
-            return "请基于我上传的表单参考附件分析语义，并推荐字段与布局：" + joinedNames;
-        }
-        return "请基于我上传的附件继续分析：" + joinedNames;
-    }
-
-    private String normalizeMessage(String message) {
-        return StringUtils.hasText(message) ? message.trim() : "";
-    }
-
-    private int safeLength(String value) {
-        return value == null ? 0 : value.length();
-    }
-
-    private String normalizeDelta(String chunk) {
-        if (chunk == null) {
-            return "";
-        }
-        return chunk;
-    }
-
-    private String buildDatasetSystemPrompt(IntegrationDatasetService.DatasetDetail dataset) {
-        String sqlDialect = resolveDatasetSqlDialect(dataset);
-        return "你是数据集智能问数助手。你的任务是基于当前选中的数据集完成统计分析、指标计算和结果解释。"
-                + "你可以按需多次调用工具，先理解数据集，再查询数据，最后给出结论。\n\n"
-
-                + "工作规则：\n"
-                + "1. 固定流程必须遵守：先调用 search_dataset_summary，先分析可能会用到哪些对象/表，再决定是否调用 get_dataset_schema，确认结构足够支撑 SQL 后，最后才调用 execute_dataset_sql。\n"
-                + "2. 遇到业务口径不明确、对象不明确、字段不明确时，不要直接猜测，必须先看摘要，再按需要看结构。\n"
-                + "3. search_dataset_summary、get_dataset_schema 返回结果中的 objectCode 才是 SQL 里可直接使用的真实表名；objectName 只是中文说明，绝对不能把中文对象名直接写进 SQL。\n"
-                + "4. 当前数据集要求使用 MySQL 方言处理，不能混用其他数据库语法。\n"
-                + "5. SQL 中出现的字段，必须来自 get_dataset_schema 返回的字段列表；不能凭经验、中文语义或历史习惯自行想象字段名。\n"
-                + "6. 需要统计结果时，先确认对象、字段和关联关系，并确认现有信息已经足够写 SQL；如果还不够，就继续调用 get_dataset_schema，而不是硬写 SQL。\n"
-                + "7. 只能基于工具返回的数据和当前数据集信息作答，禁止编造不存在的字段、表、结果或业务规则。\n"
-                + "8. 如果 SQL 执行失败，要根据错误信息调整查询，而不是直接放弃。\n"
-                + "9. 如果用户请求超出当前数据集能力或数据不足，必须明确说明原因。\n"
-
-                + "10. 回答风格要求（非常重要）：\n"
-                + "   - 默认优先给出【简洁直接的核心结论】，用自然语言回答问题。\n"
-                + "   - 非必要不要展开详细的SQL过程、字段说明或分析步骤。\n"
-                + "   - 只有在以下情况才补充说明：\n"
-                + "     a）用户明确追问计算方式或口径\n"
-                + "     b）结果存在歧义或容易误解\n"
-                + "     c）统计依赖重要过滤条件（如时间范围、状态）\n"
-                + "   - 补充信息应简洁表达，不要写成长报告。\n"
-
-                + "11. 输出结构建议：\n"
-                + "   - 第一行：直接回答问题（核心结果）\n"
-                + "   - 可选第二行：简要补充关键口径（如时间范围、筛选条件）\n"
-                + "   - 除非用户要求，不要列出完整统计说明或SQL细节。\n"
-
-                + "12. 除非问题非常复杂，否则不要先输出分析过程再给结论，应优先“结论先行”。\n\n"
-
-                + buildDatasetPromptContext(dataset, sqlDialect);
-    }
-
-    private String buildDatasetPromptContext(IntegrationDatasetService.DatasetDetail dataset, String sqlDialect) {
-        if (dataset == null) {
-            return "当前未提供数据集上下文。";
-        }
-        StringBuilder builder = new StringBuilder();
-        builder.append("当前数据集信息：\n");
-        builder.append("- 名称：").append(defaultText(dataset.name())).append("\n");
-        builder.append("- 编码：").append(defaultText(dataset.datasetCode())).append("\n");
-        builder.append("- 来源类型：").append(defaultText(dataset.sourceKind())).append("\n");
-        builder.append("- SQL 方言：").append(defaultText(sqlDialect)).append("\n");
-        builder.append("- 描述：").append(defaultText(dataset.description())).append("\n");
-        builder.append("- 业务说明：").append(defaultText(dataset.businessLogic())).append("\n");
-        builder.append("- 对象数量：").append(dataset.objectCount()).append("\n");
-        builder.append("- 字段数量：").append(dataset.fieldCount()).append("\n");
-        List<IntegrationDatasetService.ObjectBindingView> objects = dataset.objectBindings() == null
-                ? List.of()
-                : dataset.objectBindings();
-        if (!objects.isEmpty()) {
-            builder.append("对象列表：\n");
-            builder.append("- 重要：SQL 中必须使用 objectCode 作为表名，不能使用中文 objectName。\n");
-            objects.stream().limit(10).forEach(item -> builder.append("- ")
-                    .append(defaultText(item.objectName()))
-                    .append(" (")
-                    .append(defaultText(item.objectCode()))
-                    .append(")")
-                    .append(StringUtils.hasText(item.objectSource()) ? " 来源=" + item.objectSource() : "")
-                    .append("\n"));
-        }
-        List<IntegrationDatasetService.FieldBindingView> fields = dataset.fieldBindings() == null
-                ? List.of()
-                : dataset.fieldBindings();
-        if (!fields.isEmpty()) {
-            builder.append("字段列表：\n");
-            builder.append("- 重要：SQL 中使用的字段必须来自这里或 get_dataset_schema 工具返回结果，不能自行想象字段。\n");
-            fields.stream().limit(30).forEach(item -> builder.append("- ")
-                    .append(defaultText(item.objectName()))
-                    .append(".")
-                    .append(defaultText(item.fieldName()))
-                    .append(StringUtils.hasText(item.fieldAlias()) ? "（别名=" + item.fieldAlias() + "）" : "")
-                    .append(StringUtils.hasText(item.fieldType()) ? " 类型=" + item.fieldType() : "")
-                    .append(StringUtils.hasText(item.fieldScope()) ? " 范围=" + item.fieldScope() : "")
-                    .append("\n"));
-        }
-        List<IntegrationDatasetService.RelationBindingView> relations = dataset.relationBindings() == null
-                ? List.of()
-                : dataset.relationBindings();
-        if (!relations.isEmpty()) {
-            builder.append("关系列表：\n");
-            relations.stream().limit(20).forEach(item -> builder.append("- ")
-                    .append(defaultText(item.leftObjectCode()))
-                    .append(".")
-                    .append(defaultText(item.leftFieldName()))
-                    .append(" -> ")
-                    .append(defaultText(item.rightObjectCode()))
-                    .append(".")
-                    .append(defaultText(item.rightFieldName()))
-                    .append("\n"));
-        }
-        return builder.toString().trim();
-    }
-
-    private String resolveDatasetSqlDialect(IntegrationDatasetService.DatasetDetail dataset) {
-        if (dataset == null) {
-            return "MYSQL";
-        }
-        String sourceKind = StringUtils.hasText(dataset.sourceKind()) ? dataset.sourceKind().trim() : "";
-        if ("LOWCODE_APP".equalsIgnoreCase(sourceKind)) {
-            return "MYSQL";
-        }
-        if (!"AI_SOURCE".equalsIgnoreCase(sourceKind) || dataset.aiDataSourceId() == null) {
-            return "MYSQL";
-        }
-        IntegrationDataSource dataSource = integrationDataSourceMapper.selectById(dataset.aiDataSourceId());
-        if (dataSource == null || !StringUtils.hasText(dataSource.getDbType())) {
-            return "MYSQL";
-        }
-        return dataSource.getDbType().trim().toUpperCase();
-    }
-
-    private String defaultText(String value) {
-        return StringUtils.hasText(value) ? value.trim() : "无";
-    }
-
-    private ServerSentEvent<String> metaEvent(Map<String, Object> content) {
-        return typedEvent("meta", "meta", content);
-    }
-
-    private ServerSentEvent<String> messageEvent(String content) {
-        return typedEvent("message", "message", content);
+        return "[空请求]";
     }
 
     private ServerSentEvent<String> errorEvent(String error) {
-        return typedEvent("error", "error", error);
+        return ChatSseEventBuilder.error(error);
     }
 
-    private ServerSentEvent<String> doneEvent() {
-        return typedEvent("done", "done", "[DONE]");
-    }
-
-    private ServerSentEvent<String> typedEvent(String eventName, String type, Object content) {
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("type", type);
-        payload.put("content", content);
-        return ServerSentEvent.builder(JSON.toJSONString(payload)).event(eventName).build();
-    }
-
-    private record PreparedChat(
-            ConversationSessionType sessionType,
+    public record GeneralChatRequest(
+            String message,
+            List<String> fileIds,
             String sessionId,
-            Long scopeId,
-            String scopeDisplayName,
-            String query,
-            String userMessage,
             String messageType,
-            String questionType,
-            String paramsJson,
-            String fileListJson,
-            List<ToolCallback> toolCallbacks,
-            String systemPrompt,
-            String runtimeSkillName) {}
-
-    public record GeneralChatRequest(String message, List<String> fileIds, String sessionId) {}
+            Map<String, Object> eventPayload,
+            String systemPromptAppend,
+            Map<String, Object> options,
+            Long mentionedSkillId,
+            Long chatModelId) {}
 
     public record SkillChatRequest(
             Long skillId,
@@ -884,7 +294,27 @@ public class ChatConversationService {
             List<String> fileIds,
             String sessionId,
             String messageType,
-            Map<String, Object> eventPayload) {}
+            Map<String, Object> eventPayload,
+            String systemPromptAppend,
+            Map<String, Object> options) {}
 
-    public record DatasetChatRequest(String message, String sessionId) {}
+    public record ExpertPackageChatRequest(
+            Long packageId,
+            String message,
+            List<String> fileIds,
+            String sessionId,
+            String messageType,
+            Map<String, Object> eventPayload,
+            String systemPromptAppend,
+            Map<String, Object> options,
+            Long mentionedSkillId,
+            Long chatModelId) {}
+
+    public record DatasetChatRequest(
+            String message,
+            String sessionId,
+            String messageType,
+            Map<String, Object> eventPayload,
+            String systemPromptAppend,
+            Map<String, Object> options) {}
 }

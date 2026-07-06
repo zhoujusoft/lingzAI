@@ -7,7 +7,6 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import java.util.Date;
 import lingzhou.agent.backend.business.datasets.domain.VO.FileListModel;
-import lingzhou.agent.backend.framework.web.BaseEntity;
 
 /**
  * 存储文档信息对象 knowledge_document
@@ -28,7 +27,8 @@ public class KnowledgeDocument {
 
     private String name;
 
-    private String fileId;
+    @TableField("file_id")
+    private String objectName;
 
     private String fileType;
 
@@ -96,12 +96,12 @@ public class KnowledgeDocument {
         this.name = name;
     }
 
-    public String getFileId() {
-        return fileId;
+    public String getObjectName() {
+        return objectName;
     }
 
-    public void setFileId(String fileId) {
-        this.fileId = fileId;
+    public void setObjectName(String objectName) {
+        this.objectName = objectName;
     }
 
     public String getFileType() {
@@ -201,6 +201,6 @@ public class KnowledgeDocument {
     }
 
     public FileListModel setFileListModel() {
-        return new FileListModel(getDocId(), getName(), getFileId());
+        return new FileListModel(getDocId(), getName(), getObjectName());
     }
 }

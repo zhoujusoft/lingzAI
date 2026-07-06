@@ -139,10 +139,8 @@ public class ChineseHeadingAnalyzer {
         }
         // 一级标题：1 标题、一、标题、（一）标题
         if ((t.matches("^\\d+\\s+.*") && hasReasonableHeadingTail(t, "^\\d+\\s+"))
-                || (t.matches("^[一二三四五六七八九十]+[、.]\\s*.*")
-                        && hasReasonableHeadingTail(t, "^[一二三四五六七八九十]+[、.]\\s*"))
-                || (t.matches("^（[一二三四五六七八九十]+）\\s+.*")
-                        && hasReasonableHeadingTail(t, "^（[一二三四五六七八九十]+）\\s+"))) {
+                || (t.matches("^[一二三四五六七八九十]+[、.]\\s*.*") && hasReasonableHeadingTail(t, "^[一二三四五六七八九十]+[、.]\\s*"))
+                || (t.matches("^（[一二三四五六七八九十]+）\\s+.*") && hasReasonableHeadingTail(t, "^（[一二三四五六七八九十]+）\\s+"))) {
             return 1;
         }
         if (t.matches("^第[一二三四五六七八九十百千万零0-9]+章\\s*.*")) {
@@ -201,8 +199,7 @@ public class ChineseHeadingAnalyzer {
             return 2;
         }
 
-        if (text.matches("^第?[一二三四五六七八九十百千万零0-9]+条\\s*.*")
-                || text.matches("^第?[一二三四五六七八九十百千万零0-9]+款\\s*.*")) {
+        if (text.matches("^第?[一二三四五六七八九十百千万零0-9]+条\\s*.*") || text.matches("^第?[一二三四五六七八九十百千万零0-9]+款\\s*.*")) {
             return 3;
         }
 

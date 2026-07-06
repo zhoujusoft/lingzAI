@@ -72,7 +72,11 @@ function getSemanticClasses(meta, type) {
 function getColumnClass(column, type) {
     const meta = getColumnMeta(column);
     const customClass = type === 'th' ? meta.thClass : meta.tdClass;
-    return [type === 'th' ? BASE_TH_CLASS : BASE_TD_CLASS, getSemanticClasses(meta, type), customClass];
+    return [
+        type === 'th' ? BASE_TH_CLASS : BASE_TD_CLASS,
+        getSemanticClasses(meta, type),
+        customClass,
+    ];
 }
 
 function getColumnStyle(column) {
@@ -103,7 +107,10 @@ function getColumnStyle(column) {
                     <th
                         v-for="header in headerGroup.headers"
                         :key="header.id"
-                        :class="[getColumnClass(header.column, 'th'), 'border-b border-slate-100 align-middle']"
+                        :class="[
+                            getColumnClass(header.column, 'th'),
+                            'border-b border-slate-100 align-middle',
+                        ]"
                         :style="getColumnStyle(header.column)"
                     >
                         <FlexRender

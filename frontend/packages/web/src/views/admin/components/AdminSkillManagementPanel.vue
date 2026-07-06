@@ -15,13 +15,6 @@ function backToList() {
 </script>
 
 <template>
-    <AdminSkillCatalogListPanel
-        v-if="!selectedSkillId"
-        @open-skill-detail="openSkillDetail"
-    />
-    <AdminSkillCatalogDetailPanel
-        v-else
-        :skill-id="selectedSkillId"
-        @back="backToList"
-    />
+    <AdminSkillCatalogListPanel v-if="!selectedSkillId" @open-skill-detail="openSkillDetail" />
+    <AdminSkillCatalogDetailPanel v-else :skill-id="selectedSkillId" @back="backToList" />
 </template>

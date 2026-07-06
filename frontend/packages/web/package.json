@@ -9,13 +9,27 @@
         "preview": "vite preview"
     },
     "dependencies": {
+        "@codemirror/lang-json": "^6.0.2",
+        "@codemirror/lang-markdown": "^6.5.0",
+        "@codemirror/lang-python": "^6.2.1",
+        "@codemirror/lang-yaml": "^6.1.3",
+        "@codemirror/language": "^6.12.3",
+        "@codemirror/state": "^6.6.0",
+        "@codemirror/view": "^6.41.1",
         "@headlessui/vue": "^1.7.23",
         "@lingzhou/core": "workspace:*",
         "@tanstack/vue-table": "^8.21.3",
+        "@vue-office/docx": "1.6.3",
+        "@vue-office/excel": "1.7.14",
+        "@vue-office/pdf": "2.0.10",
+        "@vue-office/pptx": "1.0.1",
         "axios": "^1.13.6",
+        "codemirror": "^6.0.2",
         "marked": "^12.0.2",
         "vue": "^3.4.0",
-        "vue-router": "4.6.4"
+        "vue-demi": "0.14.6",
+        "vue-router": "4.6.4",
+        "vue-virtual-scroller": "^3.0.4"
     },
     "devDependencies": {
         "@vitejs/plugin-vue": "^5.0.4",

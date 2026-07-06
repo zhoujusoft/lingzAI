@@ -5,6 +5,7 @@ import lingzhou.agent.backend.business.datasets.domain.KnowledgeBase;
 import lingzhou.agent.backend.business.skill.mapper.SkillToolBindingMapper;
 import lingzhou.agent.backend.business.tool.domain.ToolCatalog;
 import lingzhou.agent.backend.business.tool.mapper.ToolCatalogMapper;
+import lingzhou.agent.backend.common.permission.ResourcePermissionSupport;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -45,14 +46,35 @@ public class KnowledgeBaseToolPublishService {
         toolCatalog.setDescription(seed.description());
         toolCatalog.setToolType(TOOL_TYPE_KNOWLEDGE_BASE);
         toolCatalog.setBindable(1);
+        if (toolCatalog.getEnabledGlobal() == null) {
+            toolCatalog.setEnabledGlobal(0);
+        }
         toolCatalog.setOwnerSkillName(null);
         toolCatalog.setSource(buildSource(kbCode));
+        toolCatalog.setOwnerUserId(knowledgeBase.getOwnerUserId());
+        toolCatalog.setPermissionScope(normalizePermissionScope(knowledgeBase.getPermissionScope()));
         if (toolCatalog.getId() == null) {
             toolCatalogMapper.insert(toolCatalog);
         } else {
             toolCatalogMapper.updateById(toolCatalog);
         }
         return List.of(seed.toolName());
+    }
+
+    public void syncPermissions(KnowledgeBase knowledgeBase) {
+        if (knowledgeBase == null || !StringUtils.hasText(knowledgeBase.getKbCode())) {
+            return;
+        }
+        List<ToolCatalog> tools = toolCatalogMapper.selectBySource(buildSource(knowledgeBase.getKbCode()));
+        if (tools.isEmpty()) {
+            return;
+        }
+        Integer normalizedPermissionScope = normalizePermissionScope(knowledgeBase.getPermissionScope());
+        for (ToolCatalog tool : tools) {
+            tool.setOwnerUserId(knowledgeBase.getOwnerUserId());
+            tool.setPermissionScope(normalizedPermissionScope);
+            toolCatalogMapper.updateById(tool);
+        }
     }
 
     public void disable(String kbCode) {
@@ -97,6 +119,10 @@ public class KnowledgeBaseToolPublishService {
 
     private String normalizeText(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    private Integer normalizePermissionScope(Integer value) {
+        return ResourcePermissionSupport.normalizeScope(value);
     }
 
     private record PublishedToolSeed(String toolName, String displayName, String description, int sortOrder) {}

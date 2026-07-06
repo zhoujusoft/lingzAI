@@ -59,7 +59,8 @@ public class RequestIdFilter extends OncePerRequestFilter {
     }
 
     private boolean isValidUuidV7(String requestId) {
-        return StringUtils.hasText(requestId) && UUID_V7_LOWER_PATTERN.matcher(requestId).matches();
+        return StringUtils.hasText(requestId)
+                && UUID_V7_LOWER_PATTERN.matcher(requestId).matches();
     }
 
     private String maskRequestId(String requestId) {

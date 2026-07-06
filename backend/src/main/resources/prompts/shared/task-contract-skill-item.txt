@@ -1,0 +1,1 @@
+- 技能：{{displayName}} (`{{skillName}}`){{capabilitiesLine}}

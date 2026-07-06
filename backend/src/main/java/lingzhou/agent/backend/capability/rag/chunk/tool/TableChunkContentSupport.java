@@ -28,7 +28,9 @@ public final class TableChunkContentSupport {
     }
 
     public static String formatTextContent(List<String> headings, String content) {
-        return joinMarkdownBlocks(buildHeadingMarkdown(headings), StringUtils.defaultString(content).trim());
+        return joinMarkdownBlocks(
+                buildHeadingMarkdown(headings),
+                StringUtils.defaultString(content).trim());
     }
 
     public static String formatTableContent(List<String> headings, String caption, String htmlContent) {
@@ -74,7 +76,8 @@ public final class TableChunkContentSupport {
     }
 
     public static boolean isTableBlock(String blockType) {
-        return TABLE_BLOCK_TYPE.equalsIgnoreCase(StringUtils.defaultString(blockType).trim());
+        return TABLE_BLOCK_TYPE.equalsIgnoreCase(
+                StringUtils.defaultString(blockType).trim());
     }
 
     private static String buildHeadingMarkdown(List<String> headings) {

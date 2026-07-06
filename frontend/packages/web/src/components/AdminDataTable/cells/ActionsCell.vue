@@ -55,7 +55,10 @@ function handleClick(action) {
             :key="action.key || (typeof action.label === 'string' ? action.label : index)"
             type="button"
             :disabled="isDisabled(action)"
-            :class="[resolveClass(action), isDisabled(action) ? 'cursor-not-allowed opacity-50' : '']"
+            :class="[
+                resolveClass(action),
+                isDisabled(action) ? 'cursor-not-allowed opacity-50' : '',
+            ]"
             @click="handleClick(action)"
         >
             {{ resolveText(action) }}

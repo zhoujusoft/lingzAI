@@ -4,9 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import lingzhou.agent.backend.capability.rag.chunk.config.ChunkRequest;
 import lingzhou.agent.backend.capability.rag.chunk.config.ChunkStrategy;
@@ -17,8 +17,8 @@ import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
-import org.apache.poi.xwpf.usermodel.XWPFTable;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.apache.poi.xwpf.usermodel.XWPFTable;
 import org.junit.jupiter.api.Test;
 
 class DocumentParseChunkServiceV2Tests {
@@ -26,7 +26,7 @@ class DocumentParseChunkServiceV2Tests {
     private final DocumentParseChunkServiceV2 service =
             new DocumentParseChunkServiceV2(new DocumentTextExtractorFactory());
 
-//    @Test
+    //    @Test
     void delimiterWindowKeepsOverlapWhenNextSegmentIsLong() throws Exception {
         ChunkRequest request = new ChunkRequest();
         request.setStrategy(ChunkStrategy.DELIMITER_WINDOW);
@@ -97,7 +97,9 @@ class DocumentParseChunkServiceV2Tests {
                 service.parseAndChunk(new ByteArrayInputStream(pdfBytes), "sample.pdf", request);
 
         assertThat(sections).hasSize(2);
-        assertThat(sections).extracting(ChunkedSection::getContent).noneMatch(content -> content.contains("Employee Handbook"));
+        assertThat(sections)
+                .extracting(ChunkedSection::getContent)
+                .noneMatch(content -> content.contains("Employee Handbook"));
         assertThat(sections).extracting(ChunkedSection::getContent).noneMatch(content -> content.contains("Contents"));
         assertThat(sections.get(0).getHeadings()).containsExactly("1 General");
         assertThat(sections.get(0).getContent()).startsWith("## 1 General");
@@ -135,7 +137,7 @@ class DocumentParseChunkServiceV2Tests {
                 .contains("试验项目 | 要求");
     }
 
-//    @Test
+    //    @Test
     void lawModeKeepsArticleOpeningSentenceInsideArticleChunk() throws Exception {
         Path docxPath = Path.of("/Users/xiehb/Downloads/国家法律法规数据库_批量下载_20260323_160656/中华人民共和国教育法_20210429.docx");
         assertThat(Files.exists(docxPath)).isTrue();
@@ -149,7 +151,8 @@ class DocumentParseChunkServiceV2Tests {
         request.setArticleMaxChars(1800);
         request.setClauseSplitThreshold(2200);
 
-        List<ChunkedSection> sections = service.parseAndChunk(Files.newInputStream(docxPath), "中华人民共和国教育法_20210429.docx", request);
+        List<ChunkedSection> sections =
+                service.parseAndChunk(Files.newInputStream(docxPath), "中华人民共和国教育法_20210429.docx", request);
 
         ChunkedSection articleTwelve = sections.stream()
                 .filter(section -> section.getHeadings() != null
@@ -158,7 +161,8 @@ class DocumentParseChunkServiceV2Tests {
                 .orElseThrow();
 
         assertThat(articleTwelve.getHeadings())
-                .anyMatch(heading -> heading.replace('\u3000', ' ').replaceAll("\\s+", "").contains("第一章总则"));
+                .anyMatch(heading ->
+                        heading.replace('\u3000', ' ').replaceAll("\\s+", "").contains("第一章总则"));
         assertThat(articleTwelve.getHeadings()).doesNotContain("第一条");
         assertThat(articleTwelve.getContent()).contains("第十二条");
         assertThat(articleTwelve.getContent()).contains("国家通用语言文字为学校及其他教育机构的基本教育教学语言文字");
@@ -168,7 +172,8 @@ class DocumentParseChunkServiceV2Tests {
     }
 
     private byte[] buildDocx(List<String> paragraphs) throws Exception {
-        try (XWPFDocument document = new XWPFDocument(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+        try (XWPFDocument document = new XWPFDocument();
+                ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             for (String paragraph : paragraphs) {
                 document.createParagraph().createRun().setText(paragraph);
             }
@@ -178,7 +183,8 @@ class DocumentParseChunkServiceV2Tests {
     }
 
     private byte[] buildDocxWithTable() throws Exception {
-        try (XWPFDocument document = new XWPFDocument(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+        try (XWPFDocument document = new XWPFDocument();
+                ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             document.createParagraph().createRun().setText("电力变压器试验标准");
             document.createParagraph().createRun().setText("3 油浸式电力变压器试验");
             document.createParagraph().createRun().setText("本章说明。");
@@ -198,7 +204,8 @@ class DocumentParseChunkServiceV2Tests {
     }
 
     private byte[] buildPdf(List<String> lines) throws Exception {
-        try (PDDocument document = new PDDocument(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+        try (PDDocument document = new PDDocument();
+                ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             PDPage page = new PDPage();
             document.addPage(page);
 

@@ -13,4 +13,10 @@ public interface SystemConfigMapper extends BaseMapper<SystemConfigModel> {
                 .eq(SystemConfigModel::getConfigKey, configKey)
                 .last("limit 1"));
     }
+
+    default SystemConfigModel selectByConfigKeyForUpdate(String configKey) {
+        return this.selectOne(new LambdaQueryWrapper<SystemConfigModel>()
+                .eq(SystemConfigModel::getConfigKey, configKey)
+                .last("limit 1 FOR UPDATE"));
+    }
 }

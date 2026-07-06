@@ -1,17 +1,19 @@
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import AppSelect from '@/components/AppSelect.vue';
 import BaseModal from '@/components/feedback/BaseModal.vue';
-import { alert } from '@/composables/useModal';
+import { alert, confirm } from '@/composables/useModal';
 import { clearUserSession } from '@/composables/useCurrentUser';
 import {
     createModelLibraryModel,
+    deleteModelLibraryModel,
     listModelLibraryDefaults,
     listModelLibraryModels,
     listModelLibraryVendors,
     saveModelLibraryDefaultBinding,
     updateModelLibraryModel,
+    validateModelLibraryModel,
     validateModelLibraryVendor,
     updateModelLibraryVendor,
 } from '@/api/model-library';
@@ -600,8 +602,10 @@ function openCreateModelModal(vendorId = '') {
         vendorId: vendorId || vendors.value[0]?.id || '',
     });
     applyModelTemplateDefaults(true);
-    suppressModelTemplateSync.value = false;
     modelModalOpen.value = true;
+    nextTick(() => {
+        suppressModelTemplateSync.value = false;
+    });
 }
 
 function openEditModelModal(item) {
@@ -615,7 +619,10 @@ function openEditModelModal(item) {
         capabilityType: item?.capabilityType || 'CHAT',
         vendorId: item?.vendorId || vendors.value[0]?.id || '',
         baseUrl: item?.baseUrl || '',
-        baseUrlDirty: false,
+        // Preserve model-level Base URL when reopening edit mode; otherwise the
+        // vendor/capability sync watcher will immediately overwrite it with the
+        // vendor default URL before the user changes anything.
+        baseUrlDirty: Boolean(item?.baseUrl),
         apiKey: '',
         apiKeyDirty: false,
         modelName: item?.modelName || '',
@@ -626,25 +633,22 @@ function openEditModelModal(item) {
                 ? ''
                 : String(item.temperature),
         maxTokens:
-            item?.maxTokens === null || item?.maxTokens === undefined
-                ? ''
-                : String(item.maxTokens),
+            item?.maxTokens === null || item?.maxTokens === undefined ? '' : String(item.maxTokens),
         systemPrompt: item?.systemPrompt || '',
         dimensions:
             item?.dimensions === null || item?.dimensions === undefined
                 ? ''
                 : String(item.dimensions),
         timeoutMs:
-            item?.timeoutMs === null || item?.timeoutMs === undefined
-                ? ''
-                : String(item.timeoutMs),
-        fallbackRrf:
-            typeof item?.fallbackRrf === 'boolean' ? item.fallbackRrf : true,
+            item?.timeoutMs === null || item?.timeoutMs === undefined ? '' : String(item.timeoutMs),
+        fallbackRrf: typeof item?.fallbackRrf === 'boolean' ? item.fallbackRrf : true,
         apiKeyConfigured: Boolean(item?.apiKeyConfigured),
     });
     applyModelTemplateDefaults(false);
-    suppressModelTemplateSync.value = false;
     modelModalOpen.value = true;
+    nextTick(() => {
+        suppressModelTemplateSync.value = false;
+    });
 }
 
 function buildModelPayload() {
@@ -656,6 +660,7 @@ function buildModelPayload() {
         return Number.isFinite(parsed) ? parsed : null;
     };
     return {
+        modelId: modelEditingId.value || null,
         modelCode: modelForm.modelCode || '',
         displayName: modelForm.displayName,
         capabilityType: modelForm.capabilityType,
@@ -666,20 +671,12 @@ function buildModelPayload() {
         status: 'ACTIVE',
         protocol: showRerankAdvancedFields() ? modelForm.protocol : '',
         path: modelForm.path,
-        temperature: showChatAdvancedFields()
-            ? normalizeNumber(modelForm.temperature)
-            : null,
-        maxTokens: showChatAdvancedFields()
-            ? normalizeNumber(modelForm.maxTokens)
-            : null,
+        temperature: showChatAdvancedFields() ? normalizeNumber(modelForm.temperature) : null,
+        maxTokens: showChatAdvancedFields() ? normalizeNumber(modelForm.maxTokens) : null,
         systemPrompt: showChatAdvancedFields() ? modelForm.systemPrompt : '',
         enableThinking: null,
-        dimensions: showEmbeddingAdvancedFields()
-            ? normalizeNumber(modelForm.dimensions)
-            : null,
-        timeoutMs: showRerankAdvancedFields()
-            ? normalizeNumber(modelForm.timeoutMs)
-            : null,
+        dimensions: showEmbeddingAdvancedFields() ? normalizeNumber(modelForm.dimensions) : null,
+        timeoutMs: showRerankAdvancedFields() ? normalizeNumber(modelForm.timeoutMs) : null,
         fallbackRrf: showRerankAdvancedFields() ? Boolean(modelForm.fallbackRrf) : null,
     };
 }
@@ -715,6 +712,7 @@ async function handleSaveModel() {
     modelSaveError.value = '';
     try {
         const payload = buildModelPayload();
+        await validateModelLibraryModel(payload, handleUnauthorized);
         if (modelEditingId.value) {
             await updateModelLibraryModel(modelEditingId.value, payload, handleUnauthorized);
         } else {
@@ -726,6 +724,35 @@ async function handleSaveModel() {
         modelSaveError.value = error?.message || '模型保存失败';
     } finally {
         modelSaving.value = false;
+    }
+}
+
+async function handleDeleteModel(item) {
+    if (!item?.id) {
+        return;
+    }
+    const confirmed = await confirm({
+        title: '删除模型',
+        message: `确认删除模型“${item.displayName || item.modelName || item.modelCode}”吗？删除后不可恢复。`,
+        confirmText: '删除',
+        cancelText: '取消',
+        destructive: true,
+    });
+    if (!confirmed) {
+        return;
+    }
+    try {
+        await deleteModelLibraryModel(item.id, handleUnauthorized);
+        if (modelEditingId.value === item.id) {
+            modelModalOpen.value = false;
+        }
+        await Promise.all([loadVendors(), loadAllModels(), loadDefaults()]);
+    } catch (error) {
+        await alert({
+            title: '删除失败',
+            message: error?.message || '模型删除失败',
+            destructive: true,
+        });
     }
 }
 
@@ -821,13 +848,10 @@ onMounted(loadPage);
 
 <template>
     <section class="flex h-full min-h-0 flex-col bg-slate-50">
-        <header class="border-b border-slate-200 bg-white px-8 py-6">
+        <header class="border-b border-slate-200 bg-white px-8 py-5">
             <div class="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
                 <div>
-                    <p class="text-xs font-semibold uppercase tracking-[0.32em] text-slate-400">
-                        Model Library
-                    </p>
-                    <h2 class="mt-3 text-3xl font-bold tracking-tight text-slate-900">模型库</h2>
+                    <h2 class="text-3xl font-bold tracking-tight text-slate-900">模型库</h2>
                     <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
                         管理模型厂商、内置模型与自定义模型，默认模型通过右上角入口统一配置。
                     </p>
@@ -927,10 +951,7 @@ onMounted(loadPage);
                         <!-- Left: Model List -->
                         <div class="w-1/2 border-r border-slate-100 p-4">
                             <div class="mb-3 flex items-center justify-between">
-                                <span
-                                    class="text-xs font-semibold uppercase tracking-wider text-slate-400"
-                                    >可用模型</span
-                                >
+                                <span class="text-xs font-semibold text-slate-400">可用模型</span>
                                 <button
                                     type="button"
                                     class="text-xs font-semibold text-primary transition-colors hover:text-primary-dim"
@@ -1004,6 +1025,15 @@ onMounted(loadPage);
                                                 >edit</span
                                             >
                                         </button>
+                                        <button
+                                            type="button"
+                                            class="rounded-full p-1 text-slate-400 opacity-0 transition hover:bg-rose-50 hover:text-rose-600 group-hover:opacity-100"
+                                            @click.stop="handleDeleteModel(item)"
+                                        >
+                                            <span class="material-symbols-outlined text-[16px]"
+                                                >delete</span
+                                            >
+                                        </button>
                                     </div>
                                 </div>
                             </div>
@@ -1011,8 +1041,7 @@ onMounted(loadPage);
 
                         <!-- Right: Vendor Config -->
                         <div class="w-1/2 bg-slate-50/50 p-4">
-                            <span
-                                class="mb-3 block text-xs font-semibold uppercase tracking-wider text-slate-400"
+                            <span class="mb-3 block text-xs font-semibold text-slate-400"
                                 >厂商配置</span
                             >
                             <div class="space-y-3">
@@ -1187,10 +1216,7 @@ onMounted(loadPage);
                             </p>
                         </label>
 
-                        <label
-                            v-if="showBasicPathField()"
-                            class="block space-y-2 md:col-span-2"
-                        >
+                        <label v-if="showBasicPathField()" class="block space-y-2 md:col-span-2">
                             <span class="text-sm font-semibold text-slate-600">请求路径</span>
                             <input
                                 v-model.trim="modelForm.path"
@@ -1202,7 +1228,6 @@ onMounted(loadPage);
                                 {{ modelPathHint() }}
                             </p>
                         </label>
-
                     </div>
 
                     <section class="rounded-2xl border border-slate-200 bg-slate-50/80">
@@ -1228,7 +1253,9 @@ onMounted(loadPage);
                                     v-if="showAdvancedConnectionFields()"
                                     class="block space-y-2"
                                 >
-                                    <span class="text-sm font-semibold text-slate-600">Base URL</span>
+                                    <span class="text-sm font-semibold text-slate-600"
+                                        >Base URL</span
+                                    >
                                     <input
                                         type="text"
                                         class="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
@@ -1245,14 +1272,17 @@ onMounted(loadPage);
                                     v-if="showAdvancedConnectionFields()"
                                     class="block space-y-2"
                                 >
-                                    <span class="text-sm font-semibold text-slate-600">API Key</span>
+                                    <span class="text-sm font-semibold text-slate-600"
+                                        >API Key</span
+                                    >
                                     <input
                                         type="password"
                                         class="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
                                         :placeholder="
                                             modelForm.apiKeyConfigured
                                                 ? '已配置，重新输入后将覆盖当前值'
-                                                : resolveModelVendorCode(modelForm.vendorId) === 'VLLM'
+                                                : resolveModelVendorCode(modelForm.vendorId) ===
+                                                    'VLLM'
                                                   ? '可选；无鉴权部署可留空'
                                                   : '如需单独覆盖，可在此输入模型级 API Key'
                                         "
@@ -1273,7 +1303,9 @@ onMounted(loadPage);
                                     v-if="showAdvancedPathField()"
                                     class="block space-y-2 md:col-span-2"
                                 >
-                                    <span class="text-sm font-semibold text-slate-600">请求路径</span>
+                                    <span class="text-sm font-semibold text-slate-600"
+                                        >请求路径</span
+                                    >
                                     <input
                                         v-model.trim="modelForm.path"
                                         type="text"
@@ -1285,11 +1317,10 @@ onMounted(loadPage);
                                     </p>
                                 </label>
 
-                                <label
-                                    v-if="showChatAdvancedFields()"
-                                    class="block space-y-2"
-                                >
-                                    <span class="text-sm font-semibold text-slate-600">temperature</span>
+                                <label v-if="showChatAdvancedFields()" class="block space-y-2">
+                                    <span class="text-sm font-semibold text-slate-600"
+                                        >temperature</span
+                                    >
                                     <input
                                         v-model.trim="modelForm.temperature"
                                         type="number"
@@ -1300,11 +1331,10 @@ onMounted(loadPage);
                                     />
                                 </label>
 
-                                <label
-                                    v-if="showChatAdvancedFields()"
-                                    class="block space-y-2"
-                                >
-                                    <span class="text-sm font-semibold text-slate-600">maxTokens</span>
+                                <label v-if="showChatAdvancedFields()" class="block space-y-2">
+                                    <span class="text-sm font-semibold text-slate-600"
+                                        >maxTokens</span
+                                    >
                                     <input
                                         v-model.trim="modelForm.maxTokens"
                                         type="number"
@@ -1313,11 +1343,10 @@ onMounted(loadPage);
                                     />
                                 </label>
 
-                                <label
-                                    v-if="showEmbeddingAdvancedFields()"
-                                    class="block space-y-2"
-                                >
-                                    <span class="text-sm font-semibold text-slate-600">dimensions</span>
+                                <label v-if="showEmbeddingAdvancedFields()" class="block space-y-2">
+                                    <span class="text-sm font-semibold text-slate-600"
+                                        >dimensions</span
+                                    >
                                     <input
                                         v-model.trim="modelForm.dimensions"
                                         type="number"
@@ -1326,10 +1355,7 @@ onMounted(loadPage);
                                     />
                                 </label>
 
-                                <label
-                                    v-if="showRerankAdvancedFields()"
-                                    class="block space-y-2"
-                                >
+                                <label v-if="showRerankAdvancedFields()" class="block space-y-2">
                                     <span class="text-sm font-semibold text-slate-600">协议</span>
                                     <AppSelect
                                         v-model="modelForm.protocol"
@@ -1338,11 +1364,10 @@ onMounted(loadPage);
                                     />
                                 </label>
 
-                                <label
-                                    v-if="showRerankAdvancedFields()"
-                                    class="block space-y-2"
-                                >
-                                    <span class="text-sm font-semibold text-slate-600">timeoutMs</span>
+                                <label v-if="showRerankAdvancedFields()" class="block space-y-2">
+                                    <span class="text-sm font-semibold text-slate-600"
+                                        >timeoutMs</span
+                                    >
                                     <input
                                         v-model.trim="modelForm.timeoutMs"
                                         type="number"
@@ -1356,7 +1381,9 @@ onMounted(loadPage);
                                     class="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3.5 py-3 md:col-span-2"
                                 >
                                     <div>
-                                        <p class="text-sm font-semibold text-slate-700">Rerank 失败时回退 RRF</p>
+                                        <p class="text-sm font-semibold text-slate-700">
+                                            Rerank 失败时回退 RRF
+                                        </p>
                                         <p class="mt-1 text-xs text-slate-400">
                                             默认开启，避免重排序服务偶发异常直接影响检索结果。
                                         </p>

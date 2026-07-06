@@ -45,10 +45,7 @@
             @back="backToKnowledgeSegment"
             @go-document="goKnowledgeDocument"
         />
-        <div
-            v-else
-            class="flex flex-1 items-center justify-center text-sm text-slate-400"
-        >
+        <div v-else class="flex flex-1 items-center justify-center text-sm text-slate-400">
             暂无可展示内容
         </div>
     </div>
@@ -56,6 +53,8 @@
 
 <script setup>
 import { ref } from 'vue';
+import { currentUserState } from '@/composables/useCurrentUser';
+import { canOperateKnowledgeBase } from '@/model/knowledge-permissions';
 import AdminKnowledgePanel from '@/views/admin/components/AdminKnowledgePanel.vue';
 import AdminKnowledgeDetailPanel from '@/views/admin/components/AdminKnowledgeDetailPanel.vue';
 import AdminKnowledgeDocumentDetailPanel from '@/views/admin/components/AdminKnowledgeDocumentDetailPanel.vue';
@@ -69,6 +68,10 @@ const selectedDocument = ref(null);
 const knowledgePageMode = ref('detail');
 const isCreatingKnowledge = ref(false);
 
+function canOperateKnowledge(item) {
+    return canOperateKnowledgeBase(item, currentUserState.profile);
+}
+
 function openKnowledgeDetail(item) {
     selectedKnowledge.value = item;
     selectedDocument.value = null;
@@ -77,14 +80,19 @@ function openKnowledgeDetail(item) {
 }
 
 function openKnowledgeEdit(item) {
-    if (item) {
-        selectedKnowledge.value = item;
+    const target = item || selectedKnowledge.value;
+    if (!target || !canOperateKnowledge(target)) {
+        return;
     }
+    selectedKnowledge.value = item || selectedKnowledge.value;
     knowledgePageMode.value = 'upload';
     isCreatingKnowledge.value = false;
 }
 
 function openKnowledgeRecallTest(item) {
+    if (!canOperateKnowledge(item)) {
+        return;
+    }
     selectedKnowledge.value = item;
     selectedDocument.value = null;
     knowledgePageMode.value = 'recall-test';
@@ -95,6 +103,7 @@ function openCreateKnowledge() {
     selectedKnowledge.value = {
         name: '',
         kbCode: '',
+        permissionScope: 3,
     };
     selectedDocument.value = null;
     knowledgePageMode.value = 'upload';
@@ -155,9 +164,11 @@ function handleKnowledgeProcessSubmitted(knowledge) {
 }
 
 function handleKnowledgeProcessRequest(knowledge) {
-    if (knowledge) {
-        selectedKnowledge.value = knowledge;
+    const target = knowledge || selectedKnowledge.value;
+    if (!target || !canOperateKnowledge(target)) {
+        return;
     }
+    selectedKnowledge.value = knowledge || selectedKnowledge.value;
     knowledgePageMode.value = 'segment';
 }
 

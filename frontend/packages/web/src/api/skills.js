@@ -18,6 +18,9 @@ export async function listSkillCatalogs(params = {}, onUnauthorized) {
     return Array.isArray(data) ? data : [];
 }
 
+// 别名，用于兼容单数形式的导入
+export const listSkillCatalog = listSkillCatalogs;
+
 export async function listSkillTools(onUnauthorized) {
     const { data } = await doRequestJson('/api/skills/tools', {
         method: 'GET',
@@ -27,13 +30,46 @@ export async function listSkillTools(onUnauthorized) {
     return Array.isArray(data) ? data : [];
 }
 
-export async function listMcpServers(onUnauthorized) {
-    const { data } = await doRequestJson('/api/skills/mcp/servers', {
-        method: 'GET',
+export async function updateSkillTool(toolName, payload, onUnauthorized) {
+    const { data } = await doRequestJson(`/api/skills/tools/${encodeURIComponent(toolName)}`, {
+        method: 'PUT',
+        body: payload,
+        auth: true,
+        onUnauthorized,
+    });
+    return data;
+}
+
+export async function batchUpdateSkillTools(toolNames, payload, onUnauthorized) {
+    const { data } = await doRequestJson('/api/skills/tools/batch-global', {
+        method: 'PUT',
+        body: { toolNames, ...payload },
         auth: true,
         onUnauthorized,
     });
     return Array.isArray(data) ? data : [];
+}
+
+export async function listMcpServerPage(
+    { page = 1, pageSize = 10, keyword = '' } = {},
+    onUnauthorized
+) {
+    const { data } = await doRequestJson('/api/skills/mcp/servers', {
+        method: 'GET',
+        query: {
+            page,
+            pageSize,
+            keyword: keyword || undefined,
+        },
+        auth: true,
+        onUnauthorized,
+    });
+    return data;
+}
+
+export async function listMcpServers(onUnauthorized) {
+    const data = await listMcpServerPage({ page: 1, pageSize: 1000 }, onUnauthorized);
+    return Array.isArray(data?.list) ? data.list : [];
 }
 
 export async function getMcpServerDetail(serverId, onUnauthorized) {
@@ -163,6 +199,15 @@ export async function updateSkillCatalog(skillId, payload, onUnauthorized) {
     return data;
 }
 
+export async function deleteSkillCatalog(skillId, onUnauthorized) {
+    const { data } = await doRequestJson(`/api/skills/catalog/${skillId}`, {
+        method: 'DELETE',
+        auth: true,
+        onUnauthorized,
+    });
+    return data;
+}
+
 export async function updateSkillBindings(skillId, toolNames, onUnauthorized) {
     const { data } = await doRequestJson(`/api/skills/catalog/${skillId}/bindings`, {
         method: 'PUT',
@@ -171,6 +216,104 @@ export async function updateSkillBindings(skillId, toolNames, onUnauthorized) {
         },
         auth: true,
         onUnauthorized,
+    });
+    return data;
+}
+
+export async function refreshSkillBindings(skillId, onUnauthorized) {
+    const { data } = await doRequestJson(`/api/skills/catalog/${skillId}/bindings/refresh`, {
+        method: 'POST',
+        auth: true,
+        onUnauthorized,
+    });
+    return data;
+}
+
+export async function getSkillPublishStatus(skillId, onUnauthorized) {
+    const { data } = await doRequestJson(`/api/skills/catalog/${skillId}/publish`, {
+        method: 'GET',
+        auth: true,
+        onUnauthorized,
+    });
+    return data;
+}
+
+export async function publishSkillChatbot(skillId, payload, onUnauthorized) {
+    const { data } = await doRequestJson(`/api/skills/catalog/${skillId}/publish`, {
+        method: 'PUT',
+        body: payload || {},
+        auth: true,
+        onUnauthorized,
+    });
+    return data;
+}
+
+export async function updateSkillPublishInfo(skillId, payload, onUnauthorized) {
+    const { data } = await doRequestJson(`/api/skills/catalog/${skillId}/publish/info`, {
+        method: 'PUT',
+        body: payload || {},
+        auth: true,
+        onUnauthorized,
+    });
+    return data;
+}
+
+export async function regenerateSkillPublishCode(skillId, onUnauthorized) {
+    const { data } = await doRequestJson(`/api/skills/catalog/${skillId}/publish/regenerate`, {
+        method: 'POST',
+        auth: true,
+        onUnauthorized,
+    });
+    return data;
+}
+
+export async function disableSkillPublish(skillId, onUnauthorized) {
+    const { data } = await doRequestJson(`/api/skills/catalog/${skillId}/publish/disable`, {
+        method: 'POST',
+        auth: true,
+        onUnauthorized,
+    });
+    return data;
+}
+
+export async function getChatbotContext(appCode, passport) {
+    const normalizedAppCode = String(appCode || '').trim();
+    const { data } = await doRequestJson('/api/chatbot/context', {
+        method: 'GET',
+        auth: false,
+        headers: {
+            'X-App-Code': normalizedAppCode,
+            'X-App-Passport': String(passport || '').trim(),
+        },
+    });
+    return data;
+}
+
+export async function getChatbotPublishStatus(appCode) {
+    const normalizedAppCode = String(appCode || '').trim();
+    const { data } = await doRequestJson('/api/chatbot/publish-status', {
+        method: 'GET',
+        auth: false,
+        headers: {
+            'X-App-Code': normalizedAppCode,
+        },
+    });
+    return data;
+}
+
+export async function exchangeChatbotPassport(appCode, userId) {
+    const normalizedAppCode = String(appCode || '').trim();
+    const search = new URLSearchParams();
+    if (userId !== undefined && userId !== null && String(userId).trim() !== '') {
+        search.set('userId', String(userId).trim());
+    }
+    const query = search.toString();
+    const { data } = await doRequestJson(`/api/chatbot/passport${query ? `?${query}` : ''}`, {
+        method: 'GET',
+        auth: false,
+        headers: {
+            'X-App-Code': normalizedAppCode,
+        },
     });
     return data;
 }

@@ -5,7 +5,7 @@ import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headless
 const props = defineProps({
     modelValue: {
         type: [String, Number, Boolean, Object],
-        default: '',
+        default: null,
     },
     options: {
         type: Array,
@@ -33,6 +33,14 @@ const props = defineProps({
         type: Boolean,
         default: false,
     },
+    leadingIcon: {
+        type: String,
+        default: '',
+    },
+    leadingIconClass: {
+        type: String,
+        default: '',
+    },
     buttonClass: {
         type: String,
         default: '',
@@ -51,7 +59,15 @@ const emit = defineEmits(['update:modelValue']);
 
 function normalizeOption(option, index) {
     if (option && typeof option === 'object') {
-        const value = option.value ?? option.id ?? option.key ?? index;
+        let value = index;
+        if (option.value !== undefined) {
+            value = option.value;
+        } else if (option.id !== undefined) {
+            value = option.id;
+        } else if (option.key !== undefined) {
+            value = option.key;
+        }
+
         const label = option.label ?? option.name ?? value;
         return {
             key: option.key ?? `${String(value)}-${index}`,
@@ -75,8 +91,8 @@ const normalizedOptions = computed(() =>
     (Array.isArray(props.options) ? props.options : []).map(normalizeOption)
 );
 
-const selectedOption = computed(() =>
-    normalizedOptions.value.find(option => option.value === props.modelValue) || null
+const selectedOption = computed(
+    () => normalizedOptions.value.find(option => option.value === props.modelValue) || null
 );
 
 const selectedLabel = computed(() => selectedOption.value?.label || props.placeholder);
@@ -122,11 +138,23 @@ const menuClasses = computed(() => [
     <Listbox v-model="proxyValue" :disabled="disabled" v-slot="{ open }">
         <div :class="['relative', wrapperClass]" @click.stop>
             <ListboxButton :class="buttonClasses">
-                <span
-                    class="min-w-0 truncate"
-                    :class="selectedOption ? 'text-slate-700' : 'text-slate-400'"
-                >
-                    {{ selectedLabel }}
+                <span class="flex min-w-0 flex-1 items-center gap-2.5">
+                    <span
+                        v-if="leadingIcon"
+                        :class="[
+                            'material-symbols-outlined shrink-0 text-[18px] leading-none',
+                            selectedOption ? 'text-slate-500' : 'text-slate-400',
+                            leadingIconClass,
+                        ]"
+                    >
+                        {{ leadingIcon }}
+                    </span>
+                    <span
+                        class="min-w-0 truncate"
+                        :class="selectedOption ? 'text-slate-700' : 'text-slate-400'"
+                    >
+                        {{ selectedLabel }}
+                    </span>
                 </span>
                 <span
                     class="material-symbols-outlined pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[20px] text-slate-400 transition duration-150"

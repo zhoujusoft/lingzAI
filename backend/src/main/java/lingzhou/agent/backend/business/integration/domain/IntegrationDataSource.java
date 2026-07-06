@@ -24,6 +24,10 @@ public class IntegrationDataSource {
 
     private String authConfigJson;
 
+    private Long ownerUserId;
+
+    private Integer permissionScope;
+
     private String status;
 
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
@@ -86,6 +90,22 @@ public class IntegrationDataSource {
 
     public void setAuthConfigJson(String authConfigJson) {
         this.authConfigJson = authConfigJson;
+    }
+
+    public Long getOwnerUserId() {
+        return ownerUserId;
+    }
+
+    public void setOwnerUserId(Long ownerUserId) {
+        this.ownerUserId = ownerUserId;
+    }
+
+    public Integer getPermissionScope() {
+        return permissionScope;
+    }
+
+    public void setPermissionScope(Integer permissionScope) {
+        this.permissionScope = permissionScope;
     }
 
     public String getStatus() {

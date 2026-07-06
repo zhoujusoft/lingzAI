@@ -45,10 +45,13 @@ public class KnowledgeBaseToolRuntimeService {
             throw new TaskException("toolName 不能为空", TaskException.Code.UNKNOWN);
         }
         ToolCatalog catalog = toolCatalogMapper.selectByToolName(toolName.trim());
-        if (catalog == null || !StringUtils.hasText(catalog.getSource()) || !catalog.getSource().startsWith("knowledge_base:")) {
+        if (catalog == null
+                || !StringUtils.hasText(catalog.getSource())
+                || !catalog.getSource().startsWith("knowledge_base:")) {
             throw new TaskException("未找到对应的知识库工具：" + toolName, TaskException.Code.UNKNOWN);
         }
-        String kbCode = catalog.getSource().substring("knowledge_base:".length()).trim();
+        String kbCode =
+                catalog.getSource().substring("knowledge_base:".length()).trim();
         if (!StringUtils.hasText(kbCode)) {
             throw new TaskException("知识库工具来源无效：" + catalog.getSource(), TaskException.Code.UNKNOWN);
         }

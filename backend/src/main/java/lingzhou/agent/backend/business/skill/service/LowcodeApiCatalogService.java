@@ -2,18 +2,17 @@ package lingzhou.agent.backend.business.skill.service;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import jakarta.annotation.PostConstruct;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import lingzhou.agent.backend.capability.api.publish.LowcodeApiToolPublishService;
 import lingzhou.agent.backend.business.skill.domain.LowcodeApiCatalog;
 import lingzhou.agent.backend.business.skill.mapper.LowcodeApiCatalogMapper;
 import lingzhou.agent.backend.business.skill.mapper.SkillToolBindingMapper;
 import lingzhou.agent.backend.business.tool.domain.ToolCatalog;
 import lingzhou.agent.backend.business.tool.mapper.ToolCatalogMapper;
+import lingzhou.agent.backend.capability.api.publish.LowcodeApiToolPublishService;
 import lingzhou.agent.backend.common.lzException.TaskException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -23,8 +22,8 @@ import org.springframework.util.StringUtils;
 @Service
 public class LowcodeApiCatalogService {
 
-    private static final ObjectMapper JSON = new ObjectMapper()
-            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+    private static final ObjectMapper JSON =
+            new ObjectMapper().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
     private final LowcodeApiCatalogMapper lowcodeApiCatalogMapper;
     private final ToolCatalogMapper toolCatalogMapper;
@@ -44,7 +43,6 @@ public class LowcodeApiCatalogService {
         this.skillToolBindingMapper = skillToolBindingMapper;
         this.jdbcTemplate = jdbcTemplate;
     }
-
 
     public Map<String, LowcodeApiCatalog> mapByPlatformAndApiCode(String platformKey) {
         if (!StringUtils.hasText(platformKey)) {
@@ -78,12 +76,17 @@ public class LowcodeApiCatalogService {
         String appId = normalizeText(command.appId());
         String appName = normalizeText(command.appName());
         String apiId = normalizeText(command.apiId());
-        String description = normalizeText(command.description());
+        String apiRemark = normalizeText(command.apiRemark());
+        String toolDisplayName = normalizeRequired(command.toolDisplayName(), "toolDisplayName 不能为空");
         String toolName = normalizeToolName(command.toolName(), platformKey, apiCode);
+        String toolRemark = normalizeText(command.toolRemark());
         String remoteSchemaJson = serializeJson(command.remoteSchema());
 
         LowcodeApiCatalog catalog = lowcodeApiCatalogMapper.selectByPlatformKeyAndApiCode(platformKey, apiCode);
         boolean created = catalog == null;
+        String previousToolName = catalog == null ? "" : normalizeText(catalog.getToolName());
+        ToolCatalog previousToolCatalog =
+                StringUtils.hasText(previousToolName) ? toolCatalogMapper.selectByToolName(previousToolName) : null;
         if (catalog == null) {
             catalog = new LowcodeApiCatalog();
             catalog.setPlatformKey(platformKey);
@@ -93,9 +96,10 @@ public class LowcodeApiCatalogService {
         catalog.setAppName(appName);
         catalog.setApiId(apiId);
         catalog.setApiName(apiName);
-        catalog.setDescription(description);
+        catalog.setDescription(apiRemark);
         catalog.setRemoteSchemaJson(remoteSchemaJson);
         catalog.setToolName(toolName);
+        catalog.setToolRemark(toolRemark);
         catalog.setEnabled(1);
         catalog.setLastSyncAt(new Date());
         if (created) {
@@ -104,16 +108,14 @@ public class LowcodeApiCatalogService {
             lowcodeApiCatalogMapper.updateById(catalog);
         }
 
-        lowcodeApiToolPublishService.publish(toolName, apiName, description, platformKey);
+        lowcodeApiToolPublishService.publish(toolName, toolDisplayName, toolRemark, platformKey);
+        preservePublishedToolSettings(previousToolCatalog, previousToolName, toolName);
+        migrateSkillBindings(previousToolName, toolName);
+        if (StringUtils.hasText(previousToolName) && !Objects.equals(previousToolName, toolName)) {
+            lowcodeApiToolPublishService.disable(previousToolName);
+        }
 
-        return new RegistrationView(
-                catalog.getId(),
-                platformKey,
-                apiCode,
-                apiName,
-                toolName,
-                created,
-                false);
+        return new RegistrationView(catalog.getId(), platformKey, apiCode, apiName, toolName, created, false);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -155,6 +157,59 @@ public class LowcodeApiCatalogService {
         return candidate;
     }
 
+    private void preservePublishedToolSettings(
+            ToolCatalog previousToolCatalog, String previousToolName, String nextToolName) {
+        if (previousToolCatalog == null
+                || !StringUtils.hasText(previousToolName)
+                || !StringUtils.hasText(nextToolName)
+                || Objects.equals(previousToolName, nextToolName)) {
+            return;
+        }
+        ToolCatalog nextToolCatalog = toolCatalogMapper.selectByToolName(nextToolName);
+        if (nextToolCatalog == null) {
+            return;
+        }
+        boolean changed = false;
+        if (!Objects.equals(nextToolCatalog.getEnabledGlobal(), previousToolCatalog.getEnabledGlobal())) {
+            nextToolCatalog.setEnabledGlobal(previousToolCatalog.getEnabledGlobal());
+            changed = true;
+        }
+        if (previousToolCatalog.getSortOrder() != null
+                && !Objects.equals(nextToolCatalog.getSortOrder(), previousToolCatalog.getSortOrder())) {
+            nextToolCatalog.setSortOrder(previousToolCatalog.getSortOrder());
+            changed = true;
+        }
+        if (changed) {
+            toolCatalogMapper.updateById(nextToolCatalog);
+        }
+    }
+
+    private void migrateSkillBindings(String previousToolName, String nextToolName) {
+        if (!StringUtils.hasText(previousToolName)
+                || !StringUtils.hasText(nextToolName)
+                || Objects.equals(previousToolName, nextToolName)) {
+            return;
+        }
+        jdbcTemplate.update(
+                """
+                DELETE old_binding
+                FROM skill_tool_binding old_binding
+                WHERE old_binding.tool_name = ?
+                  AND EXISTS (
+                      SELECT 1
+                      FROM skill_tool_binding next_binding
+                      WHERE next_binding.skill_id = old_binding.skill_id
+                        AND next_binding.tool_name = ?
+                  )
+                """,
+                previousToolName,
+                nextToolName);
+        jdbcTemplate.update(
+                "UPDATE skill_tool_binding SET tool_name = ? WHERE tool_name = ?",
+                nextToolName,
+                previousToolName);
+    }
+
     private String serializeJson(Object value) throws TaskException {
         if (value == null) {
             return "";
@@ -184,8 +239,10 @@ public class LowcodeApiCatalogService {
             String apiId,
             String apiCode,
             String apiName,
-            String description,
+            String apiRemark,
+            String toolDisplayName,
             String toolName,
+            String toolRemark,
             Object remoteSchema) {}
 
     public record RegistrationView(

@@ -78,7 +78,9 @@ function goToPage(nextPage) {
 </script>
 
 <template>
-    <div class="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white/95 px-2.5 py-1.5 shadow-[0_10px_28px_-22px_rgba(15,23,42,0.38)] backdrop-blur-sm">
+    <div
+        class="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white/95 px-2.5 py-1.5 shadow-[0_10px_28px_-22px_rgba(15,23,42,0.38)] backdrop-blur-sm"
+    >
         <AppSelect
             v-model="selectedPageSize"
             :options="pageSizeSelectOptions"
@@ -98,14 +100,10 @@ function goToPage(nextPage) {
         </button>
 
         <div class="flex items-center gap-1">
-            <template
-                v-for="token in pageTokens"
-                :key="String(token)"
-            >
-                <span
-                    v-if="typeof token === 'string'"
-                    class="px-1 text-xs text-slate-400"
-                >...</span>
+            <template v-for="token in pageTokens" :key="String(token)">
+                <span v-if="typeof token === 'string'" class="px-1 text-xs text-slate-400"
+                    >...</span
+                >
                 <button
                     v-else
                     type="button"

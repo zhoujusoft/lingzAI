@@ -47,7 +47,7 @@ public record AttachmentParseResult(
             String text,
             Integer rowCount,
             Integer columnCount,
-            Integer headerRowIndex,
+            Integer headerRowZeroBasedIndex,
             List<String> header,
             List<List<String>> sampleRows,
             List<Column> columns) {
@@ -63,12 +63,7 @@ public record AttachmentParseResult(
     }
 
     public record Column(
-            int index,
-            String name,
-            String inferredType,
-            int nullCount,
-            int totalCount,
-            List<String> sampleValues) {
+            int index, String name, String inferredType, int nullCount, int totalCount, List<String> sampleValues) {
 
         public Column {
             name = name == null ? "" : name;
@@ -77,7 +72,8 @@ public record AttachmentParseResult(
         }
     }
 
-    public record Entities(List<String> headings, List<String> labels, List<EntityTable> tables, List<String> sheetNames) {
+    public record Entities(
+            List<String> headings, List<String> labels, List<EntityTable> tables, List<String> sheetNames) {
 
         public Entities {
             headings = headings == null ? List.of() : List.copyOf(headings);

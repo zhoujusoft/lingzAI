@@ -1,0 +1,46 @@
+package lingzhou.agent.spring.ai.wechat.ilink.service;
+
+import java.io.IOException;
+import java.util.Collections;
+import java.util.List;
+import lingzhou.agent.spring.ai.wechat.ilink.core.config.ILinkConfig;
+import lingzhou.agent.spring.ai.wechat.ilink.core.context.*;
+import lingzhou.agent.spring.ai.wechat.ilink.core.http.BusinessApiClient;
+import lingzhou.agent.spring.ai.wechat.ilink.core.login.LoginContext;
+import lingzhou.agent.spring.ai.wechat.ilink.core.model.*;
+
+public class UpdateService {
+    private final ILinkConfig config;
+    private final BusinessApiClient apiClient;
+    private final GetUpdatesCursorStore cursorStore;
+    private final ContextPoolManager contextPoolManager = ContextPoolManager.getInstance();
+
+    public UpdateService(ILinkConfig config, BusinessApiClient apiClient, GetUpdatesCursorStore cursorStore) {
+        this.config = config;
+        this.apiClient = apiClient;
+        this.cursorStore = cursorStore;
+    }
+
+    public List<WeixinMessage> poll(LoginContext loginContext) throws IOException {
+        String cursor = cursorStore.get(loginContext.getBotId());
+        if (cursor == null) cursor = "";
+        GetUpdatesResponse resp = apiClient.post(
+                loginContext,
+                "/ilink/bot/getupdates",
+                new GetUpdatesRequest(cursor, new BaseInfo(config.getChannelVersion())),
+                GetUpdatesResponse.class);
+        if (resp.getGet_updates_buf() != null) cursorStore.put(loginContext.getBotId(), resp.getGet_updates_buf());
+        List<WeixinMessage> msgs = resp.getMsgs();
+        if (msgs == null) return Collections.<WeixinMessage>emptyList();
+        for (WeixinMessage msg : msgs) {
+            if (msg.getFrom_user_id() != null
+                    && msg.getContext_token() != null
+                    && !msg.getContext_token().trim().isEmpty()) {
+                contextPoolManager
+                        .getOrCreate(loginContext.getBotId(), msg.getFrom_user_id())
+                        .updateContextToken(msg.getContext_token(), msg.getMessage_id(), msg.getCreate_time_ms());
+            }
+        }
+        return msgs;
+    }
+}

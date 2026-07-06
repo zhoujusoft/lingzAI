@@ -50,7 +50,9 @@ function medalClass(rank) {
 </script>
 
 <template>
-    <div class="w-full max-w-full space-y-4 rounded-2xl border border-sky-200 bg-sky-50/70 p-4 sm:w-[500px]">
+    <div
+        class="w-full max-w-full space-y-4 rounded-2xl border border-sky-200 bg-sky-50/70 p-4 sm:w-[500px]"
+    >
         <div class="min-w-0">
             <h4 class="truncate text-sm font-semibold text-slate-900">
                 {{ componentProps.title || payload.title || '排行榜' }}
@@ -103,9 +105,7 @@ function medalClass(rank) {
                 </div>
             </div>
 
-            <p v-if="!items.length" class="py-6 text-center text-sm text-slate-400">
-                暂无排行数据
-            </p>
+            <p v-if="!items.length" class="py-6 text-center text-sm text-slate-400">暂无排行数据</p>
         </div>
     </div>
 </template>

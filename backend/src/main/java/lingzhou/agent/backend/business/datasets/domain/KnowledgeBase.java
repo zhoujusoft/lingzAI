@@ -6,13 +6,12 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import java.util.Date;
-import lingzhou.agent.backend.framework.web.BaseEntity;
 
 /**
  * 存储知识库基本信息对象 knowledge_base
  */
 @TableName("knowledge_base")
-public class KnowledgeBase  {
+public class KnowledgeBase {
 
     private static final long serialVersionUID = 1L;
 
@@ -24,6 +23,10 @@ public class KnowledgeBase  {
     private String kbName;
 
     private String description;
+
+    private Long ownerUserId;
+
+    private Integer permissionScope;
 
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm")
     private Date createdAt;
@@ -85,6 +88,22 @@ public class KnowledgeBase  {
 
     public void setDescription(String description) {
         this.description = description;
+    }
+
+    public Long getOwnerUserId() {
+        return ownerUserId;
+    }
+
+    public void setOwnerUserId(Long ownerUserId) {
+        this.ownerUserId = ownerUserId;
+    }
+
+    public Integer getPermissionScope() {
+        return permissionScope;
+    }
+
+    public void setPermissionScope(Integer permissionScope) {
+        this.permissionScope = permissionScope;
     }
 
     public Date getCreatedAt() {

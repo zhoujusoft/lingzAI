@@ -1,10 +1,16 @@
 import { ROUTE_PATHS } from '@/router/routePaths';
 
 export const ADMIN_HOME_VIEWS = Object.freeze({
+    DASHBOARD: 'dashboard',
     KNOWLEDGE: 'knowledge',
+    SKILL_STUDIO: 'skill-studio',
+    SANDBOX_TEST: 'sandbox-test',
     SKILL_MANAGEMENT: 'skill-management',
     MCP_MANAGEMENT: 'mcp-management',
+    CHANNEL_MANAGEMENT: 'channel-management',
     MODEL_LIBRARY: 'model-library',
+    TOKEN_USAGE: 'token-usage',
+    CONNECTOR: 'connector',
     DATABASE: 'database',
     API_LIBRARY: 'api-library',
     TOOL_LIBRARY: 'tool-library',
@@ -13,16 +19,45 @@ export const ADMIN_HOME_VIEWS = Object.freeze({
 
 export const ADMIN_SYSTEM_SUB_VIEWS = Object.freeze({
     USER_MANAGEMENT: 'user-management',
+    ROLE_MANAGEMENT: 'role-management',
+    AGENT_MANAGEMENT: 'agent-management',
+    TOKEN_QUOTA: 'token-quota',
     CONFIG_MANAGEMENT: 'config-management',
+    LICENSE_MANAGEMENT: 'license-management',
+    USER_AGENT_CONFIG: 'user-agent-config',
 });
 
 export const ADMIN_SIDEBAR_ITEMS = Object.freeze([
+    {
+        id: ADMIN_HOME_VIEWS.DASHBOARD,
+        label: '首页看板',
+        icon: 'dashboard',
+        view: ADMIN_HOME_VIEWS.DASHBOARD,
+        path: ROUTE_PATHS.adminHomeDashboard,
+    },
     {
         id: ADMIN_HOME_VIEWS.KNOWLEDGE,
         label: '知识库',
         icon: 'inventory_2',
         view: ADMIN_HOME_VIEWS.KNOWLEDGE,
         path: ROUTE_PATHS.adminKnowledge,
+        permissionKey: 'admin.knowledge.view',
+    },
+    {
+        id: ADMIN_HOME_VIEWS.SKILL_STUDIO,
+        label: '技能工坊',
+        icon: 'design_services',
+        view: ADMIN_HOME_VIEWS.SKILL_STUDIO,
+        path: ROUTE_PATHS.adminSkillStudio,
+        permissionKey: 'admin.skillstudio.view',
+    },
+    {
+        id: ADMIN_HOME_VIEWS.SANDBOX_TEST,
+        label: '云电脑测试',
+        icon: 'desktop_windows',
+        view: ADMIN_HOME_VIEWS.SANDBOX_TEST,
+        path: ROUTE_PATHS.adminSandboxTest,
+        permissionKey: 'admin.sandbox-test.view',
     },
     {
         id: ADMIN_HOME_VIEWS.SKILL_MANAGEMENT,
@@ -30,6 +65,7 @@ export const ADMIN_SIDEBAR_ITEMS = Object.freeze([
         icon: 'smart_toy',
         view: ADMIN_HOME_VIEWS.SKILL_MANAGEMENT,
         path: ROUTE_PATHS.adminSkillManagement,
+        permissionKey: 'admin.skill-management.view',
     },
     {
         id: ADMIN_HOME_VIEWS.MCP_MANAGEMENT,
@@ -37,6 +73,15 @@ export const ADMIN_SIDEBAR_ITEMS = Object.freeze([
         icon: 'hub',
         view: ADMIN_HOME_VIEWS.MCP_MANAGEMENT,
         path: ROUTE_PATHS.adminMcpManagement,
+        permissionKey: 'admin.mcp-management.view',
+    },
+    {
+        id: ADMIN_HOME_VIEWS.CHANNEL_MANAGEMENT,
+        label: '渠道接入',
+        icon: 'lan',
+        view: ADMIN_HOME_VIEWS.CHANNEL_MANAGEMENT,
+        path: ROUTE_PATHS.adminChannels,
+        permissionKey: 'admin.channel-management.view',
     },
     {
         id: ADMIN_HOME_VIEWS.MODEL_LIBRARY,
@@ -44,13 +89,31 @@ export const ADMIN_SIDEBAR_ITEMS = Object.freeze([
         icon: 'deployed_code',
         view: ADMIN_HOME_VIEWS.MODEL_LIBRARY,
         path: ROUTE_PATHS.adminModelLibrary,
+        permissionKey: 'admin.model-library.view',
+    },
+    {
+        id: ADMIN_HOME_VIEWS.TOKEN_USAGE,
+        label: 'Token 统计',
+        icon: 'query_stats',
+        view: ADMIN_HOME_VIEWS.TOKEN_USAGE,
+        path: ROUTE_PATHS.adminTokenUsage,
+        permissionKey: 'admin.token-usage.view',
+    },
+    {
+        id: ADMIN_HOME_VIEWS.CONNECTOR,
+        label: '连接器',
+        icon: 'conversion_path',
+        view: ADMIN_HOME_VIEWS.CONNECTOR,
+        path: ROUTE_PATHS.adminIntegrationConnectors,
+        permissionKey: 'admin.integration.connectors.view',
     },
     {
         id: ADMIN_HOME_VIEWS.DATABASE,
-        label: '数据库',
+        label: '数据源',
         icon: 'database',
         view: ADMIN_HOME_VIEWS.DATABASE,
         path: ROUTE_PATHS.adminIntegrationDataSources,
+        permissionKey: 'admin.integration.data-sources.view',
     },
     {
         id: ADMIN_HOME_VIEWS.API_LIBRARY,
@@ -58,6 +121,7 @@ export const ADMIN_SIDEBAR_ITEMS = Object.freeze([
         icon: 'api',
         view: ADMIN_HOME_VIEWS.API_LIBRARY,
         path: ROUTE_PATHS.adminApiLibrary,
+        permissionKey: 'admin.api-library.view',
     },
     {
         id: ADMIN_HOME_VIEWS.TOOL_LIBRARY,
@@ -65,6 +129,7 @@ export const ADMIN_SIDEBAR_ITEMS = Object.freeze([
         icon: 'build_circle',
         view: ADMIN_HOME_VIEWS.TOOL_LIBRARY,
         path: ROUTE_PATHS.adminToolLibrary,
+        permissionKey: 'admin.tool-library.view',
     },
     {
         id: ADMIN_HOME_VIEWS.SYSTEM,
@@ -74,16 +139,53 @@ export const ADMIN_SIDEBAR_ITEMS = Object.freeze([
         path: ROUTE_PATHS.adminSystemHome,
         children: [
             {
+                id: ADMIN_SYSTEM_SUB_VIEWS.AGENT_MANAGEMENT,
+                label: '专家技能包',
+                subView: ADMIN_SYSTEM_SUB_VIEWS.AGENT_MANAGEMENT,
+                path: ROUTE_PATHS.adminSystemAgentManagement,
+                permissionKey: 'admin.system.agents.view',
+            },
+            {
+                id: ADMIN_SYSTEM_SUB_VIEWS.ROLE_MANAGEMENT,
+                label: '角色管理',
+                subView: ADMIN_SYSTEM_SUB_VIEWS.ROLE_MANAGEMENT,
+                path: ROUTE_PATHS.adminSystemRoleManagement,
+                permissionKey: 'admin.system.roles.view',
+            },
+            {
                 id: ADMIN_SYSTEM_SUB_VIEWS.USER_MANAGEMENT,
                 label: '用户管理',
                 subView: ADMIN_SYSTEM_SUB_VIEWS.USER_MANAGEMENT,
                 path: ROUTE_PATHS.adminSystemUserManagement,
+                permissionKey: 'admin.system.users.view',
+            },
+            {
+                id: ADMIN_SYSTEM_SUB_VIEWS.TOKEN_QUOTA,
+                label: '用户额度',
+                subView: ADMIN_SYSTEM_SUB_VIEWS.TOKEN_QUOTA,
+                path: ROUTE_PATHS.adminSystemTokenQuota,
+                permissionKey: 'admin.system.token-quota.view',
             },
             {
                 id: ADMIN_SYSTEM_SUB_VIEWS.CONFIG_MANAGEMENT,
                 label: '配置管理',
                 subView: ADMIN_SYSTEM_SUB_VIEWS.CONFIG_MANAGEMENT,
                 path: ROUTE_PATHS.adminSystemConfigs,
+                permissionKey: 'admin.system.configs.view',
+            },
+            {
+                id: ADMIN_SYSTEM_SUB_VIEWS.LICENSE_MANAGEMENT,
+                label: '授权管理',
+                subView: ADMIN_SYSTEM_SUB_VIEWS.LICENSE_MANAGEMENT,
+                path: ROUTE_PATHS.license,
+                permissionKey: 'admin.system.configs.view',
+            },
+            {
+                id: ADMIN_SYSTEM_SUB_VIEWS.USER_AGENT_CONFIG,
+                label: '用户 Agent 配置',
+                subView: ADMIN_SYSTEM_SUB_VIEWS.USER_AGENT_CONFIG,
+                path: ROUTE_PATHS.adminSystemUserAgentConfig,
+                permissionKey: 'admin.system.user-agent-config.view',
             },
         ],
     },

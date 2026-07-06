@@ -1,9 +1,9 @@
 package lingzhou.agent.backend.capability.dataset.registry;
 
 import java.util.Map;
-import lingzhou.agent.backend.capability.dataset.runtime.KnowledgeBaseToolRuntimeService;
 import lingzhou.agent.backend.business.tool.domain.ToolCatalog;
 import lingzhou.agent.backend.business.tool.mapper.ToolCatalogMapper;
+import lingzhou.agent.backend.capability.dataset.runtime.KnowledgeBaseToolRuntimeService;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.function.FunctionToolCallback;
 import org.springframework.stereotype.Service;
@@ -12,7 +12,8 @@ import org.springframework.util.StringUtils;
 @Service
 public class KnowledgeBaseToolRegistryService {
 
-    private static final String GENERIC_OBJECT_SCHEMA = """
+    private static final String GENERIC_OBJECT_SCHEMA =
+            """
             {
               \"type\": \"object\",
               \"additionalProperties\": true
@@ -33,7 +34,9 @@ public class KnowledgeBaseToolRegistryService {
             return null;
         }
         ToolCatalog catalog = toolCatalogMapper.selectByToolName(toolName.trim());
-        if (catalog == null || !StringUtils.hasText(catalog.getSource()) || !catalog.getSource().startsWith("knowledge_base:")) {
+        if (catalog == null
+                || !StringUtils.hasText(catalog.getSource())
+                || !catalog.getSource().startsWith("knowledge_base:")) {
             return null;
         }
         return buildCallback(catalog);

@@ -5,11 +5,18 @@ const emit = defineEmits(['move', 'rename', 'delete']);
 </script>
 
 <template>
-    <Menu as="div" class="relative inline-block text-left" data-component="DirectoryActionsMenu" @click.stop>
+    <Menu
+        as="div"
+        class="relative inline-block text-left"
+        data-component="DirectoryActionsMenu"
+        @click.stop
+    >
         <MenuButton
             class="flex h-6 w-6 items-center justify-center rounded text-slate-400 transition-colors hover:bg-white hover:text-primary"
         >
-            <span class="material-symbols-outlined fill-0 text-[18px] leading-none">more_horiz</span>
+            <span class="material-symbols-outlined fill-0 text-[18px] leading-none"
+                >more_horiz</span
+            >
         </MenuButton>
 
         <transition
@@ -30,7 +37,9 @@ const emit = defineEmits(['move', 'rename', 'delete']);
                         :class="active ? 'bg-slate-50' : ''"
                         @click="emit('move')"
                     >
-                        <span class="material-symbols-outlined fill-0 text-base">drive_file_move</span>
+                        <span class="material-symbols-outlined fill-0 text-base"
+                            >drive_file_move</span
+                        >
                         <span>移动</span>
                     </button>
                 </MenuItem>
@@ -42,7 +51,9 @@ const emit = defineEmits(['move', 'rename', 'delete']);
                         :class="active ? 'bg-slate-50' : ''"
                         @click="emit('rename')"
                     >
-                        <span class="material-symbols-outlined fill-0 text-base">drive_file_rename_outline</span>
+                        <span class="material-symbols-outlined fill-0 text-base"
+                            >drive_file_rename_outline</span
+                        >
                         <span>重命名</span>
                     </button>
                 </MenuItem>

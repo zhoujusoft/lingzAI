@@ -22,13 +22,21 @@ public class McpServer {
 
     private String endpoint;
 
+    private Long ownerUserId;
+
+    private Integer permissionScope;
+
     private String serverScope;
 
     private String authType;
 
     private String authConfigJson;
 
+    private String headersJson;
+
     private Integer enabled;
+
+    private Integer enabledGlobal;
 
     private String lastRefreshStatus;
 
@@ -91,6 +99,22 @@ public class McpServer {
         this.endpoint = endpoint;
     }
 
+    public Long getOwnerUserId() {
+        return ownerUserId;
+    }
+
+    public void setOwnerUserId(Long ownerUserId) {
+        this.ownerUserId = ownerUserId;
+    }
+
+    public Integer getPermissionScope() {
+        return permissionScope;
+    }
+
+    public void setPermissionScope(Integer permissionScope) {
+        this.permissionScope = permissionScope;
+    }
+
     public String getServerScope() {
         return serverScope;
     }
@@ -115,12 +139,28 @@ public class McpServer {
         this.authConfigJson = authConfigJson;
     }
 
+    public String getHeadersJson() {
+        return headersJson;
+    }
+
+    public void setHeadersJson(String headersJson) {
+        this.headersJson = headersJson;
+    }
+
     public Integer getEnabled() {
         return enabled;
     }
 
     public void setEnabled(Integer enabled) {
         this.enabled = enabled;
+    }
+
+    public Integer getEnabledGlobal() {
+        return enabledGlobal;
+    }
+
+    public void setEnabledGlobal(Integer enabledGlobal) {
+        this.enabledGlobal = enabledGlobal;
     }
 
     public String getLastRefreshStatus() {

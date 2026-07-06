@@ -1,7 +1,6 @@
 package lingzhou.agent.backend.app;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.util.StringUtils;
 
 @ConfigurationProperties(prefix = "model")
 public class ModelProviderProperties {

@@ -9,8 +9,19 @@ public class ChatSessionVo {
     private String updatedAt;
     private String lastMessage;
     private String sessionType;
+    private String sessionTypeLabel;
     private Long scopeId;
     private String scopeDisplayName;
+    private String sourceType;
+    private String sourceLabel;
+    private String sourceIcon;
+    private String sourceIconColor;
+    private String channelType;
+    private String titleSummary;
+    private String subtitle;
+    private Long chatModelId;
+    private String chatModelDisplayName;
+    private Boolean chatModelAvailable;
 
     public String getId() {
         return id;
@@ -68,6 +79,14 @@ public class ChatSessionVo {
         this.sessionType = sessionType;
     }
 
+    public String getSessionTypeLabel() {
+        return sessionTypeLabel;
+    }
+
+    public void setSessionTypeLabel(String sessionTypeLabel) {
+        this.sessionTypeLabel = sessionTypeLabel;
+    }
+
     public Long getScopeId() {
         return scopeId;
     }
@@ -82,5 +101,85 @@ public class ChatSessionVo {
 
     public void setScopeDisplayName(String scopeDisplayName) {
         this.scopeDisplayName = scopeDisplayName;
+    }
+
+    public String getSourceType() {
+        return sourceType;
+    }
+
+    public void setSourceType(String sourceType) {
+        this.sourceType = sourceType;
+    }
+
+    public String getSourceLabel() {
+        return sourceLabel;
+    }
+
+    public void setSourceLabel(String sourceLabel) {
+        this.sourceLabel = sourceLabel;
+    }
+
+    public String getSourceIcon() {
+        return sourceIcon;
+    }
+
+    public void setSourceIcon(String sourceIcon) {
+        this.sourceIcon = sourceIcon;
+    }
+
+    public String getSourceIconColor() {
+        return sourceIconColor;
+    }
+
+    public void setSourceIconColor(String sourceIconColor) {
+        this.sourceIconColor = sourceIconColor;
+    }
+
+    public String getChannelType() {
+        return channelType;
+    }
+
+    public void setChannelType(String channelType) {
+        this.channelType = channelType;
+    }
+
+    public String getTitleSummary() {
+        return titleSummary;
+    }
+
+    public void setTitleSummary(String titleSummary) {
+        this.titleSummary = titleSummary;
+    }
+
+    public String getSubtitle() {
+        return subtitle;
+    }
+
+    public void setSubtitle(String subtitle) {
+        this.subtitle = subtitle;
+    }
+
+    public Long getChatModelId() {
+        return chatModelId;
+    }
+
+    public void setChatModelId(Long chatModelId) {
+        this.chatModelId = chatModelId;
+    }
+
+    public String getChatModelDisplayName() {
+        return chatModelDisplayName;
+    }
+
+    public void setChatModelDisplayName(String chatModelDisplayName) {
+        this.chatModelDisplayName = chatModelDisplayName;
+    }
+
+    public Boolean getChatModelAvailable() {
+        return chatModelAvailable;
+    }
+
+    public void setChatModelAvailable(Boolean chatModelAvailable) {
+        this.chatModelAvailable = chatModelAvailable;
     }
 }

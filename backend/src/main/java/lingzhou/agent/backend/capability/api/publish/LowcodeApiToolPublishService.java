@@ -16,17 +16,20 @@ public class LowcodeApiToolPublishService {
         this.toolCatalogMapper = toolCatalogMapper;
     }
 
-    public void publish(String toolName, String apiName, String description, String platformKey) {
+    public void publish(String toolName, String toolDisplayName, String toolRemark, String platformKey) {
         ToolCatalog toolCatalog = toolCatalogMapper.selectByToolName(toolName);
         if (toolCatalog == null) {
             toolCatalog = new ToolCatalog();
             toolCatalog.setToolName(toolName);
             toolCatalog.setSortOrder(60000);
         }
-        toolCatalog.setDisplayName(apiName);
-        toolCatalog.setDescription(description);
+        toolCatalog.setDisplayName(toolDisplayName);
+        toolCatalog.setDescription(toolRemark);
         toolCatalog.setToolType(TOOL_TYPE_LOWCODE_API);
         toolCatalog.setBindable(1);
+        if (toolCatalog.getEnabledGlobal() == null) {
+            toolCatalog.setEnabledGlobal(0);
+        }
         toolCatalog.setOwnerSkillName(null);
         toolCatalog.setSource(buildSource(platformKey));
         if (toolCatalog.getId() == null) {

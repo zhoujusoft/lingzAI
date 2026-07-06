@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="lingzhou.agent.backend.business.system.dao.RoleResourcePermissionMapper">
+
+    <resultMap id="BaseResultMap" type="lingzhou.agent.backend.business.system.model.RoleResourcePermission">
+        <id column="id" property="id"/>
+        <result column="role_id" property="roleId"/>
+        <result column="resource_type" property="resourceType"/>
+        <result column="resource_id" property="resourceId"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="created_by" property="createdBy"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id, role_id, resource_type, resource_id, created_at, created_by
+    </sql>
+
+    <delete id="deleteByRoleId">
+        DELETE FROM sys_role_resource_permission
+        WHERE role_id = #{roleId}
+    </delete>
+
+    <insert id="batchInsert">
+        INSERT INTO sys_role_resource_permission (role_id, resource_type, resource_id, created_by)
+        VALUES
+        <foreach collection="permissions" item="permission" separator=",">
+            (#{permission.roleId}, #{permission.resourceType}, #{permission.resourceId}, #{permission.createdBy})
+        </foreach>
+    </insert>
+
+    <select id="selectResourceIdsByRole" resultType="java.lang.Long">
+        SELECT resource_id
+        FROM sys_role_resource_permission
+        WHERE role_id = #{roleId} AND resource_type = #{resourceType}
+    </select>
+
+    <select id="exists" resultType="boolean">
+        SELECT COUNT(*) > 0
+        FROM sys_role_resource_permission
+        WHERE role_id = #{roleId}
+          AND resource_type = #{resourceType}
+          AND resource_id = #{resourceId}
+    </select>
+
+    <select id="selectRoleIdsByResource" resultType="java.lang.Long">
+        SELECT role_id
+        FROM sys_role_resource_permission
+        WHERE resource_type = #{resourceType} AND resource_id = #{resourceId}
+    </select>
+
+</mapper>

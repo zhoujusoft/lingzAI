@@ -1,0 +1,49 @@
+{
+  "defaultBaseTemplate": "reference-driven",
+  "businessIntentRules": [
+    {
+      "tag": "knowledge-base",
+      "keywords": ["知识库", "问答", "检索", "法规", "法条", "资料问答", "知识问答", "制度答疑"],
+      "preferredBaseTemplate": "reference-driven",
+      "upgradeSignals": []
+    },
+    {
+      "tag": "dataset",
+      "keywords": ["数据集", "问数", "统计", "分析", "指标", "汇总", "报表", "SQL", "字段结构"],
+      "preferredBaseTemplate": "reference-driven",
+      "upgradeSignals": ["流程", "步骤", "输入输出", "填报"]
+    },
+    {
+      "tag": "api-library",
+      "keywords": ["api", "API", "表单", "填报", "提交", "字段映射", "请求参数", "schema"],
+      "preferredBaseTemplate": "document-workflow",
+      "upgradeSignals": []
+    },
+    {
+      "tag": "mcp-library",
+      "keywords": ["mcp", "MCP", "企业主体", "企业检索", "模糊搜索", "远程工具"],
+      "preferredBaseTemplate": "basic",
+      "upgradeSignals": []
+    }
+  ],
+  "baseTemplateRules": [
+    {
+      "template": "basic",
+      "signals": ["说明", "介绍", "指导", "简单", "轻量"],
+      "excludeSignals": ["规则", "案例", "清单", "流程", "步骤", "表单", "检索"],
+      "fallback": false
+    },
+    {
+      "template": "reference-driven",
+      "signals": ["规则", "术语", "清单", "案例", "说明", "参考资料", "知识"],
+      "excludeSignals": [],
+      "fallback": true
+    },
+    {
+      "template": "document-workflow",
+      "signals": ["流程", "步骤", "输入", "输出", "处理", "表单", "提交", "文档"],
+      "excludeSignals": [],
+      "fallback": false
+    }
+  ]
+}

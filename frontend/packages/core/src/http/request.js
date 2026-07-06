@@ -14,6 +14,8 @@ import {
 
 const API_BASE_URL = (import.meta.env?.VITE_BASE_URL || '').trim().replace(/\/+$/, '');
 
+let globalRequestErrorHandler = null;
+
 export class RequestError extends Error {
     constructor(message, options = {}) {
         super(message || '请求失败');
@@ -22,6 +24,14 @@ export class RequestError extends Error {
         this.code = options.code ?? null;
         this.payload = options.payload;
     }
+}
+
+export function setGlobalRequestErrorHandler(handler) {
+    globalRequestErrorHandler = typeof handler === 'function' ? handler : null;
+}
+
+export function isLicenseErrorCode(code) {
+    return Number.isInteger(code) && code >= 423000 && code < 424000;
 }
 
 function parseApiCode(payload) {
@@ -64,13 +74,16 @@ function fallbackMessageByStatus(status) {
         return '请求参数不正确';
     }
     if (status === 401) {
-        return '登录已过期或无权限，请重新登录';
+        return '登录已过期或没有访问权限，请重新登录';
     }
     if (status === 403) {
-        return '当前无权限执行该操作';
+        return '当前没有权限执行该操作';
     }
     if (status === 404) {
         return '请求的资源不存在';
+    }
+    if (status === 423) {
+        return '当前授权状态不可用，请检查 license';
     }
     if (status === 429) {
         return '请求过于频繁，请稍后重试';
@@ -198,11 +211,14 @@ async function request(url, options = {}) {
         method = 'GET',
         headers = {},
         body,
+        query,
         auth = true,
         onUnauthorized,
         responseType,
         skipRefresh = false,
         retry = false,
+        signal,
+        onUploadProgress,
     } = options;
 
     const mergedHeaders = new Headers(headers);
@@ -221,10 +237,13 @@ async function request(url, options = {}) {
         baseURL: API_BASE_URL || undefined,
         url,
         method,
+        params: query,
         data: normalizeBody(body, mergedHeaders),
         headers: headersToObject(mergedHeaders),
         responseType,
-        adapter: 'fetch',
+        signal,
+        onUploadProgress,
+        adapter: onUploadProgress ? undefined : 'fetch',
         validateStatus: () => true,
     });
 
@@ -264,11 +283,32 @@ export async function requestJson(url, options = {}) {
     const ok = response.status >= HTTP_STATUS_OK_MIN && response.status < HTTP_STATUS_OK_MAX;
 
     if (!ok || code !== 0) {
-        throw new RequestError(parseApiMessage(payload, fallbackMessageByStatus(response.status)), {
-            status: response.status,
-            code,
-            payload,
-        });
+        const error = new RequestError(
+            parseApiMessage(payload, fallbackMessageByStatus(response.status)),
+            {
+                status: response.status,
+                code,
+                payload,
+            }
+        );
+        if (typeof globalRequestErrorHandler === 'function') {
+            try {
+                globalRequestErrorHandler({
+                    error,
+                    url,
+                    options,
+                    response,
+                    payload,
+                    data,
+                    status: response.status,
+                    code,
+                    isLicenseError: isLicenseErrorCode(code),
+                });
+            } catch (handlerError) {
+                // 保持请求契约稳定，不让页面级处理器影响底层请求行为
+            }
+        }
+        throw error;
     }
 
     return {

@@ -40,7 +40,8 @@ public class LowcodeApiBrowseController {
     }
 
     @PostMapping("/test-execute")
-    public LowcodeApiBrowseService.TestExecuteResult testExecute(@RequestBody TestExecuteRequest request) throws TaskException {
+    public LowcodeApiBrowseService.TestExecuteResult testExecute(@RequestBody TestExecuteRequest request)
+            throws TaskException {
         return lowcodeApiBrowseService.testExecute(request.platformKey(), request.apiCode(), request.arguments());
     }
 

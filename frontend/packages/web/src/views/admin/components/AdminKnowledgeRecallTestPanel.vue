@@ -57,7 +57,7 @@ async function runRecallTest() {
                 query,
                 topK: 8,
             },
-            handleUnauthorized,
+            handleUnauthorized
         );
         recallChunks.value = chunks.map(chunk => ({
             ...chunk,
@@ -144,11 +144,15 @@ async function runRecallTest() {
 
                     <div class="space-y-4">
                         <h3 class="px-1 font-bold text-slate-800">记录</h3>
-                        <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                        <div
+                            class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+                        >
                             <table class="w-full text-left text-sm">
                                 <thead class="border-b border-slate-100 bg-slate-50/50">
                                     <tr>
-                                        <th class="px-6 py-4 font-semibold text-slate-500">检索源</th>
+                                        <th class="px-6 py-4 font-semibold text-slate-500">
+                                            检索源
+                                        </th>
                                         <th class="px-6 py-4 font-semibold text-slate-500">文本</th>
                                         <th class="px-6 py-4 font-semibold text-slate-500">时间</th>
                                     </tr>
@@ -157,10 +161,16 @@ async function runRecallTest() {
                                     <tr v-for="record in testRecords" :key="record.id">
                                         <td class="px-6 py-4">
                                             <div class="flex items-center gap-2">
-                                                <div class="flex h-6 w-6 items-center justify-center rounded bg-blue-50 text-primary">
-                                                    <span class="material-symbols-outlined text-sm">manage_search</span>
+                                                <div
+                                                    class="flex h-6 w-6 items-center justify-center rounded bg-blue-50 text-primary"
+                                                >
+                                                    <span class="material-symbols-outlined text-sm"
+                                                        >manage_search</span
+                                                    >
                                                 </div>
-                                                <span class="font-medium text-slate-700">{{ record.source }}</span>
+                                                <span class="font-medium text-slate-700">{{
+                                                    record.source
+                                                }}</span>
                                             </div>
                                         </td>
                                         <td class="max-w-[280px] truncate px-6 py-4 text-slate-600">
@@ -178,8 +188,13 @@ async function runRecallTest() {
 
                 <div class="custom-scrollbar min-h-0 w-full space-y-4 overflow-y-auto xl:w-[450px]">
                     <div class="flex items-center justify-between px-1">
-                        <h3 class="text-lg font-bold text-slate-800">{{ recallChunks.length }} 个召回段落</h3>
-                        <button type="button" class="text-slate-400 transition hover:text-slate-600">
+                        <h3 class="text-lg font-bold text-slate-800">
+                            {{ recallChunks.length }} 个召回段落
+                        </h3>
+                        <button
+                            type="button"
+                            class="text-slate-400 transition hover:text-slate-600"
+                        >
                             <span class="material-symbols-outlined">tune</span>
                         </button>
                     </div>
@@ -196,11 +211,15 @@ async function runRecallTest() {
                         :key="chunk.id"
                         class="relative rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
                     >
-                        <div class="absolute right-0 top-0 rounded-bl-xl rounded-tr-2xl bg-blue-50 px-3 py-1 text-[10px] font-bold tracking-wider text-primary">
+                        <div
+                            class="absolute right-0 top-0 rounded-bl-xl rounded-tr-2xl bg-blue-50 px-3 py-1 text-[10px] font-bold tracking-wider text-primary"
+                        >
                             SCORE {{ chunk.score }}
                         </div>
                         <div class="mb-3 flex items-center gap-2 text-xs text-slate-400">
-                            <span class="material-symbols-outlined text-sm text-primary">grid_view</span>
+                            <span class="material-symbols-outlined text-sm text-primary"
+                                >grid_view</span
+                            >
                             <span class="font-medium">{{ chunk.chunkLabel }}</span>
                         </div>
                         <p class="mb-4 text-sm leading-relaxed text-slate-600">
@@ -215,12 +234,21 @@ async function runRecallTest() {
                                 {{ tag }}
                             </span>
                         </div>
-                        <div class="flex items-center justify-between border-t border-slate-100 pt-3">
+                        <div
+                            class="flex items-center justify-between border-t border-slate-100 pt-3"
+                        >
                             <div class="flex items-center gap-2">
-                                <span class="material-symbols-outlined text-sm text-red-400">picture_as_pdf</span>
-                                <span class="w-48 truncate text-[11px] text-slate-400">{{ chunk.fileName }}</span>
+                                <span class="material-symbols-outlined text-sm text-red-400"
+                                    >picture_as_pdf</span
+                                >
+                                <span class="w-48 truncate text-[11px] text-slate-400">{{
+                                    chunk.fileName
+                                }}</span>
                             </div>
-                            <button type="button" class="flex items-center gap-1 text-[11px] font-bold text-primary">
+                            <button
+                                type="button"
+                                class="flex items-center gap-1 text-[11px] font-bold text-primary"
+                            >
                                 打开
                                 <span class="material-symbols-outlined text-sm">open_in_new</span>
                             </button>

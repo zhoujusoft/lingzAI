@@ -14,17 +14,18 @@
         <result property="email" column="email"/>
         <result property="state" column="state"/>
         <result property="parentId" column="parent_id"/>
+        <result property="avatarObjectName" column="avatar_object_name"/>
     </resultMap>
 
     <select id="selectByCode" resultMap="SysUserModelMap">
-        SELECT id, name, code, password, user_type, mobile, email, state, parent_id
+        SELECT id, name, code, password, user_type, mobile, email, state, parent_id, avatar_object_name
         FROM t_user
         WHERE LOWER(code) = LOWER(#{code})
         LIMIT 1
     </select>
 
     <select id="selectByMobile" resultMap="SysUserModelMap">
-        SELECT id, name, code, password, user_type, mobile, email, state, parent_id
+        SELECT id, name, code, password, user_type, mobile, email, state, parent_id, avatar_object_name
         FROM t_user
         WHERE mobile = #{mobile}
     </select>

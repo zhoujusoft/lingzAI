@@ -3,6 +3,7 @@ set -eu
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)"
+. "$SCRIPT_DIR/lib/release-meta.sh"
 
 ENV_FILE_ARG="${1:-deploy/release.env}"
 case "$ENV_FILE_ARG" in
@@ -23,8 +24,8 @@ set +a
 
 CURRENT_IMAGE_TAG="${IMAGE_TAG:-}"
 
-if ! echo "$CURRENT_IMAGE_TAG" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-  echo "IMAGE_TAG in $ENV_FILE must be semantic version x.y.z, got: ${CURRENT_IMAGE_TAG:-<empty>}" >&2
+if ! validate_image_tag "$CURRENT_IMAGE_TAG"; then
+  echo "IMAGE_TAG in $ENV_FILE must be base semantic version x.y.z, got: ${CURRENT_IMAGE_TAG:-<empty>}" >&2
   exit 1
 fi
 
@@ -60,8 +61,8 @@ if [ -z "$TARGET_VERSION" ]; then
   fi
 fi
 
-if ! echo "$TARGET_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-  echo "Release version must be semantic version x.y.z, got: $TARGET_VERSION" >&2
+if ! validate_image_tag "$TARGET_VERSION"; then
+  echo "Release version must be base semantic version x.y.z, got: $TARGET_VERSION" >&2
   exit 1
 fi
 

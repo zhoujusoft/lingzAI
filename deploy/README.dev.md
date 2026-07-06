@@ -34,7 +34,7 @@ cp deploy/.env.dev.example deploy/.env.dev
 - `dev-up` 只负责 dev 中间件与数据库准备，不会代替你启动本机的后端、前端进程。
 - `middleware-db-update` 仅用于本地 dev，中间件中的 MySQL 会先被拉起，然后按 `backend/src/main/resources/db/changes/*.sql` 顺序执行增量 SQL。
 - 脚本会在数据库中维护一张 `dev_schema_migrations` 表，已经执行过的 SQL 文件不会重复执行。
-- 若你清空了 `deploy/data/dev/mysql`，MySQL 会先按 `backend/src/main/resources/db/schema.sql` 初始化，再执行上述增量 SQL。
+- 若你清空了 `deploy/data/dev/mysql`，MySQL 会先按 `deploy/lingz/db/schema.sql` 初始化，再执行上述增量 SQL。
 
 ## 查看日志
 

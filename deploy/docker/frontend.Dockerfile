@@ -1,8 +1,13 @@
+# syntax=docker/dockerfile:1.7
+
 FROM node:20-alpine AS builder
+ARG TARGETARCH
 WORKDIR /app
 
 ARG PNPM_REGISTRY=https://registry.npmmirror.com
+ARG PNPM_VERSION=9.15.9
 RUN corepack enable \
+    && corepack prepare "pnpm@${PNPM_VERSION}" --activate \
     && pnpm config set registry "${PNPM_REGISTRY}" \
     && pnpm config set fetch-retries 5 \
     && pnpm config set fetch-timeout 120000
@@ -10,7 +15,8 @@ RUN corepack enable \
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages/core/package.json ./packages/core/package.json
 COPY packages/web/package.json ./packages/web/package.json
-RUN pnpm install --no-frozen-lockfile
+RUN --mount=type=cache,id=frontend-pnpm-store-${TARGETARCH},target=/root/.local/share/pnpm/store,sharing=locked \
+    pnpm install --no-frozen-lockfile
 
 COPY . .
 

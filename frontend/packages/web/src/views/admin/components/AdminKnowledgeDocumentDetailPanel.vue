@@ -5,7 +5,8 @@ import { useRouter } from 'vue-router';
 import MiniPagination from '@/components/MiniPagination.vue';
 import PageLayout from '@/components/PageLayout.vue';
 import { alert } from '@/composables/useModal';
-import { clearUserSession } from '@/composables/useCurrentUser';
+import { clearUserSession, currentUserState } from '@/composables/useCurrentUser';
+import { canOperateKnowledgeBase } from '@/model/knowledge-permissions';
 import {
     appendDocumentChunk,
     getDocumentDetail,
@@ -198,6 +199,9 @@ const documentName = computed(() => resolvedDetail.value?.name || '未命名文�
 const documentPath = computed(() => resolvedDetail.value?.path || props.knowledge?.name || '-');
 const documentIcon = computed(() => fileIcon(resolvedDetail.value?.fileType));
 const parsedChunkConfig = computed(() => parseChunkConfig(detail.value?.chunkConfig));
+const canOperateCurrentKnowledge = computed(() =>
+    canOperateKnowledgeBase(props.knowledge, currentUserState.profile)
+);
 
 const summaryItems = computed(() => {
     const current = resolvedDetail.value;
@@ -225,7 +229,9 @@ const summaryItems = computed(() => {
     ];
 });
 
-const canAppendChunk = computed(() => Number(detail.value?.status) === 2);
+const canAppendChunk = computed(
+    () => canOperateCurrentKnowledge.value && Number(detail.value?.status) === 2
+);
 const metadataItems = computed(() => [
     { label: '文件名', value: documentName.value },
     { label: '所属知识库', value: props.knowledge?.name || '-' },
@@ -365,6 +371,9 @@ function formatEditableList(values) {
 }
 
 function startEditingChunk(chunk) {
+    if (!canOperateCurrentKnowledge.value) {
+        return;
+    }
     editingChunkId.value = chunk.chunkId;
     editForm.chunkContent = chunk.chunkContent || '';
     editForm.chunkType = chunk.chunkType || 'TEXT';
@@ -373,6 +382,9 @@ function startEditingChunk(chunk) {
 }
 
 async function submitChunk() {
+    if (!canOperateCurrentKnowledge.value) {
+        return;
+    }
     const content = chunkContent.value.trim();
     if (!content) {
         await alert({
@@ -411,6 +423,9 @@ async function submitChunk() {
 }
 
 async function submitChunkEdit(chunk) {
+    if (!canOperateCurrentKnowledge.value) {
+        return;
+    }
     const kbId = knowledgeId.value;
     if (kbId == null) {
         await alert({
@@ -512,6 +527,7 @@ watch([page, pageSize], () => {
                     {{ statusText(detail?.status) }}
                 </span>
                 <button
+                    v-if="canOperateCurrentKnowledge"
                     type="button"
                     class="flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-blue-500/15 transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
                     :disabled="!canAppendChunk || savingChunk"
@@ -543,12 +559,7 @@ watch([page, pageSize], () => {
                                 class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between"
                             >
                                 <div>
-                                    <div
-                                        class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400"
-                                    >
-                                        Document Detail
-                                    </div>
-                                    <h2 class="mt-2 text-2xl font-bold text-slate-900">
+                                    <h2 class="text-2xl font-bold text-slate-900">
                                         {{ documentName }}
                                     </h2>
                                     <p class="mt-2 text-sm leading-6 text-slate-500">
@@ -559,9 +570,7 @@ watch([page, pageSize], () => {
                                 <div
                                     class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600"
                                 >
-                                    <div class="text-xs uppercase tracking-[0.18em] text-slate-400">
-                                        当前策略
-                                    </div>
+                                    <div class="text-xs text-slate-400">当前策略</div>
                                     <div class="mt-1 font-semibold text-slate-800">
                                         {{ formatChunkStrategy(detail?.chunkStrategy) }}
                                     </div>
@@ -576,9 +585,7 @@ watch([page, pageSize], () => {
                                 >
                                     <div class="flex items-start justify-between gap-3">
                                         <div>
-                                            <div
-                                                class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400"
-                                            >
+                                            <div class="text-xs font-semibold text-slate-400">
                                                 {{ item.label }}
                                             </div>
                                             <div
@@ -606,7 +613,7 @@ watch([page, pageSize], () => {
                             </div>
 
                             <div
-                                v-if="!canAppendChunk"
+                                v-if="canOperateCurrentKnowledge && !canAppendChunk"
                                 class="mt-5 rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-700"
                             >
                                 当前文档状态为
@@ -614,7 +621,7 @@ watch([page, pageSize], () => {
                             </div>
                         </div>
                         <section
-                            v-if="addFormOpen"
+                            v-if="canOperateCurrentKnowledge && addFormOpen"
                             class="border-t border-slate-100 bg-slate-50/70 px-6 py-6"
                         >
                             <div class="mb-5 flex items-center justify-between">
@@ -806,6 +813,7 @@ watch([page, pageSize], () => {
 
                                         <div class="flex flex-wrap items-center justify-end gap-2">
                                             <button
+                                                v-if="canOperateCurrentKnowledge"
                                                 type="button"
                                                 class="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
                                                 :disabled="
@@ -952,7 +960,7 @@ watch([page, pageSize], () => {
 
                         <div class="mt-5 space-y-4">
                             <div v-for="item in metadataItems" :key="item.label">
-                                <div class="text-xs uppercase tracking-[0.16em] text-slate-400">
+                                <div class="text-xs text-slate-400">
                                     {{ item.label }}
                                 </div>
                                 <div class="mt-1 break-all text-sm font-medium text-slate-700">
@@ -976,7 +984,7 @@ watch([page, pageSize], () => {
                                 :key="item.label"
                                 class="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3"
                             >
-                                <div class="text-xs uppercase tracking-[0.16em] text-slate-400">
+                                <div class="text-xs text-slate-400">
                                     {{ item.label }}
                                 </div>
                                 <div

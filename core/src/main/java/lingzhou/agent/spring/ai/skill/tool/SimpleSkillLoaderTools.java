@@ -175,11 +175,13 @@ public class SimpleSkillLoaderTools {
         }
     }
 
-    @Tool(description = "List activated skills with their descriptions.")
+    @Tool(
+            description =
+                    "List currently activated skills only. This does not list all skills that may be available to load.")
     public String listActiveSkills() {
         Set<String> active = skillKit.getActivatedSkillNames();
         if (active == null || active.isEmpty()) {
-            return "[]";
+            return "{\"activeSkills\":[],\"note\":\"No skills are currently activated. This does not mean no other skills are available to load.\"}";
         }
 
         StringJoiner joiner = new StringJoiner(",", "[", "]");
@@ -195,7 +197,8 @@ public class SimpleSkillLoaderTools {
                     + escapeJson(source)
                     + "\"}");
         }
-        return joiner.toString();
+        return "{\"activeSkills\":" + joiner
+                + ",\"note\":\"This only shows activated skills, not every skill that may be available to load.\"}";
     }
 
     private static String escapeJson(String value) {

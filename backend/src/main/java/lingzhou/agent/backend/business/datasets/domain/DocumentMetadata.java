@@ -3,7 +3,6 @@ package lingzhou.agent.backend.business.datasets.domain;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
-import lingzhou.agent.backend.framework.web.BaseEntity;
 
 /**
  * 存储元数据配置定义对象 document_metadata

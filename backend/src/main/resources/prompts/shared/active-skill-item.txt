@@ -1,0 +1,8 @@
+---
+
+### 技能：{{skillName}}
+用途：{{skillDescription}}
+{{toolNamesLine}}
+
+继续遵守的关键规则：
+{{keyRulesSection}}

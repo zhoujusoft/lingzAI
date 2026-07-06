@@ -1,0 +1,15 @@
+上一条输出不符合 Runtime V2 ReAct 协议，请按当前模式修正，不要补充额外说明。
+修正原因：{{repairReason}}
+上一条原始输出：
+{{rawOutput}}
+
+重新输出时必须满足：
+1. 如果已经可以直接回答，直接输出给用户的最终回答正文，不要输出 JSON。
+2. 如果确实需要调用工具，只能输出单个 JSON 对象。
+3. 当输出 JSON 时，type 只能是 tool。
+4. 当输出 JSON 时，toolName 必须来自可用工具列表，arguments 必须是 JSON 对象；userPreambleMessage 如提供，必须是简短字符串。
+5. 当输出 JSON 时，必须显式包含以下骨架中的全部必需字段，不要省略 type：
+{"type":"tool","toolName":"工具名","arguments":{}}
+{{observationAwareRule}}{{jsonEscapingRule}}
+
+现在只输出修正后的正文或单个 tool JSON。

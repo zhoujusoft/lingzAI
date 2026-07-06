@@ -1,15 +1,15 @@
 package lingzhou.agent.backend.business.datasets.service;
 
-import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 import java.util.stream.Collectors;
-import lingzhou.agent.backend.capability.tool.publish.DatasetToolPublishService;
 import lingzhou.agent.backend.business.datasets.domain.IntegrationDataset;
 import lingzhou.agent.backend.business.datasets.domain.IntegrationDatasetPublishBinding;
 import lingzhou.agent.backend.business.datasets.mapper.IntegrationDatasetMapper;
 import lingzhou.agent.backend.business.datasets.mapper.IntegrationDatasetPublishBindingMapper;
+import lingzhou.agent.backend.business.system.model.SysUserModel;
+import lingzhou.agent.backend.capability.tool.publish.DatasetToolPublishService;
 import lingzhou.agent.backend.common.lzException.TaskException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,18 +25,23 @@ public class IntegrationDatasetPublishService {
     private final IntegrationDatasetMapper integrationDatasetMapper;
     private final IntegrationDatasetPublishBindingMapper publishBindingMapper;
     private final DatasetToolPublishService datasetToolPublishService;
+    private final IntegrationDatasetPermissionService integrationDatasetPermissionService;
 
     public IntegrationDatasetPublishService(
             IntegrationDatasetMapper integrationDatasetMapper,
             IntegrationDatasetPublishBindingMapper publishBindingMapper,
-            DatasetToolPublishService datasetToolPublishService) {
+            DatasetToolPublishService datasetToolPublishService,
+            IntegrationDatasetPermissionService integrationDatasetPermissionService) {
         this.integrationDatasetMapper = integrationDatasetMapper;
         this.publishBindingMapper = publishBindingMapper;
         this.datasetToolPublishService = datasetToolPublishService;
+        this.integrationDatasetPermissionService = integrationDatasetPermissionService;
     }
 
-    public PublishStatusView getPublishStatus(Long datasetId) throws TaskException {
+    public PublishStatusView getPublishStatus(Long datasetId, Long operatorUserId) throws TaskException {
         IntegrationDataset dataset = requireDataset(datasetId);
+        SysUserModel operator = integrationDatasetPermissionService.resolveOperator(operatorUserId);
+        integrationDatasetPermissionService.assertCanViewDataset(dataset, operator);
         String datasetCode = requireDatasetCode(dataset);
         IntegrationDatasetPublishBinding binding = publishBindingMapper.selectByDatasetId(datasetId);
         List<PublishedToolView> tools = toPublishedToolViews(datasetToolPublishService.loadPublishedTools(datasetCode));
@@ -44,8 +49,10 @@ public class IntegrationDatasetPublishService {
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public PublishStatusView publish(Long datasetId) throws TaskException {
+    public PublishStatusView publish(Long datasetId, Long operatorUserId) throws TaskException {
         IntegrationDataset dataset = requireDataset(datasetId);
+        SysUserModel operator = integrationDatasetPermissionService.resolveOperator(operatorUserId);
+        integrationDatasetPermissionService.assertCanOperateDataset(dataset, operator);
         requireDatasetCode(dataset);
         List<String> toolNames = datasetToolPublishService.publish(dataset);
         Date now = new Date();
@@ -68,12 +75,14 @@ public class IntegrationDatasetPublishService {
         } else {
             publishBindingMapper.updateById(binding);
         }
-        return getPublishStatus(datasetId);
+        return getPublishStatus(datasetId, operatorUserId);
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public PublishStatusView disable(Long datasetId) throws TaskException {
+    public PublishStatusView disable(Long datasetId, Long operatorUserId) throws TaskException {
         IntegrationDataset dataset = requireDataset(datasetId);
+        SysUserModel operator = integrationDatasetPermissionService.resolveOperator(operatorUserId);
+        integrationDatasetPermissionService.assertCanOperateDataset(dataset, operator);
         String datasetCode = requireDatasetCode(dataset);
         IntegrationDatasetPublishBinding binding = publishBindingMapper.selectByDatasetId(datasetId);
         Date now = new Date();
@@ -95,9 +104,7 @@ public class IntegrationDatasetPublishService {
     }
 
     private PublishStatusView toStatusView(
-            IntegrationDataset dataset,
-            IntegrationDatasetPublishBinding binding,
-            List<PublishedToolView> tools) {
+            IntegrationDataset dataset, IntegrationDatasetPublishBinding binding, List<PublishedToolView> tools) {
         String status = binding == null || !StringUtils.hasText(binding.getPublishStatus())
                 ? STATUS_DRAFT
                 : binding.getPublishStatus().trim().toUpperCase(Locale.ROOT);
@@ -136,11 +143,8 @@ public class IntegrationDatasetPublishService {
 
     private List<PublishedToolView> toPublishedToolViews(List<DatasetToolPublishService.PublishedToolView> source) {
         return source.stream()
-                .map(item -> new PublishedToolView(
-                        item.toolName(),
-                        item.displayName(),
-                        item.description(),
-                        item.toolType()))
+                .map(item ->
+                        new PublishedToolView(item.toolName(), item.displayName(), item.description(), item.toolType()))
                 .toList();
     }
 

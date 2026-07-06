@@ -50,8 +50,7 @@ function md5(input) {
     function convertToWordArray(str) {
         const msgLength = str.length;
         const numberOfWordsTemp1 = msgLength + 8;
-        const numberOfWordsTemp2 =
-            (numberOfWordsTemp1 - (numberOfWordsTemp1 % 64)) / 64;
+        const numberOfWordsTemp2 = (numberOfWordsTemp1 - (numberOfWordsTemp1 % 64)) / 64;
         const numberOfWords = (numberOfWordsTemp2 + 1) * 16;
         const wordArray = new Array(numberOfWords - 1);
         let bytePosition = 0;
@@ -60,8 +59,7 @@ function md5(input) {
             const wordCount = (byteCount - (byteCount % 4)) / 4;
             bytePosition = (byteCount % 4) * 8;
             wordArray[wordCount] =
-                wordArray[wordCount] |
-                (str.charCodeAt(byteCount) << bytePosition);
+                wordArray[wordCount] | (str.charCodeAt(byteCount) << bytePosition);
             byteCount += 1;
         }
         const wordCount = (byteCount - (byteCount % 4)) / 4;

@@ -1,13 +1,7 @@
 import { h } from 'vue';
 
 export function createTextColumn(columnHelper, options) {
-    const {
-        accessorKey,
-        header,
-        maxWidth,
-        minWidth,
-        textTone = 'muted',
-    } = options;
+    const { accessorKey, header, maxWidth, minWidth, textTone = 'muted' } = options;
 
     return columnHelper.accessor(accessorKey, {
         header,
@@ -18,7 +12,7 @@ export function createTextColumn(columnHelper, options) {
                     class: 'truncate',
                     style: maxWidth ? { maxWidth: `${maxWidth}px` } : undefined,
                 },
-                info.getValue(),
+                info.getValue()
             ),
         meta: {
             minWidth,

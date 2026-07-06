@@ -14,6 +14,8 @@ import {
 } from '@/api/skills';
 import { ROUTE_PATHS } from '@/router/routePaths';
 import AdminLowcodeApiDetailModalContent from '@/views/admin/components/AdminLowcodeApiDetailModalContent.vue';
+import AdminLowcodeApiRegisterModalContent from '@/views/admin/components/AdminLowcodeApiRegisterModalContent.vue';
+import AdminLowcodeApiRegisterModalFooter from '@/views/admin/components/AdminLowcodeApiRegisterModalFooter.vue';
 import { ADMIN_SELECT_BUTTON_CLASS } from '@/views/admin/components/mcp-management/mcpManagementShared';
 
 const router = useRouter();
@@ -64,7 +66,7 @@ const filteredApis = computed(() => {
         if (!keyword) {
             return true;
         }
-        return `${item.apiName || ''} ${item.apiCode || ''} ${item.apiRemark || ''} ${item.method || ''} ${item.url || ''}`
+        return `${item.apiName || ''} ${item.apiCode || ''} ${item.apiRemark || ''} ${item.toolDisplayName || ''} ${item.toolRemark || ''} ${item.method || ''} ${item.url || ''}`
             .toLowerCase()
             .includes(keyword);
     });
@@ -77,13 +79,13 @@ function prettyJson(value) {
     if (typeof value === 'string') {
         try {
             return JSON.stringify(JSON.parse(value), null, 2);
-        } catch (error) {
+        } catch {
             return value;
         }
     }
     try {
         return JSON.stringify(value, null, 2);
-    } catch (error) {
+    } catch {
         return String(value);
     }
 }
@@ -95,7 +97,7 @@ function parseMaybeJson(value) {
     if (typeof value === 'string') {
         try {
             return JSON.parse(value);
-        } catch (error) {
+        } catch {
             return value;
         }
     }
@@ -139,6 +141,12 @@ function setExecutePayloadText(apiCode, text) {
         ...executePayloadTextByCode.value,
         [apiCode]: text,
     };
+}
+
+function buildDefaultToolName(platformKey, apiCode) {
+    return String(`lowcode.${platformKey || ''}.${apiCode || ''}`)
+        .trim()
+        .replaceAll(/[^A-Za-z0-9._-]+/g, '_');
 }
 
 async function loadPlatforms() {
@@ -219,7 +227,7 @@ async function handleTestExecuteByCode(apiCode, payloadText) {
     let argumentsPayload = {};
     try {
         argumentsPayload = payloadText.trim() ? JSON.parse(payloadText) : {};
-    } catch (error) {
+    } catch {
         executeErrorByCode.value = {
             ...executeErrorByCode.value,
             [apiCode]: '测试入参不是合法 JSON',
@@ -269,9 +277,44 @@ async function handleRegister(api) {
     if (!api?.apiCode || registerLoadingCode.value) {
         return;
     }
+    const registerPayload = await openModal({
+        title: api.registered ? '重新注册工具' : '注册为工具',
+        showClose: true,
+        showCancel: true,
+        confirmText: api.registered ? '确认重新注册' : '确认注册',
+        cancelText: '取消',
+        panelClass: '!max-w-[880px]',
+        content: {
+            component: AdminLowcodeApiRegisterModalContent,
+        },
+        footer: {
+            component: AdminLowcodeApiRegisterModalFooter,
+            props: {
+                confirmText: api.registered ? '确认重新注册' : '确认注册',
+            },
+        },
+        context: {
+            apiName: api.apiName || api.apiCode || '',
+            apiCode: api.apiCode || '',
+            apiRemark: api.apiRemark || '',
+            platformKey: selectedPlatformKey.value,
+            registered: Boolean(api.registered),
+            currentToolDisplayName: api.toolDisplayName || '',
+            currentToolName: api.toolName || '',
+            currentToolRemark: api.toolRemark || '',
+            defaultToolName: buildDefaultToolName(selectedPlatformKey.value, api.apiCode),
+            toolDisplayName: api.toolDisplayName || api.apiName || api.apiCode || '',
+            toolRemark: api.toolRemark || '',
+            formErrors: {},
+            submitError: '',
+        },
+    });
+    if (!registerPayload?.toolDisplayName) {
+        return;
+    }
     registerLoadingCode.value = api.apiCode;
     try {
-        const result = await registerLowcodeApi(
+        await registerLowcodeApi(
             {
                 platformKey: selectedPlatformKey.value,
                 appId: selectedApp.value?.appId || api.appId || '',
@@ -279,7 +322,11 @@ async function handleRegister(api) {
                 apiId: api.apiId || '',
                 apiCode: api.apiCode,
                 apiName: api.apiName,
-                description: api.apiRemark || '',
+                apiRemark: api.apiRemark || '',
+                toolDisplayName: registerPayload.toolDisplayName,
+                toolName:
+                    api.toolName || buildDefaultToolName(selectedPlatformKey.value, api.apiCode),
+                toolRemark: registerPayload.toolRemark || '',
                 remoteSchema: api.raw || api,
             },
             handleUnauthorized
@@ -287,7 +334,7 @@ async function handleRegister(api) {
         await loadApis();
         await alert({
             title: '注册成功',
-            message: `已注册为工具：${result?.toolName || api.apiCode}`,
+            message: `已注册工具：${registerPayload.toolDisplayName || api.apiName || api.apiCode}`,
         });
     } catch (error) {
         await alert({
@@ -391,15 +438,12 @@ onMounted(async () => {
 
 <template>
     <section class="flex h-full min-h-0 flex-col bg-slate-100">
-        <header class="border-b border-slate-200 bg-white px-8 py-6">
+        <header class="border-b border-slate-200 bg-white px-8 py-5">
             <div class="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
                 <div>
-                    <p class="text-xs font-semibold uppercase tracking-[0.32em] text-slate-400">
-                        API Library
-                    </p>
-                    <h2 class="mt-3 text-3xl font-bold tracking-tight text-slate-900">API 库</h2>
+                    <h2 class="text-3xl font-bold tracking-tight text-slate-900">API 库</h2>
                     <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
-                        浏览低代码平台连接器应用与 API 目录，查看接口详情，测试执行，并将 API
+                        浏览低代码平台连接器应用与 API 目录，查看接口详情、测试执行，并将 API
                         注册或取消注册为项目工具。
                     </p>
                 </div>
@@ -593,9 +637,9 @@ onMounted(async () => {
                                             </span>
                                         </div>
                                         <p class="mt-2 text-sm text-slate-500">
-                                            <span class="font-medium text-slate-700"
-                                                >API Code：</span
-                                            >
+                                            <span class="font-medium text-slate-700">
+                                                API Code：
+                                            </span>
                                             {{ api.apiCode || '-' }}
                                         </p>
                                         <p
@@ -604,11 +648,24 @@ onMounted(async () => {
                                         >
                                             {{ api.apiRemark }}
                                         </p>
+                                        <p
+                                            v-if="api.toolRemark"
+                                            class="mt-2 rounded-2xl border border-sky-100 bg-sky-50 px-3 py-2 text-xs leading-6 text-sky-700"
+                                        >
+                                            工具备注：{{ api.toolRemark }}
+                                        </p>
+                                        <p
+                                            v-if="api.toolDisplayName"
+                                            class="mt-2 text-xs text-slate-500"
+                                        >
+                                            工具名称：<span class="font-semibold text-slate-700">{{
+                                                api.toolDisplayName
+                                            }}</span>
+                                        </p>
                                         <p v-if="api.toolName" class="mt-2 text-xs text-slate-500">
-                                            已生成工具名：<span
-                                                class="font-semibold text-slate-700"
-                                                >{{ api.toolName }}</span
-                                            >
+                                            工具编码：<span class="font-semibold text-slate-700">{{
+                                                api.toolName
+                                            }}</span>
                                         </p>
                                     </div>
 

@@ -11,6 +11,11 @@ import {
     listIntegrationDatasets,
     publishIntegrationDataset,
 } from '@/api/integration';
+import {
+    getResourcePermissionBadgeClass,
+    getResourcePermissionDescription,
+    getResourcePermissionLabel,
+} from '@/model/resource-permissions';
 import { ROUTE_PATHS } from '@/router/routePaths';
 
 const router = useRouter();
@@ -66,9 +71,10 @@ async function loadPageData() {
 const groupedDatasets = computed(() => {
     const groups = {};
     datasets.value.forEach(item => {
-        const key = item.sourceKind === 'AI_SOURCE'
-            ? item.aiDataSourceName || '未绑定数据源'
-            : item.lowcodeAppName || '低代码应用';
+        const key =
+            item.sourceKind === 'AI_SOURCE'
+                ? item.aiDataSourceName || '未绑定数据源'
+                : item.lowcodeAppName || '低代码应用';
         if (!groups[key]) {
             groups[key] = [];
         }
@@ -175,6 +181,18 @@ function publishActionLabel(item) {
     return item?.publishStatus === 'PUBLISHED' ? '重新发布' : '发布工具';
 }
 
+function permissionScopeLabel(item) {
+    return getResourcePermissionLabel(item?.permissionScope);
+}
+
+function permissionScopeDescription(item) {
+    return getResourcePermissionDescription(item?.permissionScope);
+}
+
+function permissionScopeClass(item) {
+    return getResourcePermissionBadgeClass(item?.permissionScope);
+}
+
 onMounted(loadPageData);
 </script>
 
@@ -182,6 +200,13 @@ onMounted(loadPageData);
     <div class="flex h-full flex-col overflow-hidden bg-[#f6f7f8]">
         <header class="border-b border-slate-200 bg-white px-8 pt-6">
             <div class="flex items-center gap-8">
+                <button
+                    class="border-b-2 border-transparent pb-4 text-sm font-medium text-slate-400"
+                    type="button"
+                    @click="router.push(ROUTE_PATHS.adminIntegrationConnectors)"
+                >
+                    连接器
+                </button>
                 <button
                     class="border-b-2 border-transparent pb-4 text-sm font-medium text-slate-400"
                     type="button"
@@ -195,7 +220,9 @@ onMounted(loadPageData);
             </div>
         </header>
 
-        <section class="flex flex-col gap-4 border-b border-slate-100 bg-white px-8 py-6 md:flex-row md:items-center md:justify-between">
+        <section
+            class="flex flex-col gap-4 border-b border-slate-100 bg-white px-8 py-6 md:flex-row md:items-center md:justify-between"
+        >
             <div class="flex flex-1 flex-col gap-4 md:max-w-3xl md:flex-row">
                 <div class="md:w-52">
                     <AppSelect
@@ -204,7 +231,12 @@ onMounted(loadPageData);
                         size="sm"
                         button-class="border-slate-200 bg-slate-50 shadow-none"
                         menu-class="w-full"
-                        @update:modelValue="value => { filters.sourceKind = value; loadPageData(); }"
+                        @update:modelValue="
+                            value => {
+                                filters.sourceKind = value;
+                                loadPageData();
+                            }
+                        "
                     />
                 </div>
                 <div class="md:w-60">
@@ -214,11 +246,19 @@ onMounted(loadPageData);
                         size="sm"
                         button-class="border-slate-200 bg-slate-50 shadow-none"
                         menu-class="w-full"
-                        @update:modelValue="value => { filters.aiDataSourceId = value; loadPageData(); }"
+                        @update:modelValue="
+                            value => {
+                                filters.aiDataSourceId = value;
+                                loadPageData();
+                            }
+                        "
                     />
                 </div>
                 <div class="relative flex-1">
-                    <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">search</span>
+                    <span
+                        class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                        >search</span
+                    >
                     <input
                         v-model="filters.keyword"
                         class="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-4 text-sm outline-none transition-all focus:border-primary focus:ring-2 focus:ring-primary/10"
@@ -239,15 +279,22 @@ onMounted(loadPageData);
         </section>
 
         <section class="flex-1 overflow-y-auto px-8 pb-8 pt-6">
-            <div v-if="loadError" class="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
+            <div
+                v-if="loadError"
+                class="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600"
+            >
                 {{ loadError }}
             </div>
-            <div v-if="loading" class="py-16 text-center text-sm text-slate-400">数据集加载中...</div>
+            <div v-if="loading" class="py-16 text-center text-sm text-slate-400">
+                数据集加载中...
+            </div>
             <div v-else class="space-y-12">
                 <section v-for="[groupName, items] in groupedDatasets" :key="groupName">
                     <div class="mb-6 flex items-center gap-3">
                         <span class="material-symbols-outlined text-primary">database</span>
-                        <h2 class="text-sm font-bold uppercase tracking-[0.2em] text-slate-500">{{ groupName }}</h2>
+                        <h2 class="text-sm font-bold text-slate-500">
+                            {{ groupName }}
+                        </h2>
                         <div class="h-px flex-1 bg-slate-200" />
                     </div>
                     <div class="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
@@ -258,23 +305,56 @@ onMounted(loadPageData);
                         >
                             <div class="mb-4 flex items-start justify-between gap-4">
                                 <div>
-                                    <span class="mb-2 inline-flex rounded-full px-2.5 py-1 text-[10px] font-bold" :class="sourceBadgeClass(item)">
+                                    <span
+                                        class="mb-2 inline-flex rounded-full px-2.5 py-1 text-[10px] font-bold"
+                                        :class="sourceBadgeClass(item)"
+                                    >
                                         {{ sourceLabel(item) }}
                                     </span>
-                                    <h3 class="text-lg font-bold text-slate-900">{{ item.name }}</h3>
+                                    <h3 class="text-lg font-bold text-slate-900">
+                                        {{ item.name }}
+                                    </h3>
                                     <p v-if="item.datasetCode" class="mt-1 text-xs text-slate-400">
                                         {{ item.datasetCode }}
                                     </p>
                                 </div>
                                 <div class="flex items-center gap-2">
-                                    <button class="text-slate-300 transition-colors hover:text-primary" type="button" @click.stop="router.push(ROUTE_PATHS.adminIntegrationDatasetView(item.id))">
-                                        <span class="material-symbols-outlined text-[20px]">visibility</span>
+                                    <button
+                                        class="text-slate-300 transition-colors hover:text-primary"
+                                        type="button"
+                                        @click.stop="
+                                            router.push(
+                                                ROUTE_PATHS.adminIntegrationDatasetView(item.id)
+                                            )
+                                        "
+                                    >
+                                        <span class="material-symbols-outlined text-[20px]"
+                                            >visibility</span
+                                        >
                                     </button>
-                                    <button class="text-slate-300 transition-colors hover:text-primary" type="button" @click.stop="router.push(ROUTE_PATHS.adminIntegrationDatasetEdit(item.id))">
-                                        <span class="material-symbols-outlined text-[20px]">edit</span>
+                                    <button
+                                        v-if="item.canOperate"
+                                        class="text-slate-300 transition-colors hover:text-primary"
+                                        type="button"
+                                        @click.stop="
+                                            router.push(
+                                                ROUTE_PATHS.adminIntegrationDatasetEdit(item.id)
+                                            )
+                                        "
+                                    >
+                                        <span class="material-symbols-outlined text-[20px]"
+                                            >edit</span
+                                        >
                                     </button>
-                                    <button class="text-slate-300 transition-colors hover:text-rose-500" type="button" @click.stop="handleDelete(item)">
-                                        <span class="material-symbols-outlined text-[20px]">delete</span>
+                                    <button
+                                        v-if="item.canOperate"
+                                        class="text-slate-300 transition-colors hover:text-rose-500"
+                                        type="button"
+                                        @click.stop="handleDelete(item)"
+                                    >
+                                        <span class="material-symbols-outlined text-[20px]"
+                                            >delete</span
+                                        >
                                     </button>
                                 </div>
                             </div>
@@ -282,21 +362,45 @@ onMounted(loadPageData);
                                 {{ datasetPreviewText(item) }}
                             </p>
                             <div class="mt-4 flex flex-wrap gap-2 text-[11px] text-slate-400">
-                                <span class="rounded bg-slate-100 px-2 py-1">{{ item.objectCount }} 个对象</span>
-                                <span class="rounded bg-slate-100 px-2 py-1">{{ item.fieldCount }} 个字段</span>
-                                <span class="rounded px-2 py-1" :class="publishStatusClass(item)">{{ publishStatusLabel(item) }}</span>
+                                <span class="rounded bg-slate-100 px-2 py-1"
+                                    >{{ item.objectCount }} 个对象</span
+                                >
+                                <span class="rounded bg-slate-100 px-2 py-1"
+                                    >{{ item.fieldCount }} 个字段</span
+                                >
+                                <span
+                                    class="rounded px-2 py-1"
+                                    :class="permissionScopeClass(item)"
+                                    >{{ permissionScopeLabel(item) }}</span
+                                >
+                                <span class="rounded px-2 py-1" :class="publishStatusClass(item)">{{
+                                    publishStatusLabel(item)
+                                }}</span>
                             </div>
-                            <p v-if="item.lastPublishMessage" class="mt-3 text-xs leading-5 text-slate-400">
+                            <p class="mt-2 text-xs text-slate-400">
+                                {{ permissionScopeDescription(item) }}
+                            </p>
+                            <p
+                                v-if="item.lastPublishMessage"
+                                class="mt-3 text-xs leading-5 text-slate-400"
+                            >
                                 {{ item.lastPublishMessage }}
                             </p>
-                            <div class="mt-auto flex items-center gap-2 pt-5">
+                            <div
+                                v-if="item.canOperate"
+                                class="mt-auto flex items-center gap-2 pt-5"
+                            >
                                 <button
                                     class="rounded-xl border border-primary/20 px-3 py-2 text-sm font-medium text-primary transition-all hover:border-primary/30 hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50"
                                     type="button"
                                     :disabled="publishingId === item.id"
                                     @click.stop="handlePublish(item)"
                                 >
-                                    {{ publishingId === item.id ? '处理中...' : publishActionLabel(item) }}
+                                    {{
+                                        publishingId === item.id
+                                            ? '处理中...'
+                                            : publishActionLabel(item)
+                                    }}
                                 </button>
                                 <button
                                     v-if="item.publishStatus === 'PUBLISHED'"

@@ -310,6 +310,82 @@ pnpm dev
 
 更多说明见 `deploy/README.dev.md`。
 
+### 方案 C：`.devcontainer` 开发体系
+
+如果你在 Windows + WSL 下使用 `.devcontainer` 方式开发，这里现在有两种模式：
+
+- IDEA Dev Container：IDEA 直接读取 `.devcontainer/devcontainer.json`
+- WSL 当前环境模式：`./.devcontainer/start-dev.sh`
+
+如果你要的是“前后端直接跑在当前 WSL 环境”，直接使用第二种，也就是 `start-dev.sh` / `restart-dev.sh`。
+
+如果你希望让 IDE 直接读取 `.devcontainer/devcontainer.json` 启动开发容器，可以使用第一种。
+
+1. 准备 Dev Container 环境文件：
+
+```bash
+cp .devcontainer/.env.example .devcontainer/.env
+```
+
+如果你会使用 IDEA Dev Container，并且希望容器内用户与宿主机一致，推荐把 `.devcontainer/.env` 里的用户映射写成：
+
+- `HOST_USER`
+- `HOST_UID`
+- `HOST_GID`
+
+2. 在 IDEA 中打开 WSL 里的 `lingzhou-agent` 目录，然后使用 `Create Dev Container and Mount Sources...`
+
+3. 容器创建完成后，仓库会自动执行容器内启动脚本，拉起数据库迁移、后端和前端
+
+默认访问地址：
+
+- Backend：`http://localhost:20050/api`
+- Frontend：`http://localhost:20517`
+- Debug：`localhost:20055`
+
+详细步骤与两种模式的区别见：
+
+- `./.devcontainer/README.md`
+- `docs/development/dev-modes.md`
+
+如需一次性本地打包前后端产物（不推送镜像）：
+
+```bash
+./deploy/manage.sh build
+```
+
+如仅打包后端，且希望自动处理 `target` 权限问题（例如 `backend.jar is read-only`），推荐：
+
+```bash
+./deploy/manage.sh fix-build --backend-only
+```
+
+如需一次性本地构建前后端 Docker 镜像（不推送）：
+
+```bash
+./deploy/manage.sh build-images
+```
+
+对应脚本关系：
+
+- 统一入口命令：`./deploy/manage.sh build-images`
+- 实际执行脚本：`deploy/scripts/build-images.sh`
+- 发版流程脚本：`./deploy/manage.sh release`（内部调用 `deploy/scripts/release-prepare.sh` + `deploy/scripts/build-and-push-images.sh`）
+
+如需构建后直接推送（需先自行 `docker login`）：
+
+```bash
+./deploy/manage.sh build-images --push
+```
+
+说明：`--push` 只负责推送镜像，不会自动修改 `deploy/release.env` 中的 `IMAGE_TAG`。
+
+如需构建前自动升级 `IMAGE_TAG`（patch +1）并推送：
+
+```bash
+./deploy/manage.sh build-images --auto-bump --push
+```
+
 ## 模型配置说明
 
 当前模型配置已经按“数据库 + 配置文件”拆分职责：

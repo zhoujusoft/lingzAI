@@ -1,43 +1,93 @@
-import {
-    requestJson as doRequestJson,
-    requestRaw as doRequestRaw,
-} from '@lingzhou/core/http/request';
 import { GENERAL_CHAT_SESSION_STORAGE_KEY } from '@/model/session';
-
-function createRequestOptions(options = {}, onUnauthorized) {
-    return {
-        ...options,
-        onUnauthorized,
-    };
-}
+import { listAvailableChatModels } from '@/api/model-library';
+import { requestJson as doRequestJson } from '@lingzhou/core/http/request';
+import {
+    createRequestOptions,
+    buildRuntimeChatBody,
+    sendRuntimeSseRequest,
+    fetchConversationListRequest,
+    fetchConversationMessagesRequest,
+    deleteConversationRequest,
+    renameConversationRequest,
+    parseSseEventPayload,
+    createUploadProgressHandler,
+    normalizeUploadedFileResponse,
+} from './sseChatAdapterShared';
 
 const SESSION_TYPE = 'GENERAL_CHAT';
 
 export const generalChatAdapter = {
     sessionStorageKey: GENERAL_CHAT_SESSION_STORAGE_KEY,
+    continuationSessionTypes: [SESSION_TYPE],
 
-    async sendStream({ message, fileIds, sessionId, onUnauthorized }) {
-        return doRequestRaw(
-            '/api/chat',
-            createRequestOptions(
-                {
-                    method: 'POST',
-                    responseType: 'stream',
-                    auth: true,
-                    body: {
-                        message,
-                        fileIds,
-                        sessionId,
-                    },
-                },
-                onUnauthorized
-            )
-        );
+    async sendStream({
+        message,
+        fileIds,
+        sessionId,
+        messageType,
+        eventPayload,
+        systemPromptAppend,
+        options,
+        mentionedSkillId,
+        chatModelId,
+        onUnauthorized,
+    }) {
+        return sendRuntimeSseRequest('/api/chat', {
+            auth: true,
+            onUnauthorized,
+            body: buildRuntimeChatBody({
+                message,
+                fileIds,
+                sessionId,
+                messageType,
+                eventPayload,
+                systemPromptAppend,
+                options,
+                mentionedSkillId,
+                chatModelId,
+            }),
+        });
     },
 
-    async uploadFile({ file, onUnauthorized }) {
+    async fetchChatModelOptions({ onUnauthorized } = {}) {
+        return listAvailableChatModels(onUnauthorized);
+    },
+
+    async updateConversationModel({
+        conversationId,
+        sessionType = SESSION_TYPE,
+        scopeId = null,
+        modelId,
+        onUnauthorized,
+    } = {}) {
+        const resolvedSessionType = String(sessionType || SESSION_TYPE).trim() || SESSION_TYPE;
+        const encoded = encodeURIComponent(String(conversationId || '').trim());
+        if (!encoded) {
+            return { success: false };
+        }
+        const search = new URLSearchParams();
+        search.set('sessionType', resolvedSessionType);
+        if (scopeId != null && String(scopeId).trim() !== '') {
+            search.set('scopeId', String(scopeId).trim());
+        }
+        const query = search.toString();
+        const { data } = await doRequestJson(`/api/chat/sessions/${encoded}/model?${query}`, {
+            method: 'PUT',
+            auth: true,
+            onUnauthorized,
+            body: {
+                modelId,
+            },
+        });
+        return data;
+    },
+
+    async uploadFile({ file, sessionId, onUnauthorized, onProgress }) {
         const formData = new FormData();
         formData.append('file', file);
+        if (sessionId) {
+            formData.append('sessionId', sessionId);
+        }
 
         const { data } = await doRequestJson(
             '/api/files/upload',
@@ -45,35 +95,22 @@ export const generalChatAdapter = {
                 {
                     method: 'POST',
                     body: formData,
+                    onUploadProgress: createUploadProgressHandler(file, onProgress),
                 },
                 onUnauthorized
             )
         );
 
-        return {
-            id: data.id,
-            name: data.name || file.name,
-            size: data.size || file.size,
-        };
+        return normalizeUploadedFileResponse(data, file);
     },
 
-    async fetchConversationList({ onUnauthorized } = {}) {
-        const { data } = await doRequestJson(
-            '/api/chat/sessions?limit=50',
-            createRequestOptions(
-                {
-                    method: 'GET',
-                    auth: true,
-                },
-                onUnauthorized
-            )
-        );
-
-        return {
-            data: {
-                items: Array.isArray(data?.items) ? data.items : [],
-            },
-        };
+    async fetchConversationList({ pageNo = 1, pageSize = 20, onUnauthorized } = {}) {
+        return fetchConversationListRequest('/api/chat/sessions', {
+            auth: true,
+            onUnauthorized,
+            pageNo,
+            pageSize,
+        });
     },
 
     async fetchMessages({
@@ -84,50 +121,32 @@ export const generalChatAdapter = {
         scopeId = null,
         onUnauthorized,
     } = {}) {
-        const encoded = encodeURIComponent(String(conversationId || '').trim());
-        if (!encoded) {
-            return { data: { items: [] } };
-        }
         const resolvedSessionType = String(sessionType || SESSION_TYPE).trim() || SESSION_TYPE;
-        const scopeQuery = scopeId == null ? '' : `&scopeId=${encodeURIComponent(String(scopeId))}`;
-        const { data } = await doRequestJson(
-            `/api/chat/sessions/${encoded}/messages?sessionType=${encodeURIComponent(resolvedSessionType)}${scopeQuery}&pageNo=${pageNo}&pageSize=${pageSize}`,
-            createRequestOptions(
-                {
-                    method: 'GET',
-                    auth: true,
-                },
-                onUnauthorized
-            )
-        );
-
-        return {
-            data: {
-                items: Array.isArray(data?.items) ? data.items : [],
-            },
-        };
+        return fetchConversationMessagesRequest('/api/chat/sessions', {
+            conversationId,
+            sessionType: resolvedSessionType,
+            scopeId,
+            pageNo,
+            pageSize,
+            auth: true,
+            onUnauthorized,
+        });
     },
 
-    async deleteConversation({ conversationId, sessionType = SESSION_TYPE, scopeId = null, onUnauthorized } = {}) {
-        const encoded = encodeURIComponent(String(conversationId || '').trim());
-        if (!encoded) {
-            return { data: { success: true, alreadyDeleted: true } };
-        }
+    async deleteConversation({
+        conversationId,
+        sessionType = SESSION_TYPE,
+        scopeId = null,
+        onUnauthorized,
+    } = {}) {
         const resolvedSessionType = String(sessionType || SESSION_TYPE).trim() || SESSION_TYPE;
-        const scopeQuery = scopeId == null ? '' : `&scopeId=${encodeURIComponent(String(scopeId))}`;
-
-        const { data } = await doRequestJson(
-            `/api/chat/sessions/${encoded}?sessionType=${encodeURIComponent(resolvedSessionType)}${scopeQuery}`,
-            createRequestOptions(
-                {
-                    method: 'DELETE',
-                    auth: true,
-                },
-                onUnauthorized
-            )
-        );
-
-        return { data };
+        return deleteConversationRequest('/api/chat/sessions', {
+            conversationId,
+            sessionType: resolvedSessionType,
+            scopeId,
+            auth: true,
+            onUnauthorized,
+        });
     },
 
     async renameConversation({
@@ -137,44 +156,16 @@ export const generalChatAdapter = {
         name,
         onUnauthorized,
     } = {}) {
-        const encoded = encodeURIComponent(String(conversationId || '').trim());
-        if (!encoded) {
-            return { data: { success: false } };
-        }
         const resolvedSessionType = String(sessionType || SESSION_TYPE).trim() || SESSION_TYPE;
-        const scopeQuery = scopeId == null ? '' : `&scopeId=${encodeURIComponent(String(scopeId))}`;
-
-        const { data } = await doRequestJson(
-            `/api/chat/sessions/${encoded}/name?sessionType=${encodeURIComponent(resolvedSessionType)}${scopeQuery}`,
-            createRequestOptions(
-                {
-                    method: 'PUT',
-                    auth: true,
-                    body: {
-                        name,
-                    },
-                },
-                onUnauthorized
-            )
-        );
-
-        return { data };
+        return renameConversationRequest('/api/chat/sessions', {
+            conversationId,
+            name,
+            sessionType: resolvedSessionType,
+            scopeId,
+            auth: true,
+            onUnauthorized,
+        });
     },
 
-    parseEventPayload(data) {
-        try {
-            const parsed = JSON.parse(data);
-            if (parsed && typeof parsed === 'object' && parsed.type) {
-                return parsed;
-            }
-        } catch (error) {
-            // fall through
-        }
-
-        if (data === '[DONE]') {
-            return { type: 'done', content: '' };
-        }
-
-        return { type: 'message', content: data };
-    },
+    parseEventPayload: parseSseEventPayload,
 };

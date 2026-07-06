@@ -16,10 +16,12 @@
 package lingzhou.agent.backend.app;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
+
 @ConfigurationProperties(prefix = "app.chat")
 public class ChatModelProperties {
 
     private String generalSystemPrompt;
+    private String systemPrompt;
 
     public String getGeneralSystemPrompt() {
         return generalSystemPrompt;
@@ -27,5 +29,13 @@ public class ChatModelProperties {
 
     public void setGeneralSystemPrompt(String generalSystemPrompt) {
         this.generalSystemPrompt = generalSystemPrompt;
+    }
+
+    public String getSystemPrompt() {
+        return systemPrompt;
+    }
+
+    public void setSystemPrompt(String systemPrompt) {
+        this.systemPrompt = systemPrompt;
     }
 }

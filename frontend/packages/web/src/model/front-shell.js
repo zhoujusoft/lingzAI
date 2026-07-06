@@ -1,0 +1,5 @@
+export const FRONT_TOPBAR_HEIGHT = 56;
+export const FRONT_RAIL_WIDTH_DESKTOP = 76;
+export const FRONT_RAIL_WIDTH_TABLET = 72;
+export const FRONT_RAIL_BREAKPOINT = 1024;
+export const FRONT_CONTENT_MAX_WIDTH = 1600;

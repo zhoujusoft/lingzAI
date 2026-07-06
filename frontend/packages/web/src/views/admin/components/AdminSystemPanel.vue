@@ -40,6 +40,7 @@ const defaultAddUserOptions = {
         mobile: '',
         email: '',
         userType: USER_TYPES.NORMAL,
+        roleId: null,
     },
 };
 
@@ -52,7 +53,7 @@ function isFixedAdminRow(row) {
 const userActions = [
     {
         key: 'edit',
-        label: '编辑资料',
+        label: '编辑',
         class: 'text-sm font-medium text-blue-600 hover:text-blue-700',
         onClick: row => {
             openEditUserDialog(row);
@@ -61,7 +62,7 @@ const userActions = [
     {
         key: 'reset-password',
         label: '重置密码',
-        class: 'text-sm font-medium text-violet-600 hover:text-violet-700',
+        class: 'text-sm font-medium text-blue-600 hover:text-blue-700',
         disabled: () => !isCurrentUserAdmin.value,
         onClick: row => {
             openResetPasswordDialog(row);
@@ -108,6 +109,12 @@ const columns = [
         header: '用户类型',
         minWidth: 160,
     }),
+    createTextColumn(columnHelper, {
+        accessorKey: 'roleName',
+        header: '角色',
+        maxWidth: 150,
+        minWidth: 100,
+    }),
     columnHelper.accessor('state', {
         header: '状态',
         cell: info =>
@@ -130,7 +137,7 @@ const columns = [
         minWidth: 260,
         maxWidth: 260,
         align: 'center',
-        stickyRight: false,
+        stickyRight: true,
         containerClass: 'justify-center gap-4',
         actions: userActions,
     }),
@@ -194,6 +201,7 @@ async function openEditUserDialog(row) {
             mobile: row?.mobile && row.mobile !== '-' ? row.mobile : '',
             email: row?.email && row.email !== '-' ? row.email : '',
             userType: row?.userType ?? USER_TYPES.NORMAL,
+            roleId: row?.roleId ?? null,
         },
     });
     if (edited) {
@@ -261,7 +269,8 @@ async function openToggleUserStateDialog(row) {
         return;
     }
 
-    const targetState = row.state === USER_STATES.ACTIVE ? USER_STATES.INACTIVE : USER_STATES.ACTIVE;
+    const targetState =
+        row.state === USER_STATES.ACTIVE ? USER_STATES.INACTIVE : USER_STATES.ACTIVE;
     const actionText = targetState === USER_STATES.INACTIVE ? '禁用' : '启用';
     const confirmed = await confirm({
         title: `${actionText}用户`,
@@ -279,7 +288,7 @@ async function openToggleUserStateDialog(row) {
                 id: row.id,
                 state: targetState,
             },
-            handleUnauthorized,
+            handleUnauthorized
         );
         await loadUsers(page.value);
     } catch (error) {
@@ -315,7 +324,7 @@ async function openDeleteUserDialog(row) {
             {
                 id: row.id,
             },
-            handleUnauthorized,
+            handleUnauthorized
         );
         await loadUsers(page.value);
     } catch (error) {
@@ -339,7 +348,7 @@ async function loadUsers(targetPage = page.value) {
                 page: requestedPage,
                 pageSize: pageSize.value,
             },
-            handleUnauthorized,
+            handleUnauthorized
         );
         const userList = Array.isArray(data?.items) ? data.items : [];
         users.value = userList.map(item => {
@@ -352,6 +361,8 @@ async function loadUsers(targetPage = page.value) {
                 email: user.email || '-',
                 userType: user.userType,
                 state: user.state,
+                roleId: item.roleId || null,
+                roleName: item.roleName || '-',
             };
         });
         total.value = Number(data?.total ?? userList.length) || 0;
@@ -386,7 +397,6 @@ function handlePageSizeChange(nextSize) {
 onMounted(() => {
     loadUsers();
 });
-
 </script>
 
 <template>
@@ -394,11 +404,13 @@ onMounted(() => {
         class="admin-page admin-page--system-panel flex h-full min-h-0 flex-col bg-slate-50"
         data-component="AdminSystemPanel"
     >
-        <header class="flex h-16 shrink-0 items-center justify-between border-b border-slate-100 bg-white px-8">
+        <header
+            class="flex h-16 shrink-0 items-center justify-between border-b border-slate-100 bg-white px-8"
+        >
             <h1 class="text-xl font-bold text-slate-900">用户管理</h1>
             <button
                 type="button"
-                class="flex items-center justify-center gap-2 rounded-lg bg-primary px-6 py-2 font-medium text-white shadow-md transition-all hover:bg-blue-700"
+                class="flex items-center justify-center gap-2 rounded-lg bg-primary px-6 py-2 font-medium text-white shadow-md transition-all hover:bg-primary-hover"
                 @click="openAddUserDialog"
             >
                 <span class="material-symbols-outlined fill-0 text-lg font-bold">add</span>

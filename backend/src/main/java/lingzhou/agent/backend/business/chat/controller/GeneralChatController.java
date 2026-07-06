@@ -25,4 +25,12 @@ public class GeneralChatController {
         Long userId = chatConversationService.resolveUserId(httpRequest);
         return chatConversationService.streamGeneral(request, userId);
     }
+
+    @PostMapping(value = "/expert-packages/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<ServerSentEvent<String>> expertPackageChat(
+            @RequestBody(required = false) ChatConversationService.ExpertPackageChatRequest request,
+            HttpServletRequest httpRequest) {
+        Long userId = chatConversationService.resolveUserId(httpRequest);
+        return chatConversationService.streamExpertPackage(request, userId);
+    }
 }

@@ -6,14 +6,17 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
 usage() {
   cat <<'EOF'
 Usage:
+  ./deploy/manage.sh build [build-args...]
+  ./deploy/manage.sh fix-build [build-args...]
+  ./deploy/manage.sh build-images [options] [release.env path]
   ./deploy/manage.sh quick-up [compose-args...]
   ./deploy/manage.sh dev-up [compose-args...]
   ./deploy/manage.sh up [compose-args...]
   ./deploy/manage.sh down [compose-args...]
   ./deploy/manage.sh logs [compose-args...]
-  ./deploy/manage.sh release [release.env path]
+  ./deploy/manage.sh release [options] [release.env path]
   ./deploy/manage.sh release-prepare [release.env path]
-  ./deploy/manage.sh release-publish [release.env path]
+  ./deploy/manage.sh release-publish [options] [release.env path]
   ./deploy/manage.sh middleware-up
   ./deploy/manage.sh middleware-db-update
   ./deploy/manage.sh middleware-down
@@ -32,6 +35,15 @@ fi
 shift || true
 
 case "$cmd" in
+  build)
+    exec "$SCRIPT_DIR/scripts/build.sh" "$@"
+    ;;
+  fix-build)
+    exec "$SCRIPT_DIR/scripts/fix-build.sh" "$@"
+    ;;
+  build-images)
+    exec "$SCRIPT_DIR/scripts/build-images.sh" "$@"
+    ;;
   quick-up)
     exec "$SCRIPT_DIR/scripts/up.sh" "$@"
     ;;
@@ -49,11 +61,10 @@ case "$cmd" in
     ;;
   release)
     if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
-      echo "Usage: ./deploy/manage.sh release [deploy/release.env]"
+      echo "Usage: ./deploy/manage.sh release [options] [deploy/release.env]"
       exit 0
     fi
-    env_file="${1:-deploy/release.env}"
-    exec "$SCRIPT_DIR/scripts/release.sh" "$env_file"
+    exec "$SCRIPT_DIR/scripts/release.sh" "$@"
     ;;
   release-prepare)
     if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
@@ -65,11 +76,10 @@ case "$cmd" in
     ;;
   release-publish)
     if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
-      echo "Usage: ./deploy/manage.sh release-publish [deploy/release.env]"
+      echo "Usage: ./deploy/manage.sh release-publish [options] [deploy/release.env]"
       exit 0
     fi
-    env_file="${1:-deploy/release.env}"
-    exec "$SCRIPT_DIR/scripts/build-and-push-images.sh" "$env_file"
+    exec "$SCRIPT_DIR/scripts/build-and-push-images.sh" "$@"
     ;;
   middleware-up)
     cd "$SCRIPT_DIR"

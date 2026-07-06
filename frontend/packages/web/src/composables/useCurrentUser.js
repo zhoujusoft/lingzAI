@@ -2,6 +2,7 @@ import { clearStoredToken, isAuthenticated } from '@lingzhou/core/auth';
 import { requestJson as doRequestJson } from '@lingzhou/core/http/request';
 import { reactive } from 'vue';
 import { UserBean } from '@/model/bean';
+import { resetAgentConfig } from '@/composables/useAgentConfig';
 
 export const currentUserState = reactive({
     profile: null,
@@ -28,11 +29,13 @@ export function resetCurrentUser() {
     currentUserState.name = '';
     currentUserState.loading = false;
     currentUserState.initialized = false;
+    fetchProfilePromise = null;
 }
 
 export function clearUserSession() {
     clearStoredToken();
     resetCurrentUser();
+    resetAgentConfig();
 }
 
 export async function fetchCurrentUser(options = {}) {
@@ -70,6 +73,15 @@ export async function ensureCurrentUserLoaded(options = {}) {
     }
 
     return fetchCurrentUser({ onUnauthorized });
+}
+
+export function mergeCurrentUserProfile(patch = {}) {
+    if (!currentUserState.profile || !patch || typeof patch !== 'object') {
+        return currentUserState.profile;
+    }
+    Object.assign(currentUserState.profile, patch);
+    currentUserState.name = normalizeUserName(currentUserState.profile);
+    return currentUserState.profile;
 }
 
 export async function logoutCurrentUser(options = {}) {

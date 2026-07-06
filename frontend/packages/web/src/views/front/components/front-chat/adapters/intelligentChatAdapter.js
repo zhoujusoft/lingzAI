@@ -4,16 +4,15 @@ import {
 } from '@lingzhou/core/http/request';
 import { INTELLIGENT_CHAT_SESSION_STORAGE_KEY } from '@/model/session';
 import { listKnowledgeBases } from '@/api/knowledge-bases';
+import {
+    createRequestOptions,
+    createUploadProgressHandler,
+    normalizeUploadedFileResponse,
+    parseSseEventPayload,
+} from './sseChatAdapterShared';
 
 let cachedKnowledgeIds = null;
 let cachedKnowledgeAt = 0;
-
-function createRequestOptions(options = {}, onUnauthorized) {
-    return {
-        ...options,
-        onUnauthorized,
-    };
-}
 
 function normalizeKnowledgeId(value) {
     if (value == null) {
@@ -94,9 +93,12 @@ export const intelligentChatAdapter = {
         );
     },
 
-    async uploadFile({ file, onUnauthorized }) {
+    async uploadFile({ file, sessionId, onUnauthorized, onProgress }) {
         const formData = new FormData();
         formData.append('file', file);
+        if (sessionId) {
+            formData.append('sessionId', sessionId);
+        }
 
         const { data } = await doRequestJson(
             '/api/files/upload',
@@ -104,25 +106,27 @@ export const intelligentChatAdapter = {
                 {
                     method: 'POST',
                     body: formData,
+                    onUploadProgress: createUploadProgressHandler(file, onProgress),
                 },
                 onUnauthorized
             )
         );
 
-        return {
-            id: data.id,
-            name: data.name || file.name,
-            size: data.size || file.size,
-        };
+        return normalizeUploadedFileResponse(data, file);
     },
 
-    async fetchConversationList({ selectedKnowledge, onUnauthorized } = {}) {
+    async fetchConversationList({
+        selectedKnowledge,
+        pageNo = 1,
+        pageSize = 20,
+        onUnauthorized,
+    } = {}) {
         const kbId = await resolveKbIdBySelection(selectedKnowledge, onUnauthorized);
         if (kbId == null) {
             return { data: { items: [] } };
         }
         const { data } = await doRequestJson(
-            `/api/chat/sessions?sessionType=${SESSION_TYPE}&scopeId=${kbId}&limit=50`,
+            `/api/chat/sessions?sessionType=${SESSION_TYPE}&scopeId=${kbId}&pageNo=${pageNo}&pageSize=${pageSize}`,
             createRequestOptions(
                 {
                     method: 'GET',
@@ -135,11 +139,22 @@ export const intelligentChatAdapter = {
         return {
             data: {
                 items: Array.isArray(data?.items) ? data.items : [],
+                pageNo: Number(data?.pageNo || pageNo || 1),
+                pageSize: Number(data?.pageSize || pageSize || 20),
+                total: Number(data?.total || 0),
+                hasMore: Boolean(data?.hasMore),
+                nextPageNo: data?.nextPageNo == null ? null : Number(data.nextPageNo),
             },
         };
     },
 
-    async fetchMessages({ conversationId, selectedKnowledge, pageNo = 1, pageSize = 100, onUnauthorized } = {}) {
+    async fetchMessages({
+        conversationId,
+        selectedKnowledge,
+        pageNo = 1,
+        pageSize = 100,
+        onUnauthorized,
+    } = {}) {
         const encoded = encodeURIComponent(String(conversationId || '').trim());
         if (!encoded) {
             return { data: { items: [] } };
@@ -188,20 +203,5 @@ export const intelligentChatAdapter = {
         return { data };
     },
 
-    parseEventPayload(data) {
-        try {
-            const parsed = JSON.parse(data);
-            if (parsed && typeof parsed === 'object' && parsed.type) {
-                return parsed;
-            }
-        } catch (error) {
-            // fall through
-        }
-
-        if (data === '[DONE]') {
-            return { type: 'done', content: '' };
-        }
-
-        return { type: 'message', content: data };
-    },
+    parseEventPayload: parseSseEventPayload,
 };

@@ -72,9 +72,7 @@ public final class ModelRuntimeErrorMessageResolver {
                     : "模型接口不存在（404），请检查 Base URL 或请求路径配置。";
         }
         if (status == 429) {
-            return StringUtils.hasText(detail)
-                    ? "模型服务限流（429），请稍后重试。详情：" + detail
-                    : "模型服务限流（429），请稍后重试。";
+            return StringUtils.hasText(detail) ? "模型服务限流（429），请稍后重试。详情：" + detail : "模型服务限流（429），请稍后重试。";
         }
         if (status >= 500) {
             return StringUtils.hasText(detail)

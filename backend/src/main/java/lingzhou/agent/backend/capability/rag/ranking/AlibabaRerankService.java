@@ -31,11 +31,13 @@ public class AlibabaRerankService {
     }
 
     public boolean isEnabled() {
-        return Boolean.TRUE.equals(modelRuntimeConfigResolver.resolveRerankConfig().enabled());
+        return Boolean.TRUE.equals(
+                modelRuntimeConfigResolver.resolveRerankConfig().enabled());
     }
 
     public boolean allowFallbackToRrf() {
-        return !Boolean.FALSE.equals(modelRuntimeConfigResolver.resolveRerankConfig().fallbackRrf());
+        return !Boolean.FALSE.equals(
+                modelRuntimeConfigResolver.resolveRerankConfig().fallbackRrf());
     }
 
     public List<RerankResult> rerank(String query, List<String> documents, int topN) {
@@ -62,9 +64,7 @@ public class AlibabaRerankService {
                     .body(Object.class);
         } catch (RestClientResponseException ex) {
             throw new IllegalStateException(
-                    "Rerank HTTP " + ex.getStatusCode().value() + "："
-                            + shorten(ex.getResponseBodyAsString(), 300),
-                    ex);
+                    "Rerank HTTP " + ex.getStatusCode().value() + "：" + shorten(ex.getResponseBodyAsString(), 300), ex);
         }
         return parseResults(response);
     }
@@ -256,8 +256,10 @@ public class AlibabaRerankService {
             if (!StringUtils.hasText(normalized)) {
                 return DASHSCOPE;
             }
-            if ("vllm".equalsIgnoreCase(normalized) || "openai".equalsIgnoreCase(normalized)
-                    || "openai-rerank".equalsIgnoreCase(normalized) || "vllm-openai".equalsIgnoreCase(normalized)) {
+            if ("vllm".equalsIgnoreCase(normalized)
+                    || "openai".equalsIgnoreCase(normalized)
+                    || "openai-rerank".equalsIgnoreCase(normalized)
+                    || "vllm-openai".equalsIgnoreCase(normalized)) {
                 return VLLM;
             }
             return DASHSCOPE;

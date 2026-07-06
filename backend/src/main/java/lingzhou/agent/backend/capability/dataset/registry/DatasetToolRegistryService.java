@@ -1,9 +1,9 @@
 package lingzhou.agent.backend.capability.dataset.registry;
 
 import java.util.Map;
-import lingzhou.agent.backend.capability.dataset.runtime.IntegrationDatasetToolRuntimeService;
 import lingzhou.agent.backend.business.tool.domain.ToolCatalog;
 import lingzhou.agent.backend.business.tool.mapper.ToolCatalogMapper;
+import lingzhou.agent.backend.capability.dataset.runtime.IntegrationDatasetToolRuntimeService;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.function.FunctionToolCallback;
 import org.springframework.stereotype.Service;
@@ -12,7 +12,8 @@ import org.springframework.util.StringUtils;
 @Service
 public class DatasetToolRegistryService {
 
-    private static final String SEARCH_DATASET_SUMMARY_SCHEMA = """
+    private static final String SEARCH_DATASET_SUMMARY_SCHEMA =
+            """
             {
               "type": "object",
               "properties": {
@@ -29,7 +30,8 @@ public class DatasetToolRegistryService {
             }
             """;
 
-    private static final String GET_DATASET_SCHEMA_SCHEMA = """
+    private static final String GET_DATASET_SCHEMA_SCHEMA =
+            """
             {
               "type": "object",
               "properties": {
@@ -52,7 +54,8 @@ public class DatasetToolRegistryService {
             }
             """;
 
-    private static final String EXECUTE_DATASET_SQL_SCHEMA = """
+    private static final String EXECUTE_DATASET_SQL_SCHEMA =
+            """
             {
               "type": "object",
               "properties": {
@@ -70,7 +73,8 @@ public class DatasetToolRegistryService {
             }
             """;
 
-    private static final String GENERIC_OBJECT_SCHEMA = """
+    private static final String GENERIC_OBJECT_SCHEMA =
+            """
             {
               "type": "object",
               "additionalProperties": true
@@ -92,7 +96,9 @@ public class DatasetToolRegistryService {
             return null;
         }
         ToolCatalog catalog = toolCatalogMapper.selectByToolName(toolName.trim());
-        if (catalog == null || !StringUtils.hasText(catalog.getSource()) || !catalog.getSource().startsWith("dataset:")) {
+        if (catalog == null
+                || !StringUtils.hasText(catalog.getSource())
+                || !catalog.getSource().startsWith("dataset:")) {
             return null;
         }
         return buildCallback(catalog);
@@ -104,13 +110,8 @@ public class DatasetToolRegistryService {
             return FunctionToolCallback.builder(
                             toolName,
                             (IntegrationDatasetToolRuntimeService.SearchDatasetSummaryRequest arguments,
-                                    org.springframework.ai.chat.model.ToolContext toolContext) -> {
-                                try {
-                                    return integrationDatasetToolRuntimeService.searchDatasetSummary(toolName, arguments);
-                                } catch (lingzhou.agent.backend.common.lzException.TaskException ex) {
-                                    throw new IllegalStateException(ex.getMessage(), ex);
-                                }
-                            })
+                                    org.springframework.ai.chat.model.ToolContext toolContext) ->
+                                    integrationDatasetToolRuntimeService.searchDatasetSummaryTool(toolName, arguments))
                     .description(catalog.getDescription())
                     .inputType(IntegrationDatasetToolRuntimeService.SearchDatasetSummaryRequest.class)
                     .inputSchema(SEARCH_DATASET_SUMMARY_SCHEMA)
@@ -120,13 +121,8 @@ public class DatasetToolRegistryService {
             return FunctionToolCallback.builder(
                             toolName,
                             (IntegrationDatasetToolRuntimeService.GetDatasetSchemaRequest arguments,
-                                    org.springframework.ai.chat.model.ToolContext toolContext) -> {
-                                try {
-                                    return integrationDatasetToolRuntimeService.getDatasetSchema(toolName, arguments);
-                                } catch (lingzhou.agent.backend.common.lzException.TaskException ex) {
-                                    throw new IllegalStateException(ex.getMessage(), ex);
-                                }
-                            })
+                                    org.springframework.ai.chat.model.ToolContext toolContext) ->
+                                    integrationDatasetToolRuntimeService.getDatasetSchemaTool(toolName, arguments))
                     .description(catalog.getDescription())
                     .inputType(IntegrationDatasetToolRuntimeService.GetDatasetSchemaRequest.class)
                     .inputSchema(GET_DATASET_SCHEMA_SCHEMA)
@@ -136,13 +132,8 @@ public class DatasetToolRegistryService {
             return FunctionToolCallback.builder(
                             toolName,
                             (IntegrationDatasetToolRuntimeService.ExecuteDatasetSqlRequest arguments,
-                                    org.springframework.ai.chat.model.ToolContext toolContext) -> {
-                                try {
-                                    return integrationDatasetToolRuntimeService.executeDatasetSql(toolName, arguments);
-                                } catch (lingzhou.agent.backend.common.lzException.TaskException ex) {
-                                    throw new IllegalStateException(ex.getMessage(), ex);
-                                }
-                            })
+                                    org.springframework.ai.chat.model.ToolContext toolContext) ->
+                                    integrationDatasetToolRuntimeService.executeDatasetSqlTool(toolName, arguments))
                     .description(catalog.getDescription())
                     .inputType(IntegrationDatasetToolRuntimeService.ExecuteDatasetSqlRequest.class)
                     .inputSchema(EXECUTE_DATASET_SQL_SCHEMA)

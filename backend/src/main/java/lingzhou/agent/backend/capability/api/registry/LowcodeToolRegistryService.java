@@ -5,12 +5,12 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import lingzhou.agent.backend.capability.api.client.LowcodePlatformClient;
 import lingzhou.agent.backend.business.skill.domain.LowcodeApiCatalog;
 import lingzhou.agent.backend.business.skill.service.LowcodeApiCatalogService;
 import lingzhou.agent.backend.business.skill.service.LowcodePlatformConfigService;
 import lingzhou.agent.backend.business.skill.service.LowcodeTokenService;
 import lingzhou.agent.backend.business.system.model.PlatformEndpointItem;
+import lingzhou.agent.backend.capability.api.client.LowcodePlatformClient;
 import lingzhou.agent.backend.common.lzException.TaskException;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.function.FunctionToolCallback;
@@ -55,9 +55,10 @@ public class LowcodeToolRegistryService {
         LowcodeApiSchemaResolver.ResolvedSchema resolved =
                 LowcodeApiSchemaResolver.resolve(catalog.getRemoteSchemaJson(), objectMapper);
         StringBuilder builder = new StringBuilder();
-        builder.append(StringUtils.hasText(catalog.getApiName()) ? catalog.getApiName().trim() : catalog.getToolName());
-        if (StringUtils.hasText(catalog.getDescription())) {
-            builder.append("。").append(catalog.getDescription().trim());
+        builder.append(
+                StringUtils.hasText(catalog.getApiName()) ? catalog.getApiName().trim() : catalog.getToolName());
+        if (StringUtils.hasText(catalog.getToolRemark())) {
+            builder.append("。").append(catalog.getToolRemark().trim());
         }
         builder.append("。调用低代码平台 API。");
         if (!resolved.fields().isEmpty()) {

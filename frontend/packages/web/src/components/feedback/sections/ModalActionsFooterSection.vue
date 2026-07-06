@@ -71,11 +71,15 @@ function onConfirm() {
                 layout === MODAL_FOOTER_LAYOUT.PANEL
                     ? [
                           'rounded-xl px-8 py-2.5 text-sm font-medium text-white transition-all active:scale-95',
-                          destructive ? 'bg-red-600 hover:bg-red-700' : 'bg-primary shadow-lg shadow-blue-500/30 hover:bg-blue-700',
+                          destructive
+                              ? 'bg-red-600 hover:bg-red-700'
+                              : 'bg-primary shadow-lg shadow-blue-500/30 hover:bg-blue-700',
                       ]
                     : [
                           'rounded-lg px-4 py-2 text-sm font-medium text-white transition',
-                          destructive ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700',
+                          destructive
+                              ? 'bg-red-600 hover:bg-red-700'
+                              : 'bg-blue-600 hover:bg-blue-700',
                       ]
             "
             @click="onConfirm"

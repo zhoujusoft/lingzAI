@@ -3,7 +3,12 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { ROUTE_PATHS } from '@/router/routePaths';
 import defaultAvatarSrc from '@/assets/images/default-avatar.svg';
-import { resolveUserTypeLabel, USER_TYPES } from '@/model/enums/user-type';
+import { resolveUserTypeLabel } from '@/model/enums/user-type';
+import { hasAnyAdminPermission } from '@/model/admin-menu-permissions';
+import { resolveUserAvatarUrl } from '@/utils/userAvatar';
+
+// 深色模式开关 - 与 useTheme.js 保持同步
+const DARK_MODE_ENABLED = false;
 
 const props = defineProps({
     user: {
@@ -37,14 +42,22 @@ const cardRef = ref(null);
 const isMenuOpen = ref(false);
 const isDisplayModeMenuOpen = ref(false);
 const displayName = computed(() => props.user?.name || props.user?.code || props.name || '');
+const avatarSrc = computed(() => resolveUserAvatarUrl(props.user, defaultAvatarSrc));
 const displayPlanText = computed(() => {
     if (props.user?.userType != null) {
         return resolveUserTypeLabel(props.user.userType, props.planText || '普通用户');
     }
     return props.planText;
 });
-const showSwitchButton = computed(
-    () => props.mode === 'admin' || props.user?.userType === USER_TYPES.ADMIN,
+const canSwitchToAdmin = computed(() => {
+    if (props.mode === 'admin') {
+        return true;
+    }
+    return hasAnyAdminPermission(props.user);
+});
+const showSwitchButton = computed(() => props.mode === 'admin' || canSwitchToAdmin.value);
+const profilePath = computed(() =>
+    props.mode === 'admin' ? ROUTE_PATHS.adminProfile : ROUTE_PATHS.frontProfile
 );
 
 function toggleMenu() {
@@ -80,6 +93,17 @@ function handleSwitchPage() {
     router.push(targetPath);
 }
 
+function handleOpenProfile() {
+    closeMenus();
+    if (!profilePath.value) {
+        return;
+    }
+    if (router.currentRoute.value.path === profilePath.value) {
+        return;
+    }
+    router.push(profilePath.value);
+}
+
 function handleLogoutClick() {
     closeMenus();
     emit('logout');
@@ -99,19 +123,18 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <div
-        ref="cardRef"
-        class="relative rounded-xl transition-shadow duration-200 hover:shadow-sm"
-    >
+    <div ref="cardRef" class="relative rounded-xl transition-shadow duration-200 hover:shadow-sm">
         <div class="flex items-center justify-between p-2">
             <div class="flex min-w-0 items-center gap-3 text-left">
                 <img
                     :alt="avatarAlt"
                     class="h-10 w-10 rounded-full border-2 border-slate-200 object-cover"
-                    :src="defaultAvatarSrc"
-                >
+                    :src="avatarSrc"
+                />
                 <div class="min-w-0">
-                    <div class="truncate text-sm font-semibold text-slate-900">{{ displayName }}</div>
+                    <div class="truncate text-sm font-semibold text-slate-900">
+                        {{ displayName }}
+                    </div>
                     <div
                         v-if="displayPlanText"
                         class="mt-0.5 inline-flex rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-500"
@@ -136,7 +159,8 @@ onBeforeUnmount(() => {
             class="popover-shadow absolute bottom-full left-4 z-50 mb-2 w-56 rounded-2xl border border-slate-200 bg-white"
         >
             <div class="space-y-1 p-2">
-                <div class="relative">
+                <!-- 显示模式切换 - 深色模式禁用时隐藏 -->
+                <div v-if="DARK_MODE_ENABLED" class="relative">
                     <button
                         type="button"
                         class="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-slate-700 transition-colors hover:bg-slate-50"
@@ -146,7 +170,9 @@ onBeforeUnmount(() => {
                             <span class="material-symbols-outlined text-xl">desktop_windows</span>
                             <span class="text-sm">显示模式</span>
                         </div>
-                        <span class="material-symbols-outlined text-sm text-slate-400">chevron_right</span>
+                        <span class="material-symbols-outlined text-sm text-slate-400"
+                            >chevron_right</span
+                        >
                     </button>
 
                     <div
@@ -158,7 +184,9 @@ onBeforeUnmount(() => {
                             class="flex w-full items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-slate-50"
                             @click="handleDisplayModeClick"
                         >
-                            <span class="material-symbols-outlined text-xl text-slate-500">light_mode</span>
+                            <span class="material-symbols-outlined text-xl text-slate-500"
+                                >light_mode</span
+                            >
                             <span class="text-sm">亮色模式</span>
                         </button>
                         <button
@@ -166,11 +194,22 @@ onBeforeUnmount(() => {
                             class="flex w-full items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-slate-50"
                             @click="handleDisplayModeClick"
                         >
-                            <span class="material-symbols-outlined text-xl text-slate-500">dark_mode</span>
+                            <span class="material-symbols-outlined text-xl text-slate-500"
+                                >dark_mode</span
+                            >
                             <span class="text-sm">暗色模式</span>
                         </button>
                     </div>
                 </div>
+
+                <button
+                    type="button"
+                    class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-slate-700 transition-colors hover:bg-slate-50"
+                    @click="handleOpenProfile"
+                >
+                    <span class="material-symbols-outlined text-xl">person</span>
+                    <span class="text-sm">个人中心</span>
+                </button>
 
                 <button
                     v-if="showSwitchButton"
@@ -197,6 +236,8 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .popover-shadow {
-    box-shadow: 0 4px 24px -2px rgba(0, 0, 0, 0.1), 0 2px 8px -2px rgba(0, 0, 0, 0.06);
+    box-shadow:
+        0 4px 24px -2px rgba(0, 0, 0, 0.1),
+        0 2px 8px -2px rgba(0, 0, 0, 0.06);
 }
 </style>

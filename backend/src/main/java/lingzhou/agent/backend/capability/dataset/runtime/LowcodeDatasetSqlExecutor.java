@@ -20,20 +20,24 @@ public class LowcodeDatasetSqlExecutor {
     private final LowcodeTokenService lowcodeTokenService;
     private final LowcodePlatformClient lowcodePlatformClient;
     private final LowcodeSqlCryptoService lowcodeSqlCryptoService;
+    private final LowcodeDatasetSqlValidator lowcodeDatasetSqlValidator;
 
     public LowcodeDatasetSqlExecutor(
             LowcodePlatformConfigService lowcodePlatformConfigService,
             LowcodeTokenService lowcodeTokenService,
             LowcodePlatformClient lowcodePlatformClient,
-            LowcodeSqlCryptoService lowcodeSqlCryptoService) {
+            LowcodeSqlCryptoService lowcodeSqlCryptoService,
+            LowcodeDatasetSqlValidator lowcodeDatasetSqlValidator) {
         this.lowcodePlatformConfigService = lowcodePlatformConfigService;
         this.lowcodeTokenService = lowcodeTokenService;
         this.lowcodePlatformClient = lowcodePlatformClient;
         this.lowcodeSqlCryptoService = lowcodeSqlCryptoService;
+        this.lowcodeDatasetSqlValidator = lowcodeDatasetSqlValidator;
     }
 
     public IntegrationDatasetToolRuntimeService.ExecuteDatasetSqlResult execute(
             IntegrationDatasetService.DatasetDetail detail, String executableSql) throws TaskException {
+        lowcodeDatasetSqlValidator.validate(executableSql);
         String platformKey = detail.lowcodePlatformKey();
         if (!StringUtils.hasText(platformKey)) {
             throw new TaskException("低代码数据集未配置平台", TaskException.Code.UNKNOWN);
@@ -50,13 +54,9 @@ public class LowcodeDatasetSqlExecutor {
             }
             rows.add(normalized);
         }
-        List<String> columns = rows.isEmpty() ? List.of() : new ArrayList<>(rows.get(0).keySet());
+        List<String> columns =
+                rows.isEmpty() ? List.of() : new ArrayList<>(rows.get(0).keySet());
         return new IntegrationDatasetToolRuntimeService.ExecuteDatasetSqlResult(
-                detail.id(),
-                detail.name(),
-                executableSql,
-                columns,
-                rows,
-                rows.size());
+                detail.id(), detail.name(), executableSql, columns, rows, rows.size());
     }
 }

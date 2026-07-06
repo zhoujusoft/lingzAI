@@ -68,7 +68,7 @@ async function handleSubmit() {
             },
             typeof props.context.onUnauthorized === 'function'
                 ? props.context.onUnauthorized
-                : undefined,
+                : undefined
         );
         emit('confirm', true);
     } catch (error) {
@@ -80,7 +80,9 @@ async function handleSubmit() {
 </script>
 
 <template>
-    <div class="flex items-center justify-end gap-3 border-t border-slate-100 bg-[#f8fafc]/50 px-8 py-5">
+    <div
+        class="flex items-center justify-end gap-3 border-t border-slate-100 bg-[#f8fafc]/50 px-8 py-5"
+    >
         <button
             type="button"
             class="rounded-xl px-6 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"

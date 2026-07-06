@@ -5,7 +5,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "app.skills")
 public class SkillProperties {
 
-    private String rootDir = "./skills";
+    private String rootDir = "./workspaces/public/skills";
 
     private final PackageProperties packageConfig = new PackageProperties();
 
@@ -44,9 +44,11 @@ public class SkillProperties {
 
         private boolean enableDependencyInstall = true;
 
-        private String pythonCommand = "python3";
+        private String pythonCommand = "python3.11";
 
         private String pipArgs = "-m pip install -r";
+
+        private String pipIndexUrl = "https://pypi.tuna.tsinghua.edu.cn/simple";
 
         private boolean continueOnDependencyError = true;
 
@@ -72,6 +74,14 @@ public class SkillProperties {
 
         public void setPipArgs(String pipArgs) {
             this.pipArgs = pipArgs;
+        }
+
+        public String getPipIndexUrl() {
+            return pipIndexUrl;
+        }
+
+        public void setPipIndexUrl(String pipIndexUrl) {
+            this.pipIndexUrl = pipIndexUrl;
         }
 
         public boolean isContinueOnDependencyError() {

@@ -1,6 +1,6 @@
 /**
  * 文档处理进度轮询 Composable
- * 
+ *
  * 用法：
  * const { startPolling, stopPolling, progress, isPolling } = useDocumentProgress();
  * startPolling(docId, { onProgress, onComplete, onError });
@@ -28,12 +28,7 @@ import { getDocumentProgress, DocumentStatus, ProgressStage, getStageLabel } fro
  */
 
 export function useDocumentProgress(options = {}) {
-    const {
-        onProgress,
-        onComplete,
-        onError,
-        pollInterval = 2000,
-    } = options;
+    const { onProgress, onComplete, onError, pollInterval = 2000 } = options;
 
     const progress = ref(null);
     const isPolling = ref(false);
@@ -134,7 +129,10 @@ export function useDocumentProgress(options = {}) {
      * @returns {boolean}
      */
     function isProcessing() {
-        return isPolling.value || (progress.value && progress.value.status === DocumentStatus.PROCESSING);
+        return (
+            isPolling.value ||
+            (progress.value && progress.value.status === DocumentStatus.PROCESSING)
+        );
     }
 
     /**

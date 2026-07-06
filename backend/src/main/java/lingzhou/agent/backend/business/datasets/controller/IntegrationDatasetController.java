@@ -41,13 +41,17 @@ public class IntegrationDatasetController {
             @RequestParam(value = "keyword", required = false) String keyword,
             @RequestParam(value = "sourceKind", required = false) String sourceKind,
             @RequestParam(value = "aiDataSourceId", required = false) Long aiDataSourceId,
-            @RequestParam(value = "lowcodePlatformKey", required = false) String lowcodePlatformKey) {
-        return integrationDatasetService.listDatasets(keyword, sourceKind, aiDataSourceId, lowcodePlatformKey);
+            @RequestParam(value = "lowcodePlatformKey", required = false) String lowcodePlatformKey,
+            HttpServletRequest request) {
+        Long userId = resolveUserId(request);
+        return integrationDatasetService.listDatasets(keyword, sourceKind, aiDataSourceId, lowcodePlatformKey, userId);
     }
 
     @GetMapping("/{id}")
-    public IntegrationDatasetService.DatasetDetail getDataset(@PathVariable("id") Long id) throws TaskException {
-        return integrationDatasetService.getDataset(id);
+    public IntegrationDatasetService.DatasetDetail getDataset(@PathVariable("id") Long id, HttpServletRequest request)
+            throws TaskException {
+        Long userId = resolveUserId(request);
+        return integrationDatasetService.getDataset(id, userId);
     }
 
     @PostMapping(value = "/{id}/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -61,15 +65,20 @@ public class IntegrationDatasetController {
 
     @PostMapping
     public IntegrationDatasetService.DatasetDetail create(
-            @RequestBody IntegrationDatasetService.UpsertDatasetRequest request) throws TaskException {
-        return integrationDatasetService.create(request);
+            @RequestBody IntegrationDatasetService.UpsertDatasetRequest request, HttpServletRequest httpRequest)
+            throws TaskException {
+        Long userId = resolveUserId(httpRequest);
+        return integrationDatasetService.create(request, userId);
     }
 
     @PutMapping("/{id}")
     public IntegrationDatasetService.DatasetDetail update(
-            @PathVariable("id") Long id, @RequestBody IntegrationDatasetService.UpsertDatasetRequest request)
+            @PathVariable("id") Long id,
+            @RequestBody IntegrationDatasetService.UpsertDatasetRequest request,
+            HttpServletRequest httpRequest)
             throws TaskException {
-        return integrationDatasetService.update(id, request);
+        Long userId = resolveUserId(httpRequest);
+        return integrationDatasetService.update(id, request, userId);
     }
 
     @PostMapping("/generate-description")
@@ -79,25 +88,40 @@ public class IntegrationDatasetController {
     }
 
     @GetMapping("/{id}/publish-status")
-    public IntegrationDatasetPublishService.PublishStatusView getPublishStatus(@PathVariable("id") Long id)
-            throws TaskException {
-        return integrationDatasetPublishService.getPublishStatus(id);
+    public IntegrationDatasetPublishService.PublishStatusView getPublishStatus(
+            @PathVariable("id") Long id, HttpServletRequest request) throws TaskException {
+        Long userId = resolveUserId(request);
+        return integrationDatasetPublishService.getPublishStatus(id, userId);
     }
 
     @PostMapping("/{id}/publish")
-    public IntegrationDatasetPublishService.PublishStatusView publish(@PathVariable("id") Long id)
-            throws TaskException {
-        return integrationDatasetPublishService.publish(id);
+    public IntegrationDatasetPublishService.PublishStatusView publish(
+            @PathVariable("id") Long id, HttpServletRequest request) throws TaskException {
+        Long userId = resolveUserId(request);
+        return integrationDatasetPublishService.publish(id, userId);
     }
 
     @PostMapping("/{id}/disable")
-    public IntegrationDatasetPublishService.PublishStatusView disable(@PathVariable("id") Long id)
-            throws TaskException {
-        return integrationDatasetPublishService.disable(id);
+    public IntegrationDatasetPublishService.PublishStatusView disable(
+            @PathVariable("id") Long id, HttpServletRequest request) throws TaskException {
+        Long userId = resolveUserId(request);
+        return integrationDatasetPublishService.disable(id, userId);
     }
 
     @DeleteMapping("/{id}")
-    public void delete(@PathVariable("id") Long id) throws TaskException {
-        integrationDatasetService.delete(id);
+    public void delete(@PathVariable("id") Long id, HttpServletRequest request) throws TaskException {
+        Long userId = resolveUserId(request);
+        integrationDatasetService.delete(id, userId);
+    }
+
+    private Long resolveUserId(HttpServletRequest request) {
+        Object value = request.getAttribute("UserId");
+        if (value == null) {
+            throw new IllegalStateException("UserId missing");
+        }
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        return Long.valueOf(String.valueOf(value));
     }
 }

@@ -50,7 +50,8 @@ final class DetoxHealthRiskToolProvider {
             return errorJson("用户健康数据不能为空");
         }
         try {
-            Map<String, Object> userData = JSON.readValue(userDataJson, new TypeReference<LinkedHashMap<String, Object>>() {});
+            Map<String, Object> userData =
+                    JSON.readValue(userDataJson, new TypeReference<LinkedHashMap<String, Object>>() {});
             return toJson(buildAssessment(userData));
         } catch (Exception ex) {
             return errorJson("风险评估失败: " + ex.getMessage());
@@ -121,7 +122,9 @@ final class DetoxHealthRiskToolProvider {
                 asMap(userData.get("category8_clinic_visits")),
                 reasonForCategory8(asMap(userData.get("category8_clinic_visits")))));
 
-        int totalScore = categoryScores.stream().mapToInt(item -> intValue(item.get("score"))).sum();
+        int totalScore = categoryScores.stream()
+                .mapToInt(item -> intValue(item.get("score")))
+                .sum();
         String riskLevel = totalScore >= 100 ? "高风险" : (totalScore >= 60 ? "中风险" : "低风险");
         List<Map<String, Object>> highlights = categoryScores.stream()
                 .sorted(Comparator.comparingInt(item -> -intValue(item.get("score"))))
@@ -137,7 +140,10 @@ final class DetoxHealthRiskToolProvider {
         assessment.put("category_scores", categoryScores);
         assessment.put("highlights", highlights);
         assessment.put("suggestions", buildSuggestions(riskLevel, highlights));
-        assessment.put("report", buildReport(text(userData.get("id_card")), basicInfo, riskLevel, totalScore, categoryScores, highlights));
+        assessment.put(
+                "report",
+                buildReport(
+                        text(userData.get("id_card")), basicInfo, riskLevel, totalScore, categoryScores, highlights));
         return assessment;
     }
 
@@ -152,7 +158,8 @@ final class DetoxHealthRiskToolProvider {
         LocalDate birthDate = LocalDate.of(birthYear, birthMonth, birthDay);
         LocalDate today = LocalDate.now();
         int age = today.getYear() - birthYear;
-        if (today.getMonthValue() < birthMonth || (today.getMonthValue() == birthMonth && today.getDayOfMonth() < birthDay)) {
+        if (today.getMonthValue() < birthMonth
+                || (today.getMonthValue() == birthMonth && today.getDayOfMonth() < birthDay)) {
             age--;
         }
 
@@ -168,40 +175,52 @@ final class DetoxHealthRiskToolProvider {
         double diseaseProb = Math.min(0.8d, 0.3d + age * 0.008d);
         boolean hasDisease = random.nextDouble() < diseaseProb;
         if (!hasDisease) {
-            return mapOf(
-                    "has_disease", false,
-                    "disease_type", null,
-                    "severity", "无",
-                    "score_level", 0);
+            return mapOf("has_disease", false, "disease_type", null, "severity", "无", "score_level", 0);
         }
 
         double severityRoll = random.nextDouble();
         if (severityRoll < 0.1d) {
             return mapOf(
-                    "has_disease", true,
-                    "disease_type", pick(random, "急性心梗", "脑出血", "急性呼吸衰竭"),
-                    "severity", "急性重症",
-                    "score_level", 60);
+                    "has_disease",
+                    true,
+                    "disease_type",
+                    pick(random, "急性心梗", "脑出血", "急性呼吸衰竭"),
+                    "severity",
+                    "急性重症",
+                    "score_level",
+                    60);
         }
         if (severityRoll < 0.3d) {
             return mapOf(
-                    "has_disease", true,
-                    "disease_type", pick(random, "冠心病稳定期", "肝硬化代偿期", "慢性心衰"),
-                    "severity", "严重慢性病",
-                    "score_level", 40);
+                    "has_disease",
+                    true,
+                    "disease_type",
+                    pick(random, "冠心病稳定期", "肝硬化代偿期", "慢性心衰"),
+                    "severity",
+                    "严重慢性病",
+                    "score_level",
+                    40);
         }
         if (severityRoll < 0.6d) {
             return mapOf(
-                    "has_disease", true,
-                    "disease_type", pick(random, "高血压2级", "糖尿病伴并发症", "慢性肾病"),
-                    "severity", "中度",
-                    "score_level", 20);
+                    "has_disease",
+                    true,
+                    "disease_type",
+                    pick(random, "高血压2级", "糖尿病伴并发症", "慢性肾病"),
+                    "severity",
+                    "中度",
+                    "score_level",
+                    20);
         }
         return mapOf(
-                "has_disease", true,
-                "disease_type", pick(random, "高血压1级", "脂肪肝", "高尿酸血症"),
-                "severity", "轻度",
-                "score_level", 10);
+                "has_disease",
+                true,
+                "disease_type",
+                pick(random, "高血压1级", "脂肪肝", "高尿酸血症"),
+                "severity",
+                "轻度",
+                "score_level",
+                10);
     }
 
     private static Map<String, Object> generateDrugComplication(long seed) {
@@ -209,30 +228,39 @@ final class DetoxHealthRiskToolProvider {
         double roll = random.nextDouble();
         if (roll < 0.15d) {
             return mapOf(
-                    "has_complication", true,
-                    "complication_type", "注射相关",
-                    "specific_complication", pick(random, "静脉炎", "感染性心内膜炎", "注射部位感染"),
-                    "score_level", 20);
+                    "has_complication",
+                    true,
+                    "complication_type",
+                    "注射相关",
+                    "specific_complication",
+                    pick(random, "静脉炎", "感染性心内膜炎", "注射部位感染"),
+                    "score_level",
+                    20);
         }
         if (roll < 0.3d) {
             return mapOf(
-                    "has_complication", true,
-                    "complication_type", "脏器损害",
-                    "specific_complication", pick(random, "甲基苯丙胺脑损伤", "可卡因心肌病", "肝功能损害"),
-                    "score_level", 15);
+                    "has_complication",
+                    true,
+                    "complication_type",
+                    "脏器损害",
+                    "specific_complication",
+                    pick(random, "甲基苯丙胺脑损伤", "可卡因心肌病", "肝功能损害"),
+                    "score_level",
+                    15);
         }
         if (roll < 0.45d) {
             return mapOf(
-                    "has_complication", true,
-                    "complication_type", "过量史",
-                    "specific_complication", "毒品过量/中毒史（曾昏迷抢救）",
-                    "score_level", 15);
+                    "has_complication",
+                    true,
+                    "complication_type",
+                    "过量史",
+                    "specific_complication",
+                    "毒品过量/中毒史（曾昏迷抢救）",
+                    "score_level",
+                    15);
         }
         return mapOf(
-                "has_complication", false,
-                "complication_type", null,
-                "specific_complication", null,
-                "score_level", 0);
+                "has_complication", false, "complication_type", null, "specific_complication", null, "score_level", 0);
     }
 
     private static Map<String, Object> generateWithdrawalSymptom(long seed) {
@@ -258,13 +286,17 @@ final class DetoxHealthRiskToolProvider {
 
     private static Map<String, Object> generateOutpatientVisits(long seed) {
         Random random = random(seed, 3);
-        int visitCount = weightedPick(random, new int[] {0, 1, 2, 3, 4, 5}, new double[] {0.4d, 0.25d, 0.15d, 0.1d, 0.07d, 0.03d});
+        int visitCount = weightedPick(
+                random, new int[] {0, 1, 2, 3, 4, 5}, new double[] {0.4d, 0.25d, 0.15d, 0.1d, 0.07d, 0.03d});
         if (visitCount >= 3) {
             boolean emergency = random.nextBoolean();
             return mapOf(
-                    "visit_count", visitCount,
-                    "description", "出所就医" + visitCount + "次以上" + (emergency ? "，包含紧急外诊" : ""),
-                    "score_level", 15);
+                    "visit_count",
+                    visitCount,
+                    "description",
+                    "出所就医" + visitCount + "次以上" + (emergency ? "，包含紧急外诊" : ""),
+                    "score_level",
+                    15);
         }
         if (visitCount == 2) {
             return mapOf("visit_count", 2, "description", "有2次出所就医", "score_level", 10);
@@ -280,63 +312,81 @@ final class DetoxHealthRiskToolProvider {
         double roll = random.nextDouble();
         if (roll < 0.1d) {
             return mapOf(
-                    "has_abnormal_signal", true,
-                    "severity", "危急",
-                    "symptoms", List.of(pick(random, "剧烈胸痛", "咯血", "呕血", "便血", "意识模糊", "晕厥")),
-                    "score_level", 10);
+                    "has_abnormal_signal",
+                    true,
+                    "severity",
+                    "危急",
+                    "symptoms",
+                    List.of(pick(random, "剧烈胸痛", "咯血", "呕血", "便血", "意识模糊", "晕厥")),
+                    "score_level",
+                    10);
         }
         if (roll < 0.25d) {
             return mapOf(
-                    "has_abnormal_signal", true,
-                    "severity", "持续",
-                    "symptoms", List.of(pick(random, "持续腹痛", "持续性头痛", "原因不明乏力", "持续头晕")),
-                    "score_level", 5);
+                    "has_abnormal_signal",
+                    true,
+                    "severity",
+                    "持续",
+                    "symptoms",
+                    List.of(pick(random, "持续腹痛", "持续性头痛", "原因不明乏力", "持续头晕")),
+                    "score_level",
+                    5);
         }
         if (roll < 0.45d) {
             return mapOf(
-                    "has_abnormal_signal", true,
-                    "severity", "轻度",
-                    "symptoms", List.of(pick(random, "食欲不振", "体重明显下降", "间断失眠")),
-                    "score_level", 3);
+                    "has_abnormal_signal",
+                    true,
+                    "severity",
+                    "轻度",
+                    "symptoms",
+                    List.of(pick(random, "食欲不振", "体重明显下降", "间断失眠")),
+                    "score_level",
+                    3);
         }
-        return mapOf(
-                "has_abnormal_signal", false,
-                "severity", null,
-                "symptoms", List.of(),
-                "score_level", 0);
+        return mapOf("has_abnormal_signal", false, "severity", null, "symptoms", List.of(), "score_level", 0);
     }
 
     private static Map<String, Object> generateSleepQuality(long seed) {
         Random random = random(seed, 5);
-        int sleepHours = weightedPick(random, new int[] {2, 3, 4, 5, 6, 7, 8}, new double[] {0.05d, 0.08d, 0.12d, 0.15d, 0.25d, 0.2d, 0.15d});
+        int sleepHours = weightedPick(
+                random, new int[] {2, 3, 4, 5, 6, 7, 8}, new double[] {0.05d, 0.08d, 0.12d, 0.15d, 0.25d, 0.2d, 0.15d});
         double roll = random.nextDouble();
         if (sleepHours < 4 || roll < 0.1d) {
             String description = sleepHours < 4 ? "每日睡眠时间约" + sleepHours + "小时，严重失眠" : "彻夜不眠或睡眠节律完全颠倒";
             return mapOf(
-                    "sleep_hours", sleepHours,
-                    "sleep_quality", "严重失眠",
-                    "description", description,
-                    "score_level", 10);
+                    "sleep_hours", sleepHours, "sleep_quality", "严重失眠", "description", description, "score_level", 10);
         }
         if (sleepHours < 6) {
             return mapOf(
-                    "sleep_hours", sleepHours,
-                    "sleep_quality", "中度失眠",
-                    "description", "每日睡眠时间约" + sleepHours + "小时，睡眠质量差",
-                    "score_level", 5);
+                    "sleep_hours",
+                    sleepHours,
+                    "sleep_quality",
+                    "中度失眠",
+                    "description",
+                    "每日睡眠时间约" + sleepHours + "小时，睡眠质量差",
+                    "score_level",
+                    5);
         }
         if (sleepHours < 7 || roll < 0.3d) {
             return mapOf(
-                    "sleep_hours", sleepHours,
-                    "sleep_quality", "轻度睡眠问题",
-                    "description", "每日睡眠时间约" + sleepHours + "小时，睡眠浅或多梦",
-                    "score_level", 3);
+                    "sleep_hours",
+                    sleepHours,
+                    "sleep_quality",
+                    "轻度睡眠问题",
+                    "description",
+                    "每日睡眠时间约" + sleepHours + "小时，睡眠浅或多梦",
+                    "score_level",
+                    3);
         }
         return mapOf(
-                "sleep_hours", sleepHours,
-                "sleep_quality", "正常",
-                "description", "每日睡眠时间约" + sleepHours + "小时，质量尚可",
-                "score_level", 0);
+                "sleep_hours",
+                sleepHours,
+                "sleep_quality",
+                "正常",
+                "description",
+                "每日睡眠时间约" + sleepHours + "小时，质量尚可",
+                "score_level",
+                0);
     }
 
     private static Map<String, Object> generateAgeScore(int age) {
@@ -357,29 +407,30 @@ final class DetoxHealthRiskToolProvider {
 
     private static Map<String, Object> generateClinicVisits(long seed) {
         Random random = random(seed, 6);
-        int visitCount = weightedPick(random, new int[] {0, 1, 2, 3, 4, 5, 6}, new double[] {0.5d, 0.2d, 0.12d, 0.1d, 0.05d, 0.02d, 0.01d});
+        int visitCount = weightedPick(
+                random, new int[] {0, 1, 2, 3, 4, 5, 6}, new double[] {0.5d, 0.2d, 0.12d, 0.1d, 0.05d, 0.02d, 0.01d});
         if (visitCount >= 5) {
             return mapOf(
-                    "clinic_visit_count", visitCount,
-                    "description", "所内就医" + visitCount + "次，频繁报医",
-                    "score_level", 5);
+                    "clinic_visit_count", visitCount, "description", "所内就医" + visitCount + "次，频繁报医", "score_level", 5);
         }
         if (visitCount >= 3) {
             return mapOf(
-                    "clinic_visit_count", visitCount,
-                    "description", "所内就医" + visitCount + "次，病情反复",
-                    "score_level", 3);
+                    "clinic_visit_count", visitCount, "description", "所内就医" + visitCount + "次，病情反复", "score_level", 3);
         }
         if (visitCount >= 1) {
             return mapOf(
-                    "clinic_visit_count", visitCount,
-                    "description", "所内就医" + visitCount + "次，常见轻微病症",
-                    "score_level", 2);
+                    "clinic_visit_count",
+                    visitCount,
+                    "description",
+                    "所内就医" + visitCount + "次，常见轻微病症",
+                    "score_level",
+                    2);
         }
         return mapOf("clinic_visit_count", 0, "description", "无所内就医", "score_level", 0);
     }
 
-    private static Map<String, Object> categoryScore(String code, String name, Map<String, Object> rawData, String reason) {
+    private static Map<String, Object> categoryScore(
+            String code, String name, Map<String, Object> rawData, String reason) {
         return mapOf(
                 "code", code,
                 "name", name,
@@ -558,7 +609,10 @@ final class DetoxHealthRiskToolProvider {
 
     private static List<String> stringList(Object value) {
         if (value instanceof List<?> list) {
-            return list.stream().map(DetoxHealthRiskToolProvider::text).filter(StringUtils::hasText).toList();
+            return list.stream()
+                    .map(DetoxHealthRiskToolProvider::text)
+                    .filter(StringUtils::hasText)
+                    .toList();
         }
         return List.of();
     }

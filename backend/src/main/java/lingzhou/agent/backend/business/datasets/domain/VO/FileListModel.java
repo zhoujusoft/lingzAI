@@ -12,13 +12,13 @@ import lombok.NoArgsConstructor;
 public class FileListModel {
     private Long docId;
     private String fileName;
-    private String fileId;
+    private String objectName;
     private Set<String> indexIds;
 
-    public FileListModel(Long docId, String fileName, String fileId) {
+    public FileListModel(Long docId, String fileName, String objectName) {
         this.docId = docId;
         this.fileName = fileName;
-        this.fileId = fileId;
+        this.objectName = objectName;
         this.indexIds = new HashSet<>();
     }
 }

@@ -99,7 +99,8 @@ public class DocumentParseChunkServiceV2 {
 
     private List<ChunkedSection> cleanupStructuredSections(List<ChunkedSection> sections, ChunkRequest request) {
         boolean hasHeadingSection = sections.stream()
-                .anyMatch(section -> section.getHeadings() != null && !section.getHeadings().isEmpty());
+                .anyMatch(section ->
+                        section.getHeadings() != null && !section.getHeadings().isEmpty());
         if (!hasHeadingSection) {
             return sections;
         }
@@ -120,7 +121,9 @@ public class DocumentParseChunkServiceV2 {
                 continue;
             }
 
-            String content = section.getContent() == null ? "" : stripTocLines(section.getContent()).trim();
+            String content = section.getContent() == null
+                    ? ""
+                    : stripTocLines(section.getContent()).trim();
             if (request.isDropEmpty() && content.isEmpty()) {
                 continue;
             }
@@ -218,7 +221,8 @@ public class DocumentParseChunkServiceV2 {
             }
 
             if (shouldKeepWholeLawArticle(section, request)) {
-                String content = section.getContent() == null ? "" : section.getContent().trim();
+                String content =
+                        section.getContent() == null ? "" : section.getContent().trim();
                 if (request.isDropEmpty() && content.isEmpty()) {
                     continue;
                 }
@@ -253,10 +257,12 @@ public class DocumentParseChunkServiceV2 {
         }
         LawDocumentStructureAnalyzer.LawMetadata metadata =
                 lawDocumentStructureAnalyzer.analyze(null, section.getHeadings(), section.getContent());
-        if (metadata.articleNo() == null || !lawDocumentStructureAnalyzer.isLikelyLawDocument(null, section.getHeadings())) {
+        if (metadata.articleNo() == null
+                || !lawDocumentStructureAnalyzer.isLikelyLawDocument(null, section.getHeadings())) {
             return false;
         }
-        String content = section.getContent() == null ? "" : section.getContent().trim();
+        String content =
+                section.getContent() == null ? "" : section.getContent().trim();
         if (content.isEmpty()) {
             return false;
         }
@@ -375,9 +381,7 @@ public class DocumentParseChunkServiceV2 {
                 List<String> htmlChunks = TableChunkContentSupport.toHtmlChunks(table, request.getTableMaxChars());
                 for (String tableChunk : htmlChunks) {
                     String markdownTable = TableChunkContentSupport.formatTableContent(
-                            currentHeadings,
-                            request.isTableKeepCaption() ? caption : null,
-                            tableChunk);
+                            currentHeadings, request.isTableKeepCaption() ? caption : null, tableChunk);
                     if (request.isDropEmpty() && StringUtils.isEmpty(markdownTable.trim())) {
                         continue;
                     }

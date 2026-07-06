@@ -16,7 +16,8 @@ public interface IntegrationDatasetMapper extends BaseMapper<IntegrationDataset>
         return this.selectList(wrapper);
     }
 
-    default List<IntegrationDataset> search(String keyword, String sourceKind, Long aiDataSourceId, String lowcodePlatformKey) {
+    default List<IntegrationDataset> search(
+            String keyword, String sourceKind, Long aiDataSourceId, String lowcodePlatformKey) {
         QueryWrapper<IntegrationDataset> wrapper = new QueryWrapper<>();
         if (StringUtils.hasText(keyword)) {
             String normalizedKeyword = keyword.trim();

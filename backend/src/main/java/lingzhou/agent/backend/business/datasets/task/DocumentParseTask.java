@@ -5,23 +5,23 @@ import com.alibaba.fastjson.JSONObject;
 import java.io.InputStream;
 import java.util.Collections;
 import java.util.List;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import lingzhou.agent.backend.business.datasets.domain.DocumentChunk;
 import lingzhou.agent.backend.business.datasets.domain.KnowledgeDocument;
 import lingzhou.agent.backend.business.datasets.mapper.DocumentChunkMapper;
-import lingzhou.agent.backend.business.datasets.service.IKnowledgeDocumentService;
 import lingzhou.agent.backend.business.datasets.service.IDocumentChunkService;
+import lingzhou.agent.backend.business.datasets.service.IKnowledgeDocumentService;
 import lingzhou.agent.backend.business.datasets.service.MinioService;
 import lingzhou.agent.backend.business.datasets.service.ProgressManager;
 import lingzhou.agent.backend.business.datasets.service.knowledge.ElasticsearchChunkIndexService;
-import lingzhou.agent.backend.capability.rag.embedding.DocumentEmbeddingService;
 import lingzhou.agent.backend.capability.rag.chunk.config.ChunkRequest;
 import lingzhou.agent.backend.capability.rag.chunk.config.ChunkRequestFactory;
 import lingzhou.agent.backend.capability.rag.chunk.model.ChunkedSection;
 import lingzhou.agent.backend.capability.rag.chunk.service.DocumentParseChunkServiceV2;
 import lingzhou.agent.backend.capability.rag.chunk.tool.LawDocumentStructureAnalyzer;
 import lingzhou.agent.backend.capability.rag.chunk.tool.TableChunkContentSupport;
+import lingzhou.agent.backend.capability.rag.embedding.DocumentEmbeddingService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -65,7 +65,7 @@ public class DocumentParseTask {
             progressManager.updateProgress(docId, 0, "PARSING", "开始解析");
 
             // 3. 从 MinIO 读取文件
-            String objectName = document.getFileId();
+            String objectName = document.getObjectName();
             if (objectName == null || objectName.isEmpty()) {
                 throw new RuntimeException("文件未上传");
             }
@@ -73,8 +73,8 @@ public class DocumentParseTask {
             InputStream inputStream = minioService.getFile(objectName);
 
             // 4. 构建切片请求
-            ChunkRequest request =
-                    ChunkRequestFactory.build(document.getFileType(), document.getChunkStrategy(), document.getChunkConfig());
+            ChunkRequest request = ChunkRequestFactory.build(
+                    document.getFileType(), document.getChunkStrategy(), document.getChunkConfig());
 
             // 5. 执行解析和切片
             progressManager.updateProgress(docId, 10, "PARSING", "正在读取文件");
@@ -112,7 +112,8 @@ public class DocumentParseTask {
      * 保存切片到数据库
      */
     @Transactional(rollbackFor = Exception.class)
-    private List<DocumentChunk> saveChunks(KnowledgeDocument document, ChunkRequest request, List<ChunkedSection> sections) {
+    private List<DocumentChunk> saveChunks(
+            KnowledgeDocument document, ChunkRequest request, List<ChunkedSection> sections) {
         int batchSize = 200;
         int order = 1;
         Long docId = document.getDocId();
@@ -125,8 +126,8 @@ public class DocumentParseTask {
             chunk.setChunkContent(section.getContent());
             chunk.setChunkOrder(order++);
             chunk.setIndexId(section.getId());
-            chunk.setCharCount((long) TableChunkContentSupport.resolveVisibleLength(
-                    section.getBlockType(), section.getContent()));
+            chunk.setCharCount(
+                    (long) TableChunkContentSupport.resolveVisibleLength(section.getBlockType(), section.getContent()));
 
             // 设置标题层级
             if (section.getHeadings() != null && !section.getHeadings().isEmpty()) {
@@ -144,7 +145,10 @@ public class DocumentParseTask {
 
             // 批量提交
             if ((i + 1) % batchSize == 0) {
-                progressManager.updateProgress(docId, 50 + (i * 40 / sections.size()), "CHUNKING",
+                progressManager.updateProgress(
+                        docId,
+                        50 + (i * 40 / sections.size()),
+                        "CHUNKING",
                         "已处理 " + (i + 1) + "/" + sections.size() + " 个分块");
             }
         }
@@ -157,10 +161,8 @@ public class DocumentParseTask {
             return;
         }
 
-        LawDocumentStructureAnalyzer.LawMetadata metadata = lawDocumentStructureAnalyzer.analyze(
-                document.getName(),
-                section.getHeadings(),
-                section.getContent());
+        LawDocumentStructureAnalyzer.LawMetadata metadata =
+                lawDocumentStructureAnalyzer.analyze(document.getName(), section.getHeadings(), section.getContent());
         if (metadata.chapterNo() == null && metadata.articleNo() == null) {
             return;
         }
@@ -205,5 +207,4 @@ public class DocumentParseTask {
             log.error("清理分块数据失败：docId={}, error={}", docId, cleanupEx.getMessage(), cleanupEx);
         }
     }
-
 }

@@ -10,12 +10,12 @@ import lingzhou.agent.backend.business.datasets.mapper.DocumentChunkMapper;
 import lingzhou.agent.backend.business.datasets.mapper.KnowledgeDocumentMapper;
 import lingzhou.agent.backend.business.datasets.service.IDocumentChunkService;
 import lingzhou.agent.backend.business.datasets.service.knowledge.ElasticsearchChunkIndexService;
-import lingzhou.agent.backend.capability.rag.embedding.DocumentEmbeddingService;
-import lingzhou.agent.backend.common.lzException.TaskException;
 import lingzhou.agent.backend.capability.rag.chunk.config.ChunkRequest;
 import lingzhou.agent.backend.capability.rag.chunk.config.ChunkRequestFactory;
 import lingzhou.agent.backend.capability.rag.chunk.tool.LawDocumentStructureAnalyzer;
 import lingzhou.agent.backend.capability.rag.chunk.tool.TableChunkContentSupport;
+import lingzhou.agent.backend.capability.rag.embedding.DocumentEmbeddingService;
+import lingzhou.agent.backend.common.lzException.TaskException;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -139,17 +139,15 @@ public class DocumentChunkServiceImpl implements IDocumentChunkService {
             return;
         }
 
-        ChunkRequest request =
-                ChunkRequestFactory.build(document.getFileType(), document.getChunkStrategy(), document.getChunkConfig());
+        ChunkRequest request = ChunkRequestFactory.build(
+                document.getFileType(), document.getChunkStrategy(), document.getChunkConfig());
         if (!request.isLawDocument()) {
             chunk.setMetadataValues(null);
             return;
         }
 
         LawDocumentStructureAnalyzer.LawMetadata metadata = lawDocumentStructureAnalyzer.analyze(
-                document.getName(),
-                parseHeadings(chunk.getHeadings()),
-                chunk.getChunkContent());
+                document.getName(), parseHeadings(chunk.getHeadings()), chunk.getChunkContent());
         chunk.setMetadataValues(buildLawChunkMetadata(metadata));
     }
 

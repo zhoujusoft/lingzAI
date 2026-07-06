@@ -37,7 +37,8 @@ public class KnowledgeBasePublishService {
         KnowledgeBase knowledgeBase = requireKnowledgeBase(kbId);
         String kbCode = requireKbCode(knowledgeBase);
         KnowledgeBasePublishBinding binding = publishBindingMapper.selectByKbId(kbId);
-        List<PublishedToolView> tools = toPublishedToolViews(knowledgeBaseToolPublishService.loadPublishedTools(kbCode));
+        List<PublishedToolView> tools =
+                toPublishedToolViews(knowledgeBaseToolPublishService.loadPublishedTools(kbCode));
         return toStatusView(knowledgeBase, binding, tools);
     }
 
@@ -130,13 +131,11 @@ public class KnowledgeBasePublishService {
         return value == null ? "" : value.trim();
     }
 
-    private List<PublishedToolView> toPublishedToolViews(List<KnowledgeBaseToolPublishService.PublishedToolView> source) {
+    private List<PublishedToolView> toPublishedToolViews(
+            List<KnowledgeBaseToolPublishService.PublishedToolView> source) {
         return source.stream()
-                .map(item -> new PublishedToolView(
-                        item.toolName(),
-                        item.displayName(),
-                        item.description(),
-                        item.toolType()))
+                .map(item ->
+                        new PublishedToolView(item.toolName(), item.displayName(), item.description(), item.toolType()))
                 .toList();
     }
 

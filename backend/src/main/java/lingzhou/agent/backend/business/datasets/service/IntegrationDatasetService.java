@@ -4,15 +4,14 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.List;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.ArrayList;
 import java.util.concurrent.ThreadLocalRandom;
-import lingzhou.agent.backend.capability.tool.publish.DatasetToolPublishService;
 import lingzhou.agent.backend.business.datasets.domain.IntegrationDataset;
 import lingzhou.agent.backend.business.datasets.domain.IntegrationDatasetFieldBinding;
 import lingzhou.agent.backend.business.datasets.domain.IntegrationDatasetObjectBinding;
@@ -25,8 +24,11 @@ import lingzhou.agent.backend.business.datasets.mapper.IntegrationDatasetPublish
 import lingzhou.agent.backend.business.datasets.mapper.IntegrationDatasetRelationBindingMapper;
 import lingzhou.agent.backend.business.integration.domain.IntegrationDataSource;
 import lingzhou.agent.backend.business.integration.mapper.IntegrationDataSourceMapper;
+import lingzhou.agent.backend.business.integration.service.datasource.IntegrationDataSourcePermissionService;
 import lingzhou.agent.backend.business.integration.service.lowcode.LowcodeDatasetBrowseService;
+import lingzhou.agent.backend.business.system.model.SysUserModel;
 import lingzhou.agent.backend.capability.modelruntime.ModelRuntimeClientFactory;
+import lingzhou.agent.backend.capability.tool.publish.DatasetToolPublishService;
 import lingzhou.agent.backend.common.lzException.TaskException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,6 +41,8 @@ public class IntegrationDatasetService {
 
     private static final Logger logger = LoggerFactory.getLogger(IntegrationDatasetService.class);
     private static final DateTimeFormatter DATASET_CODE_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
+    private static final java.util.regex.Pattern DATASET_CODE_PATTERN =
+            java.util.regex.Pattern.compile("^[A-Za-z0-9._-]+$");
 
     private final IntegrationDatasetMapper integrationDatasetMapper;
     private final IntegrationDataSourceMapper integrationDataSourceMapper;
@@ -49,6 +53,8 @@ public class IntegrationDatasetService {
     private final DatasetToolPublishService datasetToolPublishService;
     private final LowcodeDatasetBrowseService lowcodeDatasetBrowseService;
     private final ModelRuntimeClientFactory modelRuntimeClientFactory;
+    private final IntegrationDatasetPermissionService integrationDatasetPermissionService;
+    private final IntegrationDataSourcePermissionService integrationDataSourcePermissionService;
     private final ObjectMapper objectMapper;
 
     public IntegrationDatasetService(
@@ -61,6 +67,8 @@ public class IntegrationDatasetService {
             DatasetToolPublishService datasetToolPublishService,
             LowcodeDatasetBrowseService lowcodeDatasetBrowseService,
             ModelRuntimeClientFactory modelRuntimeClientFactory,
+            IntegrationDatasetPermissionService integrationDatasetPermissionService,
+            IntegrationDataSourcePermissionService integrationDataSourcePermissionService,
             ObjectMapper objectMapper) {
         this.integrationDatasetMapper = integrationDatasetMapper;
         this.integrationDataSourceMapper = integrationDataSourceMapper;
@@ -71,28 +79,45 @@ public class IntegrationDatasetService {
         this.datasetToolPublishService = datasetToolPublishService;
         this.lowcodeDatasetBrowseService = lowcodeDatasetBrowseService;
         this.modelRuntimeClientFactory = modelRuntimeClientFactory;
+        this.integrationDatasetPermissionService = integrationDatasetPermissionService;
+        this.integrationDataSourcePermissionService = integrationDataSourcePermissionService;
         this.objectMapper = objectMapper;
     }
 
-    public List<DatasetSummary> listDatasets(String keyword, String sourceKind, Long aiDataSourceId, String lowcodePlatformKey) {
+    public List<DatasetSummary> listDatasets(
+            String keyword, String sourceKind, Long aiDataSourceId, String lowcodePlatformKey, Long operatorUserId) {
+        SysUserModel operator = integrationDatasetPermissionService.resolveOperator(operatorUserId);
         List<IntegrationDataset> datasets =
                 integrationDatasetMapper.search(keyword, sourceKind, aiDataSourceId, lowcodePlatformKey);
-        Map<Long, IntegrationDatasetPublishBinding> publishBindingMap = publishBindingMapper
-                .selectByDatasetIds(datasets.stream().map(IntegrationDataset::getId).toList())
-                .stream()
-                .collect(java.util.stream.Collectors.toMap(
-                        IntegrationDatasetPublishBinding::getDatasetId,
-                        item -> item,
-                        (left, right) -> right,
-                        LinkedHashMap::new));
-        return datasets.stream()
-                .map(dataset -> toSummary(dataset, publishBindingMap.get(dataset.getId())))
+        List<IntegrationDataset> visibleDatasets = datasets.stream()
+                .filter(item -> integrationDatasetPermissionService.canViewDataset(item, operator))
                 .toList();
+        Map<Long, IntegrationDatasetPublishBinding> publishBindingMap =
+                publishBindingMapper
+                        .selectByDatasetIds(visibleDatasets.stream()
+                                .map(IntegrationDataset::getId)
+                                .toList())
+                        .stream()
+                        .collect(java.util.stream.Collectors.toMap(
+                                IntegrationDatasetPublishBinding::getDatasetId,
+                                item -> item,
+                                (left, right) -> right,
+                                LinkedHashMap::new));
+        return visibleDatasets.stream()
+                .map(dataset -> toSummary(dataset, publishBindingMap.get(dataset.getId()), operator))
+                .toList();
+    }
+
+    public DatasetDetail getDataset(Long id, Long operatorUserId) throws TaskException {
+        IntegrationDataset dataset = requireDataset(id);
+        SysUserModel operator = integrationDatasetPermissionService.resolveOperator(operatorUserId);
+        integrationDatasetPermissionService.assertCanViewDataset(dataset, operator);
+        return toDetail(dataset, operator);
     }
 
     public DatasetDetail getDataset(Long id) throws TaskException {
         IntegrationDataset dataset = requireDataset(id);
-        return toDetail(dataset);
+        return toDetail(dataset, null);
     }
 
     public DatasetDetail getDatasetByCode(String datasetCode) throws TaskException {
@@ -103,47 +128,65 @@ public class IntegrationDatasetService {
         if (dataset == null) {
             throw new TaskException("数据集不存在：" + datasetCode, TaskException.Code.UNKNOWN);
         }
-        return toDetail(dataset);
+        return toDetail(dataset, null);
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public DatasetDetail create(UpsertDatasetRequest request) throws TaskException {
-        NormalizedDataset normalized = normalizeRequest(request, null);
+    public DatasetDetail create(UpsertDatasetRequest request, Long operatorUserId) throws TaskException {
+        SysUserModel operator = integrationDatasetPermissionService.resolveOperator(operatorUserId);
+        NormalizedDataset normalized = normalizeRequest(request, null, operator);
         if (integrationDatasetMapper.selectByName(normalized.name()) != null) {
             throw new TaskException("数据集名称已存在：" + normalized.name(), TaskException.Code.UNKNOWN);
         }
+        ensureDatasetCodeUnique(normalized.datasetCode(), null);
         IntegrationDataset dataset = new IntegrationDataset();
-        dataset.setDatasetCode(generateUniqueDatasetCode());
+        dataset.setDatasetCode(normalized.datasetCode());
+        dataset.setOwnerUserId(operatorUserId);
         applyDataset(dataset, normalized);
         integrationDatasetMapper.insert(dataset);
         replaceBindings(dataset.getId(), normalized);
-        return getDataset(dataset.getId());
+        return getDataset(dataset.getId(), operatorUserId);
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public DatasetDetail update(Long id, UpsertDatasetRequest request) throws TaskException {
+    public DatasetDetail update(Long id, UpsertDatasetRequest request, Long operatorUserId) throws TaskException {
         IntegrationDataset dataset = requireDataset(id);
-        NormalizedDataset normalized = normalizeRequest(request, dataset);
+        SysUserModel operator = integrationDatasetPermissionService.resolveOperator(operatorUserId);
+        integrationDatasetPermissionService.assertCanOperateDataset(dataset, operator);
+        Integer requestPermissionScope = request == null ? null : request.permissionScope();
+        if (requestPermissionScope != null) {
+            int normalizedRequestScope = normalizePermissionScope(requestPermissionScope);
+            int existingScope = normalizePermissionScope(dataset.getPermissionScope());
+            if (normalizedRequestScope != existingScope) {
+                integrationDatasetPermissionService.assertCanChangePermissionScope(dataset, operator);
+            }
+        }
+        NormalizedDataset normalized = normalizeRequest(request, dataset, operator);
         IntegrationDataset sameName = integrationDatasetMapper.selectByName(normalized.name());
         if (sameName != null && !sameName.getId().equals(dataset.getId())) {
             throw new TaskException("数据集名称已存在：" + normalized.name(), TaskException.Code.UNKNOWN);
         }
+        ensureDatasetCodeUnique(normalized.datasetCode(), dataset.getId());
+        resetPublishedStateIfCodeChanged(dataset, normalized.datasetCode());
         applyDataset(dataset, normalized);
         integrationDatasetMapper.updateById(dataset);
+        datasetToolPublishService.syncPermissions(dataset);
         replaceBindings(dataset.getId(), normalized);
-        return getDataset(dataset.getId());
+        return getDataset(dataset.getId(), operatorUserId);
     }
 
-    private DatasetSummary toSummary(IntegrationDataset dataset) {
-        return toSummary(dataset, publishBindingMapper.selectByDatasetId(dataset.getId()));
+    private DatasetSummary toSummary(IntegrationDataset dataset, SysUserModel operator) {
+        return toSummary(dataset, publishBindingMapper.selectByDatasetId(dataset.getId()), operator);
     }
 
-    private DatasetSummary toSummary(IntegrationDataset dataset, IntegrationDatasetPublishBinding publishBinding) {
+    private DatasetSummary toSummary(
+            IntegrationDataset dataset, IntegrationDatasetPublishBinding publishBinding, SysUserModel operator) {
         IntegrationDataSource dataSource = dataset.getAiDataSourceId() == null
                 ? null
                 : integrationDataSourceMapper.selectById(dataset.getAiDataSourceId());
         List<IntegrationDatasetObjectBinding> objectBindings = objectBindingMapper.selectByDatasetId(dataset.getId());
         List<IntegrationDatasetFieldBinding> fieldBindings = fieldBindingMapper.selectByDatasetId(dataset.getId());
+        boolean canOperate = integrationDatasetPermissionService.canOperateDataset(dataset, operator);
         return new DatasetSummary(
                 dataset.getId(),
                 dataset.getDatasetCode(),
@@ -156,6 +199,9 @@ public class IntegrationDatasetService {
                 dataset.getLowcodeAppName(),
                 dataset.getDescription(),
                 dataset.getBusinessLogic(),
+                dataset.getOwnerUserId(),
+                normalizePermissionScope(dataset.getPermissionScope()),
+                canOperate,
                 dataset.getStatus(),
                 normalizePublishStatus(publishBinding),
                 publishBinding == null ? 0 : defaultNumber(publishBinding.getPublishedVersion()),
@@ -168,8 +214,8 @@ public class IntegrationDatasetService {
                 dataset.getUpdatedAt());
     }
 
-    private DatasetDetail toDetail(IntegrationDataset dataset) throws TaskException {
-        DatasetSummary summary = toSummary(dataset);
+    private DatasetDetail toDetail(IntegrationDataset dataset, SysUserModel operator) throws TaskException {
+        DatasetSummary summary = toSummary(dataset, operator);
         List<IntegrationDatasetObjectBinding> objectBindings = objectBindingMapper.selectByDatasetId(dataset.getId());
         List<IntegrationDatasetFieldBinding> fieldBindings = fieldBindingMapper.selectByDatasetId(dataset.getId());
         if ("LOWCODE_APP".equals(dataset.getSourceKind())) {
@@ -187,6 +233,9 @@ public class IntegrationDatasetService {
                 summary.lowcodeAppName(),
                 summary.description(),
                 summary.businessLogic(),
+                summary.ownerUserId(),
+                summary.permissionScope(),
+                summary.canOperate(),
                 summary.status(),
                 summary.publishStatus(),
                 summary.publishedVersion(),
@@ -246,8 +295,7 @@ public class IntegrationDatasetService {
 
     private String generateUniqueDatasetCode() {
         for (int attempt = 0; attempt < 20; attempt++) {
-            String candidate = "DS" + LocalDateTime.now().format(DATASET_CODE_FORMATTER)
-                    + randomAlphaNumeric(4);
+            String candidate = "DS" + LocalDateTime.now().format(DATASET_CODE_FORMATTER) + randomAlphaNumeric(4);
             if (integrationDatasetMapper.selectByDatasetCode(candidate) == null) {
                 return candidate;
             }
@@ -272,20 +320,15 @@ public class IntegrationDatasetService {
         if (!StringUtils.hasText(dataset.getLowcodePlatformKey()) || fieldBindings.isEmpty()) {
             return;
         }
-        boolean needsEnrichment = fieldBindings.stream().anyMatch(item ->
-                !StringUtils.hasText(item.getFieldScope())
+        boolean needsEnrichment = fieldBindings.stream()
+                .anyMatch(item -> !StringUtils.hasText(item.getFieldScope())
                         || !StringUtils.hasText(item.getObjectName())
-                        || (isLowcodeSubtableBinding(item, objectBindings) && !StringUtils.hasText(item.getSubObjectCode())));
+                        || (StringUtils.hasText(item.getSubObjectName())
+                                && !StringUtils.hasText(item.getSubObjectCode())));
         if (!needsEnrichment) {
             return;
         }
-        Map<String, String> objectSourceMap = new LinkedHashMap<>();
         Map<String, String> rootObjectNameMap = new LinkedHashMap<>();
-        for (IntegrationDatasetObjectBinding item : objectBindings) {
-            if (StringUtils.hasText(item.getObjectCode())) {
-                objectSourceMap.put(item.getObjectCode().trim(), item.getObjectSource());
-            }
-        }
         Map<String, LowcodeDatasetBrowseService.FieldView> fieldLookup = new LinkedHashMap<>();
         for (String appId : splitCommaSeparated(dataset.getLowcodeAppId())) {
             List<LowcodeDatasetBrowseService.ObjectView> appObjects =
@@ -295,27 +338,20 @@ public class IntegrationDatasetService {
                     continue;
                 }
                 rootObjectNameMap.putIfAbsent(trimText(object.objectCode()), trimText(object.objectName()));
-                List<LowcodeDatasetBrowseService.FieldView> browseFields =
-                        lowcodeDatasetBrowseService.listFields(
-                                dataset.getLowcodePlatformKey(),
-                                appId,
-                                object.objectCode(),
-                                object.formCode());
+                List<LowcodeDatasetBrowseService.FieldView> browseFields = lowcodeDatasetBrowseService.listFields(
+                        dataset.getLowcodePlatformKey(), appId, object.objectCode(), object.formCode());
                 for (LowcodeDatasetBrowseService.FieldView field : browseFields) {
-                    fieldLookup.putIfAbsent(buildFieldLookupKey(field.objectCode(), field.subObjectCode(), field.fieldName()), field);
+                    fieldLookup.putIfAbsent(
+                            buildFieldLookupKey(field.objectCode(), field.subObjectCode(), field.fieldName()), field);
                 }
             }
         }
         for (IntegrationDatasetFieldBinding fieldBinding : fieldBindings) {
             LowcodeDatasetBrowseService.FieldView matchedField = fieldLookup.get(buildFieldLookupKey(
-                    findMenuObjectCode(fieldBinding, objectSourceMap, fieldLookup),
-                    fieldBinding.getObjectCode(),
-                    fieldBinding.getFieldName()));
+                    fieldBinding.getObjectCode(), fieldBinding.getSubObjectCode(), fieldBinding.getFieldName()));
             if (matchedField == null) {
-                matchedField = fieldLookup.get(buildFieldLookupKey(fieldBinding.getObjectCode(), "", fieldBinding.getFieldName()));
-            }
-            if (matchedField == null) {
-                matchedField = fieldLookup.get(buildFieldLookupKey("", fieldBinding.getObjectCode(), fieldBinding.getFieldName()));
+                matchedField = fieldLookup.get(
+                        buildFieldLookupKey(fieldBinding.getObjectCode(), "", fieldBinding.getFieldName()));
             }
             if (matchedField == null) {
                 continue;
@@ -342,40 +378,6 @@ public class IntegrationDatasetService {
         }
     }
 
-    private String findMenuObjectCode(
-            IntegrationDatasetFieldBinding fieldBinding,
-            Map<String, String> objectSourceMap,
-            Map<String, LowcodeDatasetBrowseService.FieldView> fieldLookup) {
-        if (!isLowcodeSubtableBinding(fieldBinding, objectSourceMap)) {
-            return trimText(fieldBinding.getObjectCode());
-        }
-        for (LowcodeDatasetBrowseService.FieldView fieldView : fieldLookup.values()) {
-            if (sameIgnoreCase(fieldView.subObjectCode(), fieldBinding.getObjectCode())
-                    && sameIgnoreCase(fieldView.fieldName(), fieldBinding.getFieldName())) {
-                return trimText(fieldView.objectCode());
-            }
-        }
-        return "";
-    }
-
-    private boolean isLowcodeSubtableBinding(
-            IntegrationDatasetFieldBinding fieldBinding,
-            List<IntegrationDatasetObjectBinding> objectBindings) {
-        Map<String, String> objectSourceMap = new LinkedHashMap<>();
-        for (IntegrationDatasetObjectBinding item : objectBindings) {
-            if (StringUtils.hasText(item.getObjectCode())) {
-                objectSourceMap.put(item.getObjectCode().trim(), item.getObjectSource());
-            }
-        }
-        return isLowcodeSubtableBinding(fieldBinding, objectSourceMap);
-    }
-
-    private boolean isLowcodeSubtableBinding(
-            IntegrationDatasetFieldBinding fieldBinding,
-            Map<String, String> objectSourceMap) {
-        return "LOWCODE_SUBTABLE".equalsIgnoreCase(trimText(objectSourceMap.get(fieldBinding.getObjectCode())));
-    }
-
     private List<String> splitCommaSeparated(String value) {
         if (!StringUtils.hasText(value)) {
             return List.of();
@@ -390,35 +392,30 @@ public class IntegrationDatasetService {
         return normalizeCode(objectCode) + "|" + normalizeCode(subObjectCode) + "|" + normalizeCode(fieldName);
     }
 
-    private boolean sameIgnoreCase(String left, String right) {
-        return normalizeCode(left).equals(normalizeCode(right));
-    }
-
     private String normalizeCode(String value) {
         return trimText(value).toLowerCase(Locale.ROOT);
     }
 
     private IntegrationDataset requireDataset(Long id) throws TaskException {
-        if (id == null) {
-            throw new TaskException("数据集 id 不能为空", TaskException.Code.UNKNOWN);
-        }
-        IntegrationDataset dataset = integrationDatasetMapper.selectById(id);
-        if (dataset == null) {
-            throw new TaskException("数据集不存在：" + id, TaskException.Code.UNKNOWN);
-        }
-        return dataset;
+        return integrationDatasetPermissionService.requireDataset(id);
     }
 
-    private NormalizedDataset normalizeRequest(UpsertDatasetRequest request, IntegrationDataset existing) throws TaskException {
+    private NormalizedDataset normalizeRequest(
+            UpsertDatasetRequest request, IntegrationDataset existing, SysUserModel operator) throws TaskException {
         if (request == null) {
             throw new TaskException("请求参数不能为空", TaskException.Code.UNKNOWN);
         }
+        String datasetCode = existing == null
+                ? resolveCreateDatasetCode(request.datasetCode())
+                : resolveUpdatedDatasetCode(request.datasetCode(), existing.getDatasetCode());
         String name = requireText(request.name(), "数据集名称不能为空");
         String sourceKind = normalizeSourceKind(request.sourceKind());
         String businessLogic = trimText(request.businessLogic());
-        List<ObjectBindingInput> objectBindings = request.objectBindings() == null ? List.of() : request.objectBindings();
+        List<ObjectBindingInput> objectBindings =
+                request.objectBindings() == null ? List.of() : request.objectBindings();
         List<FieldBindingInput> fieldBindings = request.fieldBindings() == null ? List.of() : request.fieldBindings();
-        List<RelationBindingInput> relationBindings = request.relationBindings() == null ? List.of() : request.relationBindings();
+        List<RelationBindingInput> relationBindings =
+                request.relationBindings() == null ? List.of() : request.relationBindings();
         if (fieldBindings.isEmpty()) {
             throw new TaskException("至少选择一个字段", TaskException.Code.UNKNOWN);
         }
@@ -430,8 +427,12 @@ public class IntegrationDatasetService {
             if (aiDataSourceId == null) {
                 throw new TaskException("AI 平台数据源不能为空", TaskException.Code.UNKNOWN);
             }
-            if (integrationDataSourceMapper.selectById(aiDataSourceId) == null) {
+            IntegrationDataSource dataSource = integrationDataSourceMapper.selectById(aiDataSourceId);
+            if (dataSource == null) {
                 throw new TaskException("AI 平台数据源不存在：" + aiDataSourceId, TaskException.Code.UNKNOWN);
+            }
+            if (!integrationDataSourcePermissionService.canOperateDataSource(dataSource, operator)) {
+                throw new TaskException("仅可选择你有操作权限的AI平台数据源", TaskException.Code.UNKNOWN);
             }
         }
         if ("LOWCODE_APP".equals(sourceKind)) {
@@ -448,6 +449,7 @@ public class IntegrationDatasetService {
             }
         }
         return new NormalizedDataset(
+                datasetCode,
                 name,
                 sourceKind,
                 aiDataSourceId,
@@ -456,6 +458,10 @@ public class IntegrationDatasetService {
                 lowcodeAppName,
                 trimText(request.description()),
                 businessLogic,
+                normalizePermissionScope(
+                        request.permissionScope() != null
+                                ? request.permissionScope()
+                                : (existing == null ? null : existing.getPermissionScope())),
                 normalizeStatus(request.status(), existing == null ? "ACTIVE" : existing.getStatus()),
                 objectBindings,
                 fieldBindings,
@@ -479,7 +485,9 @@ public class IntegrationDatasetService {
                     new ObjectBindingInput(
                             objectCode,
                             trimText(item.formCode()),
-                            StringUtils.hasText(item.objectName()) ? item.objectName().trim() : objectCode,
+                            StringUtils.hasText(item.objectName())
+                                    ? item.objectName().trim()
+                                    : objectCode,
                             trimText(item.objectSource()),
                             item.selected() == null ? 1 : item.selected(),
                             item.sortOrder() == null ? objectSort++ : item.sortOrder()));
@@ -489,26 +497,27 @@ public class IntegrationDatasetService {
         Set<String> seenFieldKeys = new LinkedHashSet<>();
         int fieldSort = 0;
         for (FieldBindingInput item : fieldBindings) {
-            String ownerObjectCode = resolveFieldOwnerObjectCode(item);
+            String objectCode = trimText(item.objectCode());
+            String subObjectCode = trimText(item.subObjectCode());
             String fieldName = trimText(item.fieldName());
-            if (!StringUtils.hasText(ownerObjectCode) || !StringUtils.hasText(fieldName)) {
+            if (!StringUtils.hasText(objectCode) || !StringUtils.hasText(fieldName)) {
                 continue;
             }
-            String fieldKey = (ownerObjectCode + "|" + fieldName).toLowerCase(Locale.ROOT);
+            String fieldKey = (objectCode + "|" + subObjectCode + "|" + fieldName).toLowerCase(Locale.ROOT);
             if (!seenFieldKeys.add(fieldKey)) {
                 continue;
             }
             objectsByCode.putIfAbsent(
-                    ownerObjectCode,
+                    objectCode,
                     new ObjectBindingInput(
-                            ownerObjectCode,
+                            objectCode,
                             trimText(item.formCode()),
-                            firstNonBlank(item.objectName(), item.subObjectName(), ownerObjectCode),
-                            deriveObjectSource(item),
+                            firstNonBlank(item.objectName(), objectCode),
+                            "LOWCODE_MAIN",
                             1,
                             objectSort++));
             normalizedFields.add(new FieldBindingInput(
-                    ownerObjectCode,
+                    objectCode,
                     trimText(item.formCode()),
                     fieldName,
                     trimText(item.fieldAlias()),
@@ -516,7 +525,7 @@ public class IntegrationDatasetService {
                     item.selected() == null ? 1 : item.selected(),
                     item.sortOrder() == null ? fieldSort++ : item.sortOrder(),
                     trimText(item.fieldScope()),
-                    trimText(item.subObjectCode()),
+                    subObjectCode,
                     trimText(item.subObjectName()),
                     trimText(item.objectName())));
         }
@@ -524,26 +533,8 @@ public class IntegrationDatasetService {
             throw new TaskException("低代码链路至少选择一个字段", TaskException.Code.UNKNOWN);
         }
 
-        return new NormalizedLowcodeBindings(List.copyOf(objectsByCode.values()), List.copyOf(normalizedFields), List.of());
-    }
-
-    private String resolveFieldOwnerObjectCode(FieldBindingInput item) {
-        if (item == null) {
-            return "";
-        }
-        String subObjectCode = trimText(item.subObjectCode());
-        if (StringUtils.hasText(subObjectCode)) {
-            return subObjectCode;
-        }
-        return trimText(item.objectCode());
-    }
-
-    private String deriveObjectSource(FieldBindingInput item) {
-        String fieldScope = trimText(item.fieldScope()).toUpperCase(Locale.ROOT);
-        if (fieldScope.startsWith("SUB")) {
-            return "LOWCODE_SUBTABLE";
-        }
-        return "LOWCODE_MAIN";
+        return new NormalizedLowcodeBindings(
+                List.copyOf(objectsByCode.values()), List.copyOf(normalizedFields), List.of());
     }
 
     private String firstNonBlank(String... values) {
@@ -556,14 +547,17 @@ public class IntegrationDatasetService {
     }
 
     private void applyDataset(IntegrationDataset dataset, NormalizedDataset normalized) {
+        dataset.setDatasetCode(normalized.datasetCode());
         dataset.setName(normalized.name());
         dataset.setSourceKind(normalized.sourceKind());
         dataset.setAiDataSourceId("AI_SOURCE".equals(normalized.sourceKind()) ? normalized.aiDataSourceId() : null);
-        dataset.setLowcodePlatformKey("LOWCODE_APP".equals(normalized.sourceKind()) ? normalized.lowcodePlatformKey() : "");
+        dataset.setLowcodePlatformKey(
+                "LOWCODE_APP".equals(normalized.sourceKind()) ? normalized.lowcodePlatformKey() : "");
         dataset.setLowcodeAppId("LOWCODE_APP".equals(normalized.sourceKind()) ? normalized.lowcodeAppId() : "");
         dataset.setLowcodeAppName("LOWCODE_APP".equals(normalized.sourceKind()) ? normalized.lowcodeAppName() : "");
         dataset.setDescription(normalized.description());
         dataset.setBusinessLogic(normalized.businessLogic());
+        dataset.setPermissionScope(normalized.permissionScope());
         dataset.setStatus(normalized.status());
     }
 
@@ -620,7 +614,9 @@ public class IntegrationDatasetService {
             binding.setRightObjectCode(item.rightObjectCode().trim());
             binding.setRightFieldName(item.rightFieldName().trim());
             binding.setRelationSource(
-                    StringUtils.hasText(item.relationSource()) ? item.relationSource().trim().toUpperCase(Locale.ROOT) : "MANUAL");
+                    StringUtils.hasText(item.relationSource())
+                            ? item.relationSource().trim().toUpperCase(Locale.ROOT)
+                            : "MANUAL");
             relationBindingMapper.insert(binding);
         }
     }
@@ -640,6 +636,53 @@ public class IntegrationDatasetService {
         return status.trim().toUpperCase(Locale.ROOT);
     }
 
+    private String resolveCreateDatasetCode(String value) throws TaskException {
+        String normalized = normalizeDatasetCode(value);
+        if (StringUtils.hasText(normalized)) {
+            return normalized;
+        }
+        return generateUniqueDatasetCode();
+    }
+
+    private String resolveUpdatedDatasetCode(String value, String existingCode) throws TaskException {
+        String normalized = normalizeDatasetCode(value);
+        if (StringUtils.hasText(normalized)) {
+            return normalized;
+        }
+        return normalizeDatasetCode(existingCode);
+    }
+
+    private String normalizeDatasetCode(String value) throws TaskException {
+        if (!StringUtils.hasText(value)) {
+            return "";
+        }
+        String normalized = value.trim();
+        if (!DATASET_CODE_PATTERN.matcher(normalized).matches()) {
+            throw new TaskException("数据集编码仅支持字母、数字、点、下划线和中划线", TaskException.Code.UNKNOWN);
+        }
+        return normalized;
+    }
+
+    private void ensureDatasetCodeUnique(String datasetCode, Long currentDatasetId) throws TaskException {
+        if (!StringUtils.hasText(datasetCode)) {
+            return;
+        }
+        IntegrationDataset existing = integrationDatasetMapper.selectByDatasetCode(datasetCode);
+        if (existing != null && (currentDatasetId == null || !existing.getId().equals(currentDatasetId))) {
+            throw new TaskException("数据集编码已存在：" + datasetCode, TaskException.Code.UNKNOWN);
+        }
+    }
+
+    private void resetPublishedStateIfCodeChanged(IntegrationDataset existing, String updatedCode) {
+        String existingCode = trimText(existing == null ? null : existing.getDatasetCode());
+        String nextCode = trimText(updatedCode);
+        if (!StringUtils.hasText(existingCode) || java.util.Objects.equals(existingCode, nextCode)) {
+            return;
+        }
+        datasetToolPublishService.disable(existingCode);
+        publishBindingMapper.deleteByDatasetId(existing.getId());
+    }
+
     private String requireText(String value, String message) throws TaskException {
         if (!StringUtils.hasText(value)) {
             throw new TaskException(message, TaskException.Code.UNKNOWN);
@@ -651,7 +694,12 @@ public class IntegrationDatasetService {
         return value == null ? "" : value.trim();
     }
 
+    private Integer normalizePermissionScope(Integer value) {
+        return integrationDatasetPermissionService.normalizePermissionScope(value);
+    }
+
     private record NormalizedDataset(
+            String datasetCode,
             String name,
             String sourceKind,
             Long aiDataSourceId,
@@ -660,6 +708,7 @@ public class IntegrationDatasetService {
             String lowcodeAppName,
             String description,
             String businessLogic,
+            Integer permissionScope,
             String status,
             List<ObjectBindingInput> objectBindings,
             List<FieldBindingInput> fieldBindings,
@@ -671,8 +720,10 @@ public class IntegrationDatasetService {
             List<RelationBindingInput> relationBindings) {}
 
     @Transactional(rollbackFor = Exception.class)
-    public void delete(Long id) throws TaskException {
+    public void delete(Long id, Long operatorUserId) throws TaskException {
         IntegrationDataset dataset = requireDataset(id);
+        SysUserModel operator = integrationDatasetPermissionService.resolveOperator(operatorUserId);
+        integrationDatasetPermissionService.assertCanOperateDataset(dataset, operator);
         if (StringUtils.hasText(dataset.getDatasetCode())) {
             datasetToolPublishService.disable(dataset.getDatasetCode());
         }
@@ -688,7 +739,8 @@ public class IntegrationDatasetService {
             throw new TaskException("生成说明参数不能为空", TaskException.Code.UNKNOWN);
         }
         String sourceKind = normalizeSourceKind(request.sourceKind());
-        List<ObjectBindingInput> objectBindings = request.objectBindings() == null ? List.of() : request.objectBindings();
+        List<ObjectBindingInput> objectBindings =
+                request.objectBindings() == null ? List.of() : request.objectBindings();
         List<FieldBindingInput> fieldBindings = request.fieldBindings() == null ? List.of() : request.fieldBindings();
         if (objectBindings.isEmpty() && fieldBindings.isEmpty()) {
             throw new TaskException("请先选择对象和字段后再生成说明", TaskException.Code.UNKNOWN);
@@ -701,7 +753,8 @@ public class IntegrationDatasetService {
         Map<String, String> objectNames = new LinkedHashMap<>();
         for (ObjectBindingInput item : objectBindings) {
             if (StringUtils.hasText(item.objectCode())) {
-                objectNames.putIfAbsent(trimText(item.objectCode()), firstNonBlank(item.objectName(), item.objectCode()));
+                objectNames.putIfAbsent(
+                        trimText(item.objectCode()), firstNonBlank(item.objectName(), item.objectCode()));
             }
         }
         for (FieldBindingInput item : fieldBindings) {
@@ -711,8 +764,8 @@ public class IntegrationDatasetService {
             }
         }
 
-        DescriptionGenerateResult aiGenerated =
-                tryGenerateDescriptionByAi(sourceKind, datasetName, businessLogic, promptHint, objectNames, fieldBindings);
+        DescriptionGenerateResult aiGenerated = tryGenerateDescriptionByAi(
+                sourceKind, datasetName, businessLogic, promptHint, objectNames, fieldBindings);
         String summary = aiGenerated != null && StringUtils.hasText(aiGenerated.summary())
                 ? aiGenerated.summary()
                 : buildSummary(sourceKind, datasetName, businessLogic, promptHint, objectNames);
@@ -730,12 +783,14 @@ public class IntegrationDatasetService {
             Map<String, String> objectNames,
             List<FieldBindingInput> fieldBindings) {
         try {
-            String prompt = buildDescriptionPrompt(sourceKind, datasetName, businessLogic, promptHint, objectNames, fieldBindings);
+            String prompt = buildDescriptionPrompt(
+                    sourceKind, datasetName, businessLogic, promptHint, objectNames, fieldBindings);
             String content = modelRuntimeClientFactory
                     .createChatBundle()
                     .chatClient()
                     .prompt()
-                    .system("""
+                    .system(
+                            """
                             你是数据集建模助手，负责为 AI 查询场景生成“数据集摘要”和“关系说明”。
                             你必须严格输出 JSON，不要输出 markdown 代码块，不要输出解释。
                             JSON 结构固定为：
@@ -758,8 +813,7 @@ public class IntegrationDatasetService {
             String normalizedJson = extractJsonObject(content);
             Map<String, String> result = objectMapper.readValue(normalizedJson, new TypeReference<>() {});
             return new DescriptionGenerateResult(
-                    trimText(result.get("summary")),
-                    trimText(result.get("relationDescription")));
+                    trimText(result.get("summary")), trimText(result.get("relationDescription")));
         } catch (Exception ex) {
             logger.warn("AI 生成数据集说明失败，回退规则生成：error={}", ex.getMessage(), ex);
             return null;
@@ -778,7 +832,9 @@ public class IntegrationDatasetService {
         builder.append("数据集名称：").append(firstNonBlank(datasetName, "未命名数据集")).append('\n');
         builder.append("当前业务逻辑说明：").append(firstNonBlank(businessLogic, "无")).append('\n');
         builder.append("用户补充描述：").append(firstNonBlank(promptHint, "无")).append('\n');
-        builder.append("已选对象：").append(objectNames.isEmpty() ? "无" : String.join("、", objectNames.values())).append('\n');
+        builder.append("已选对象：")
+                .append(objectNames.isEmpty() ? "无" : String.join("、", objectNames.values()))
+                .append('\n');
         builder.append("已选字段：\n");
         if (fieldBindings.isEmpty()) {
             builder.append("- 无\n");
@@ -789,13 +845,18 @@ public class IntegrationDatasetService {
                         item.objectName(),
                         objectNames.get(trimText(item.objectCode())),
                         item.objectCode());
-                builder.append("- 对象：").append(firstNonBlank(objectName, "未命名对象"))
-                        .append("，字段：").append(firstNonBlank(item.fieldAlias(), item.fieldName()))
-                        .append("，原始字段：").append(firstNonBlank(item.fieldName(), "无"))
-                        .append("，字段类型：").append(firstNonBlank(item.fieldType(), "未知"))
-                        .append("，字段范围：").append(firstNonBlank(item.fieldScope(), "MAIN"));
+                builder.append("- 对象：")
+                        .append(firstNonBlank(objectName, "未命名对象"))
+                        .append("，字段：")
+                        .append(firstNonBlank(item.fieldAlias(), item.fieldName()))
+                        .append("，原始字段：")
+                        .append(firstNonBlank(item.fieldName(), "无"))
+                        .append("，字段类型：")
+                        .append(firstNonBlank(item.fieldType(), "未知"))
+                        .append("，字段范围：")
+                        .append(firstNonBlank(item.fieldScope(), "MAIN"));
                 if (StringUtils.hasText(item.subObjectCode())) {
-                    builder.append("，子表编码：").append(item.subObjectCode());
+                    builder.append("，子表表名：").append(item.subObjectCode());
                 }
                 builder.append('\n');
             }
@@ -820,11 +881,15 @@ public class IntegrationDatasetService {
             String promptHint,
             Map<String, String> objectNames) {
         String sourceText = "LOWCODE_APP".equals(sourceKind) ? "低代码对象结构" : "AI 平台数据源结构";
-        String objectsText = objectNames.values().stream().limit(5).reduce((a, b) -> a + "、" + b).orElse("当前已选对象");
+        String objectsText = objectNames.values().stream()
+                .limit(5)
+                .reduce((a, b) -> a + "、" + b)
+                .orElse("当前已选对象");
         List<String> parts = new ArrayList<>();
-        parts.add(StringUtils.hasText(datasetName)
-                ? "该数据集“" + datasetName + "”基于" + sourceText + "构建，适用于围绕" + objectsText + "开展查询与分析。"
-                : "该数据集基于" + sourceText + "构建，适用于围绕" + objectsText + "开展查询与分析。");
+        parts.add(
+                StringUtils.hasText(datasetName)
+                        ? "该数据集“" + datasetName + "”基于" + sourceText + "构建，适用于围绕" + objectsText + "开展查询与分析。"
+                        : "该数据集基于" + sourceText + "构建，适用于围绕" + objectsText + "开展查询与分析。");
         if (StringUtils.hasText(businessLogic)) {
             parts.add("现有业务说明显示，该数据集重点关注：" + businessLogic + "。");
         }
@@ -848,7 +913,8 @@ public class IntegrationDatasetService {
             Set<String> mainFields = new LinkedHashSet<>();
             for (FieldBindingInput item : fieldBindings) {
                 if (StringUtils.hasText(item.subObjectCode())) {
-                    subtableFields.computeIfAbsent(
+                    subtableFields
+                            .computeIfAbsent(
                                     firstNonBlank(item.subObjectName(), item.subObjectCode()),
                                     key -> new LinkedHashSet<>())
                             .add(firstNonBlank(item.fieldAlias(), item.fieldName()));
@@ -878,8 +944,10 @@ public class IntegrationDatasetService {
             }
             Map<String, Set<String>> fieldsByObject = new LinkedHashMap<>();
             for (FieldBindingInput item : fieldBindings) {
-                String objectName = firstNonBlank(item.objectName(), objectNames.get(trimText(item.objectCode())), item.objectCode());
-                fieldsByObject.computeIfAbsent(objectName, key -> new LinkedHashSet<>())
+                String objectName = firstNonBlank(
+                        item.objectName(), objectNames.get(trimText(item.objectCode())), item.objectCode());
+                fieldsByObject
+                        .computeIfAbsent(objectName, key -> new LinkedHashSet<>())
                         .add(firstNonBlank(item.fieldAlias(), item.fieldName()));
             }
             List<String> objectDescriptions = new ArrayList<>();
@@ -901,10 +969,15 @@ public class IntegrationDatasetService {
         if (values == null || values.isEmpty()) {
             return "";
         }
-        return values.stream().filter(StringUtils::hasText).limit(limit).reduce((a, b) -> a + "、" + b).orElse("");
+        return values.stream()
+                .filter(StringUtils::hasText)
+                .limit(limit)
+                .reduce((a, b) -> a + "、" + b)
+                .orElse("");
     }
 
     public record UpsertDatasetRequest(
+            String datasetCode,
             String name,
             String sourceKind,
             Long aiDataSourceId,
@@ -913,6 +986,7 @@ public class IntegrationDatasetService {
             String lowcodeAppName,
             String description,
             String businessLogic,
+            Integer permissionScope,
             String status,
             List<ObjectBindingInput> objectBindings,
             List<FieldBindingInput> fieldBindings,
@@ -940,6 +1014,9 @@ public class IntegrationDatasetService {
             String lowcodeAppName,
             String description,
             String businessLogic,
+            Long ownerUserId,
+            Integer permissionScope,
+            boolean canOperate,
             String status,
             String publishStatus,
             Integer publishedVersion,
@@ -963,6 +1040,9 @@ public class IntegrationDatasetService {
             String lowcodeAppName,
             String description,
             String businessLogic,
+            Long ownerUserId,
+            Integer permissionScope,
+            boolean canOperate,
             String status,
             String publishStatus,
             Integer publishedVersion,

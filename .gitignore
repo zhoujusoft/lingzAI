@@ -36,6 +36,12 @@ bin/
 tmpclaude-*/
 nul
 
+# Local environment files (development overrides)
+.env.local
+.env.development.local
+**/.env.local
+**/.env.development.local
+
 # Claude Code and architecture docs
 .claude/
 architecture-design/
@@ -52,15 +58,52 @@ frontend/**/node_modules/
 .trellis/.developer
 /.trellis/workspace/
 /deploy/.env
+/deploy/lingz/data
 /deploy/.env.dev
 /deploy/.env
 /data/
 /deploy/data/
 /dist/
+.codegraph/
 
 # Local cache
 .cache/
+.pnpm-store/
 
 # Private AI engineering notes / experiments
 /.ai-workbench/
 /demo/
+
+# Dev Container - ignore runtime state, track scripts and config
+.devcontainer/.env
+.devcontainer/logs/
+.devcontainer/runtime/
+!.devcontainer/scripts/
+!.devcontainer/config/
+!.devcontainer/README.md
+!.devcontainer/devcontainer.json
+!.devcontainer/docker-compose.yml
+!.devcontainer/Dockerfile
+!.devcontainer/*.sh
+
+# Workspaces: commit definitions, ignore runtime state
+/workspaces/users/
+/workspaces/public/logs/
+/workspaces/public/runtime-envs/*
+!/workspaces/public/runtime-envs/python/
+/workspaces/public/runtime-envs/python/*
+!/workspaces/public/runtime-envs/python/default/
+!/workspaces/public/runtime-envs/python/general-code/
+/workspaces/public/runtime-envs/python/default/*
+!/workspaces/public/runtime-envs/python/default/requirements.txt
+/workspaces/public/runtime-envs/python/general-code/*
+!/workspaces/public/runtime-envs/python/general-code/requirements.txt
+/workspaces/public/skillstudio/draft/
+/workspaces/public/skillstudio/logs/
+/workspaces/public/skillstudio/memory/
+/workspaces/**/__pycache__/
+/workspaces/**/.venv/
+/workspaces/**/outputs/
+/workspaces/**/tmp/
+/workspaces/**/temp/
+/workspaces/**/.DS_Store

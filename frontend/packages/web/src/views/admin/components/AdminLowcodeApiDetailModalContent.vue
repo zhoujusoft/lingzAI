@@ -47,13 +47,13 @@ function prettyJson(value) {
     if (typeof value === 'string') {
         try {
             return JSON.stringify(JSON.parse(value), null, 2);
-        } catch (error) {
+        } catch {
             return value;
         }
     }
     try {
         return JSON.stringify(value, null, 2);
-    } catch (error) {
+    } catch {
         return String(value);
     }
 }
@@ -66,7 +66,7 @@ function normalizeRows(value) {
     if (typeof raw === 'string') {
         try {
             raw = JSON.parse(raw);
-        } catch (error) {
+        } catch {
             return [];
         }
     }
@@ -150,12 +150,24 @@ const outputRows = computed(() => normalizeRows(api.value.outputParams));
                         <dd class="break-all">{{ api.apiCode || '-' }}</dd>
                     </div>
                     <div class="flex gap-3">
-                        <dt class="w-24 shrink-0 font-semibold text-slate-800">工具名</dt>
+                        <dt class="w-24 shrink-0 font-semibold text-slate-800">工具名称</dt>
+                        <dd class="break-all">
+                            {{ api.toolDisplayName || api.apiName || '尚未注册' }}
+                        </dd>
+                    </div>
+                    <div class="flex gap-3">
+                        <dt class="w-24 shrink-0 font-semibold text-slate-800">工具编码</dt>
                         <dd class="break-all">{{ api.toolName || '尚未注册' }}</dd>
                     </div>
                 </dl>
                 <p v-if="api.apiRemark" class="mt-4 text-sm leading-6 text-slate-500">
                     {{ api.apiRemark }}
+                </p>
+                <p
+                    v-if="api.toolRemark"
+                    class="mt-3 rounded-2xl border border-sky-100 bg-sky-50 px-3 py-2 text-xs leading-6 text-sky-700"
+                >
+                    工具备注：{{ api.toolRemark }}
                 </p>
             </article>
         </section>
@@ -222,7 +234,7 @@ const outputRows = computed(() => normalizeRows(api.value.outputParams));
             <div class="flex items-center justify-between gap-3">
                 <div>
                     <h4 class="text-base font-bold text-slate-900">测试执行</h4>
-                    <p class="mt-1 text-sm text-slate-500">这里直接填写 JSON 入参并执行。</p>
+                    <p class="mt-1 text-sm text-slate-500">这里可直接填写 JSON 入参并执行。</p>
                 </div>
                 <button
                     type="button"

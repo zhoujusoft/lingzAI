@@ -63,7 +63,8 @@ public class ExcelAttachmentParser implements AttachmentParser {
                 Row headerRow = headerRowIndex >= 0 ? sheet.getRow(headerRowIndex) : null;
                 List<String> header = readHeader(headerRow, formatter, evaluator);
                 List<Integer> activeColumns = activeColumns(header);
-                List<List<String>> sampleRows = readSampleRows(sheet, headerRowIndex + 1, activeColumns, formatter, evaluator);
+                List<List<String>> sampleRows =
+                        readSampleRows(sheet, headerRowIndex + 1, activeColumns, formatter, evaluator);
                 List<AttachmentParseResult.Column> columns =
                         analyzeColumns(sheet, headerRowIndex + 1, activeColumns, header, formatter, evaluator);
                 sections.add(new AttachmentParseResult.Section(
@@ -73,7 +74,7 @@ public class ExcelAttachmentParser implements AttachmentParser {
                         "",
                         effectiveRowCount(sheet, headerRowIndex),
                         activeColumns.size(),
-                        headerRowIndex >= 0 ? headerRowIndex + 1 : null,
+                        headerRowIndex >= 0 ? headerRowIndex : null,
                         header,
                         sampleRows,
                         columns));
@@ -231,16 +232,12 @@ public class ExcelAttachmentParser implements AttachmentParser {
             }
 
             String inferredType = inferType(totalCount, dateScore, numberScore, distinctValues.size());
-            String name = columnIndex < header.size() && !header.get(columnIndex).isBlank()
-                    ? header.get(columnIndex)
-                    : "Column" + (columnIndex + 1);
+            String name =
+                    columnIndex < header.size() && !header.get(columnIndex).isBlank()
+                            ? header.get(columnIndex)
+                            : "Column" + (columnIndex + 1);
             columns.add(new AttachmentParseResult.Column(
-                    columnIndex,
-                    name,
-                    inferredType,
-                    nullCount,
-                    totalCount,
-                    sampleValues));
+                    columnIndex, name, inferredType, nullCount, totalCount, sampleValues));
         }
         return columns;
     }

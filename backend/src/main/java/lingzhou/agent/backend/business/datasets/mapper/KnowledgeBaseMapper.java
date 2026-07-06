@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.util.Arrays;
 import java.util.List;
 import lingzhou.agent.backend.business.datasets.domain.KnowledgeBase;
+import lingzhou.agent.backend.common.enums.ResourcePermissionScope;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.ibatis.annotations.Mapper;
 
@@ -34,6 +35,33 @@ public interface KnowledgeBaseMapper extends BaseMapper<KnowledgeBase> {
 
     default IPage<KnowledgeBase> selectKnowledgeBasePage(KnowledgeBase knowledgeBase, long pageNum, long pageSize) {
         QueryWrapper<KnowledgeBase> wrapper = buildQuery(knowledgeBase);
+        wrapper.orderByDesc("kb_id");
+        return this.selectPage(new Page<>(pageNum, pageSize), wrapper);
+    }
+
+    default IPage<KnowledgeBase> selectVisibleKnowledgeBasePage(
+            KnowledgeBase knowledgeBase,
+            long pageNum,
+            long pageSize,
+            String keyword,
+            boolean admin,
+            Long operatorUserId) {
+        QueryWrapper<KnowledgeBase> wrapper = buildQuery(knowledgeBase);
+        if (StringUtils.isNotBlank(keyword)) {
+            String normalizedKeyword = keyword.trim();
+            wrapper.and(query -> query.like("kb_name", normalizedKeyword)
+                    .or()
+                    .like("kb_code", normalizedKeyword)
+                    .or()
+                    .like("description", normalizedKeyword));
+        }
+        if (!admin) {
+            wrapper.and(query -> query.isNull("permission_scope")
+                    .or()
+                    .ne("permission_scope", ResourcePermissionScope.OWNER_ONLY.code())
+                    .or()
+                    .eq("owner_user_id", operatorUserId));
+        }
         wrapper.orderByDesc("kb_id");
         return this.selectPage(new Page<>(pageNum, pageSize), wrapper);
     }

@@ -6,6 +6,8 @@ import java.util.Collection;
 import java.util.List;
 import lingzhou.agent.backend.business.skill.domain.SkillToolBinding;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 
 @Mapper
 public interface SkillToolBindingMapper extends BaseMapper<SkillToolBinding> {
@@ -54,4 +56,21 @@ public interface SkillToolBindingMapper extends BaseMapper<SkillToolBinding> {
         wrapper.in("tool_name", toolNames);
         return this.delete(wrapper);
     }
+
+    /**
+     * 检查工具是否绑定到指定技能
+     *
+     * @param runtimeSkillName 技能的运行时名称
+     * @param toolName 工具名称
+     * @return 如果绑定存在返回 true，否则返回 false
+     */
+    @Select("""
+        SELECT COUNT(*) > 0
+        FROM skill_tool_binding stb
+        JOIN skill_catalog sc ON stb.skill_id = sc.id
+        WHERE sc.runtime_skill_name = #{runtimeSkillName}
+          AND stb.tool_name = #{toolName}
+        """)
+    boolean existsBinding(@Param("runtimeSkillName") String runtimeSkillName,
+                          @Param("toolName") String toolName);
 }

@@ -47,12 +47,16 @@ const embeddedFiles = [
 
                 <div class="rounded-[24px] border border-slate-100 bg-white p-8 shadow-sm">
                     <div class="flex items-center gap-6">
-                        <div class="flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 text-primary">
+                        <div
+                            class="flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 text-primary"
+                        >
                             <span class="material-symbols-outlined fill-1 text-4xl">smart_toy</span>
                         </div>
                         <div class="flex-1">
                             <div class="mb-1 text-xs font-medium text-slate-400">知识库名称</div>
-                            <div class="rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-3.5 font-medium text-slate-700">
+                            <div
+                                class="rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-3.5 font-medium text-slate-700"
+                            >
                                 {{ props.knowledge.name }}
                             </div>
                         </div>
@@ -67,10 +71,14 @@ const embeddedFiles = [
                         class="flex items-center justify-between rounded-2xl border border-slate-100 bg-white p-5 shadow-sm"
                     >
                         <div class="flex items-center gap-3">
-                            <span class="material-symbols-outlined text-red-500">picture_as_pdf</span>
+                            <span class="material-symbols-outlined text-red-500"
+                                >picture_as_pdf</span
+                            >
                             <span class="font-medium text-slate-700">{{ item.name }}</span>
                         </div>
-                        <span class="material-symbols-outlined fill-1 font-bold text-green-500">check_circle</span>
+                        <span class="material-symbols-outlined fill-1 font-bold text-green-500"
+                            >check_circle</span
+                        >
                     </div>
                 </div>
 
@@ -99,7 +107,9 @@ const embeddedFiles = [
                     </div>
                     <div class="col-span-2 space-y-3">
                         <div class="text-slate-500">文本预处理规则</div>
-                        <div class="font-medium text-slate-800">替换掉连续的空格，换行符和制表符</div>
+                        <div class="font-medium text-slate-800">
+                            替换掉连续的空格，换行符和制表符
+                        </div>
                     </div>
                 </div>
 

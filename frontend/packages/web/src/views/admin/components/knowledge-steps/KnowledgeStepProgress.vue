@@ -16,7 +16,7 @@ const steps = computed(() =>
     props.labels.map((label, index) => ({
         index: index + 1,
         label,
-    })),
+    }))
 );
 </script>
 

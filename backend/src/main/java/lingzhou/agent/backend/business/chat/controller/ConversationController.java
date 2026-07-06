@@ -1,12 +1,7 @@
 package lingzhou.agent.backend.business.chat.controller;
 
 import jakarta.servlet.http.HttpServletRequest;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 import lingzhou.agent.backend.business.chat.domain.enums.ConversationSessionType;
-import lingzhou.agent.backend.business.chat.domain.vo.ChatMessageVo;
-import lingzhou.agent.backend.business.chat.domain.vo.ChatSessionVo;
 import lingzhou.agent.backend.business.chat.service.ConversationHistoryService;
 import lingzhou.agent.backend.common.lzException.TaskException;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -29,26 +24,25 @@ public class ConversationController {
     }
 
     @GetMapping
-    public Map<String, Object> listSessions(
+    public ConversationApiModels.SessionListResponse listSessions(
             @RequestParam(value = "sessionType", required = false) String sessionType,
             @RequestParam(value = "scopeId", required = false) Long scopeId,
             @RequestParam(value = "limit", required = false) Integer limit,
+            @RequestParam(value = "pageNo", required = false) Integer pageNo,
+            @RequestParam(value = "pageSize", required = false) Integer pageSize,
             HttpServletRequest request) {
         Long userId = resolveUserId(request);
-        int safeLimit = limit == null ? 20 : limit;
+        int safePageNo = pageNo == null ? 1 : pageNo;
+        int safePageSize = normalizeSessionPageSize(pageSize == null ? limit : pageSize);
         ConversationSessionType type = parseOptionalSessionType(sessionType);
-        List<ChatSessionVo> sessions = conversationHistoryService.listSessions(userId, type, scopeId, safeLimit);
-
-        Map<String, Object> data = new HashMap<>();
-        data.put("items", sessions);
-        data.put("hasMore", Boolean.FALSE);
-        data.put("nextCursor", null);
-        return data;
+        ConversationHistoryService.SessionPageResult page =
+                conversationHistoryService.listSessions(userId, type, scopeId, safePageNo, safePageSize);
+        return ConversationApiModels.sessionList(page.items(), safePageNo, safePageSize, page.total());
     }
 
-    @GetMapping("/{sessionCode}/messages")
-    public Map<String, Object> listMessages(
-            @PathVariable("sessionCode") String sessionCode,
+    @GetMapping("/{sessionId}/messages")
+    public ConversationApiModels.MessageListResponse listMessages(
+            @PathVariable("sessionId") String sessionId,
             @RequestParam(value = "sessionType", required = false) String sessionType,
             @RequestParam(value = "scopeId", required = false) Long scopeId,
             @RequestParam(value = "pageNo", required = false) Integer pageNo,
@@ -56,23 +50,17 @@ public class ConversationController {
             HttpServletRequest request) {
         Long userId = resolveUserId(request);
         int safePageNo = pageNo == null ? 1 : pageNo;
-        int safePageSize = pageSize == null ? 50 : pageSize;
+        int safePageSize = normalizeMessagePageSize(pageSize);
         ConversationSessionType type = parseSessionType(sessionType);
 
-        List<ChatMessageVo> items = conversationHistoryService.listMessages(
-                userId, type, sessionCode, scopeId, safePageNo, safePageSize);
-
-        Map<String, Object> data = new HashMap<>();
-        data.put("items", items);
-        data.put("pageNo", safePageNo);
-        data.put("pageSize", safePageSize);
-        data.put("total", items.size());
-        return data;
+        ConversationHistoryService.MessagePageResult page =
+                conversationHistoryService.listMessages(userId, type, sessionId, scopeId, safePageNo, safePageSize);
+        return ConversationApiModels.messageList(page.items(), safePageNo, safePageSize, page.total());
     }
 
-    @DeleteMapping("/{sessionCode}")
-    public Map<String, Object> deleteSession(
-            @PathVariable("sessionCode") String sessionCode,
+    @DeleteMapping("/{sessionId}")
+    public ConversationApiModels.DeleteSessionResponse deleteSession(
+            @PathVariable("sessionId") String sessionId,
             @RequestParam(value = "sessionType", required = false) String sessionType,
             @RequestParam(value = "scopeId", required = false) Long scopeId,
             HttpServletRequest request) {
@@ -80,39 +68,39 @@ public class ConversationController {
         ConversationSessionType type = parseSessionType(sessionType);
 
         ConversationHistoryService.DeleteResult result =
-                conversationHistoryService.deleteSession(userId, type, sessionCode, scopeId);
-
-        Map<String, Object> data = new HashMap<>();
-        data.put("success", result.success());
-        data.put("alreadyDeleted", result.alreadyDeleted());
-        data.put("affectedSessions", result.affectedSessions());
-        data.put("affectedMessages", result.affectedMessages());
-        return data;
+                conversationHistoryService.deleteSession(userId, type, sessionId, scopeId);
+        return ConversationApiModels.deleteResult(result);
     }
 
-    @PutMapping("/{sessionCode}/name")
-    public Map<String, Object> renameSession(
-            @PathVariable("sessionCode") String sessionCode,
+    @PutMapping("/{sessionId}/name")
+    public ConversationApiModels.RenameSessionResponse renameSession(
+            @PathVariable("sessionId") String sessionId,
             @RequestParam(value = "sessionType", required = false) String sessionType,
             @RequestParam(value = "scopeId", required = false) Long scopeId,
-            @RequestBody(required = false) RenameSessionRequest requestBody,
+            @RequestBody(required = false) ConversationApiModels.RenameSessionRequest requestBody,
             HttpServletRequest request)
             throws TaskException {
         Long userId = resolveUserId(request);
         ConversationSessionType type = parseSessionType(sessionType);
         ConversationHistoryService.RenameResult result = conversationHistoryService.renameSession(
-                userId,
-                type,
-                sessionCode,
-                scopeId,
-                requestBody == null ? null : requestBody.name());
+                userId, type, sessionId, scopeId, requestBody == null ? null : requestBody.name());
+        return ConversationApiModels.renameResult(result);
+    }
 
-        Map<String, Object> data = new HashMap<>();
-        data.put("success", Boolean.TRUE);
-        data.put("sessionCode", result.sessionCode());
-        data.put("name", result.name());
-        data.put("title", result.title());
-        return data;
+    @PutMapping("/{sessionId}/model")
+    public ConversationApiModels.UpdateSessionChatModelResponse updateSessionChatModel(
+            @PathVariable("sessionId") String sessionId,
+            @RequestParam(value = "sessionType", required = false) String sessionType,
+            @RequestParam(value = "scopeId", required = false) Long scopeId,
+            @RequestBody(required = false) ConversationApiModels.UpdateSessionChatModelRequest requestBody,
+            HttpServletRequest request)
+            throws TaskException {
+        Long userId = resolveUserId(request);
+        ConversationSessionType type = parseSessionType(sessionType);
+        ConversationHistoryService.UpdateSessionChatModelResult result =
+                conversationHistoryService.updateSessionChatModel(
+                        userId, type, sessionId, scopeId, requestBody == null ? null : requestBody.modelId());
+        return ConversationApiModels.updateChatModelResult(result);
     }
 
     private Long resolveUserId(HttpServletRequest request) {
@@ -141,5 +129,17 @@ public class ConversationController {
         return parseSessionType(value);
     }
 
-    private record RenameSessionRequest(String name) {}
+    private int normalizeMessagePageSize(Integer pageSize) {
+        if (pageSize == null) {
+            return 10;
+        }
+        return Math.max(1, Math.min(pageSize, 100));
+    }
+
+    private int normalizeSessionPageSize(Integer pageSize) {
+        if (pageSize == null) {
+            return 20;
+        }
+        return Math.max(1, Math.min(pageSize, 100));
+    }
 }

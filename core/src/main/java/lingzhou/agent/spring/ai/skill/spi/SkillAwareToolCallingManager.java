@@ -15,6 +15,9 @@
  */
 package lingzhou.agent.spring.ai.skill.spi;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -28,6 +31,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
@@ -74,6 +78,8 @@ import reactor.util.context.ContextView;
 public class SkillAwareToolCallingManager implements ToolCallingManager {
 
     private static final Logger logger = LoggerFactory.getLogger(SkillAwareToolCallingManager.class);
+    private static final ThreadLocal<BiConsumer<String, String>> TOOL_EVENT_PUBLISHER_HOLDER = new ThreadLocal<>();
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private final SkillKit skillKit;
     private final ToolCallingManager delegate;
@@ -207,6 +213,16 @@ public class SkillAwareToolCallingManager implements ToolCallingManager {
         if (sanitizedResponse != chatResponse) {
             chatResponse = sanitizedResponse;
         }
+        if (!hasValidToolCalls(chatResponse)) {
+            logger.warn("No valid tool calls remain after sanitization. Skipping delegate tool execution.");
+            return ToolExecutionResult.builder()
+                    .conversationHistory(buildConversationHistoryWithoutToolExecution(prompt, chatResponse))
+                    .build();
+        }
+        ToolExecutionResult invalidArgumentsResult = rejectInvalidToolArguments(prompt, chatResponse);
+        if (invalidArgumentsResult != null) {
+            return invalidArgumentsResult;
+        }
         if (chatResponse != null) {
             chatResponse.getResult();
             if (chatResponse.getResult().getOutput() != null) {
@@ -239,6 +255,72 @@ public class SkillAwareToolCallingManager implements ToolCallingManager {
         ToolExecutionResult result = delegate.executeToolCalls(prompt, chatResponse);
         publishToolResults(result);
         return result;
+    }
+
+    private ToolExecutionResult rejectInvalidToolArguments(Prompt prompt, ChatResponse chatResponse) {
+        List<ToolCallArgumentError> errors = collectInvalidToolArgumentErrors(chatResponse);
+        if (errors.isEmpty()) {
+            return null;
+        }
+
+        List<Message> history = buildPromptInstructions(prompt);
+        List<String> recoveryMessages = new ArrayList<>();
+        for (ToolCallArgumentError error : errors) {
+            logger.warn(
+                    "Rejecting tool call with invalid JSON arguments: id={}, name={}, reason={}",
+                    error.id(),
+                    error.name(),
+                    error.reason());
+            recoveryMessages.add(error.responseData());
+            publishToolEvent(
+                    "result",
+                    "{\"id\":\""
+                            + safeJson(error.id())
+                            + "\",\"name\":\""
+                            + safeJson(error.name())
+                            + "\",\"response\":\""
+                            + safeJson(error.responseData())
+                            + "\"}");
+        }
+        history.add(new UserMessage(String.join("\n", recoveryMessages)));
+        return ToolExecutionResult.builder().conversationHistory(history).build();
+    }
+
+    private List<ToolCallArgumentError> collectInvalidToolArgumentErrors(ChatResponse chatResponse) {
+        if (chatResponse == null || chatResponse.getResults() == null) {
+            return List.of();
+        }
+        List<ToolCallArgumentError> errors = new ArrayList<>();
+        for (Generation generation : chatResponse.getResults()) {
+            if (generation == null
+                    || generation.getOutput() == null
+                    || !generation.getOutput().hasToolCalls()) {
+                continue;
+            }
+            for (AssistantMessage.ToolCall toolCall : generation.getOutput().getToolCalls()) {
+                ToolCallArgumentError error = validateToolCallArguments(toolCall);
+                if (error != null) {
+                    errors.add(error);
+                }
+            }
+        }
+        return errors;
+    }
+
+    private ToolCallArgumentError validateToolCallArguments(AssistantMessage.ToolCall toolCall) {
+        if (toolCall == null || isBlank(toolCall.name())) {
+            return null;
+        }
+        String arguments = normalizeArguments(toolCall.arguments());
+        try {
+            JsonNode root = OBJECT_MAPPER.readTree(arguments);
+            if (root != null && root.isObject()) {
+                return null;
+            }
+            return ToolCallArgumentError.of(toolCall, "arguments must be a JSON object");
+        } catch (JsonProcessingException ex) {
+            return ToolCallArgumentError.of(toolCall, "arguments is not valid JSON: " + ex.getOriginalMessage());
+        }
     }
 
     private void publishToolResults(ToolExecutionResult result) {
@@ -276,14 +358,25 @@ public class SkillAwareToolCallingManager implements ToolCallingManager {
     @SuppressWarnings("unchecked")
     private void publishToolEvent(String eventType, String payload) {
         ContextView context = ToolCallReactiveContextHolder.getContext();
-        if (context == null || !context.hasKey("toolEventPublisher")) {
+        Object publisher = context != null && context.hasKey("toolEventPublisher")
+                ? context.get("toolEventPublisher")
+                : TOOL_EVENT_PUBLISHER_HOLDER.get();
+        if (publisher instanceof BiConsumer<?, ?> biConsumer) {
+            String wrapped = "{\"type\":\"" + safeJson(eventType) + "\",\"content\":" + payload + "}";
+            ((BiConsumer<String, String>) biConsumer).accept(eventType, wrapped);
+        }
+    }
+
+    public static void setToolEventPublisher(BiConsumer<String, String> publisher) {
+        if (publisher == null) {
+            TOOL_EVENT_PUBLISHER_HOLDER.remove();
             return;
         }
-        Object publisher = context.get("toolEventPublisher");
-        if (publisher instanceof BiConsumer<?, ?>) {
-            String wrapped = "{\"type\":\"" + safeJson(eventType) + "\",\"content\":" + payload + "}";
-            ((BiConsumer<String, String>) publisher).accept(eventType, wrapped);
-        }
+        TOOL_EVENT_PUBLISHER_HOLDER.set(publisher);
+    }
+
+    public static void clearToolEventPublisher() {
+        TOOL_EVENT_PUBLISHER_HOLDER.remove();
     }
 
     private static String safeJson(String value) {
@@ -341,6 +434,54 @@ public class SkillAwareToolCallingManager implements ToolCallingManager {
         return new ChatResponse(newResults, chatResponse.getMetadata());
     }
 
+    private boolean hasValidToolCalls(ChatResponse chatResponse) {
+        if (chatResponse == null || chatResponse.getResults() == null) {
+            return false;
+        }
+        for (Generation generation : chatResponse.getResults()) {
+            if (generation == null
+                    || generation.getOutput() == null
+                    || !generation.getOutput().hasToolCalls()) {
+                continue;
+            }
+            for (AssistantMessage.ToolCall toolCall : generation.getOutput().getToolCalls()) {
+                if (toolCall != null && !isBlank(toolCall.name())) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private List<Message> buildConversationHistoryWithoutToolExecution(Prompt prompt, ChatResponse chatResponse) {
+        List<Message> history = buildPromptInstructions(prompt);
+        AssistantMessage assistantMessage = extractFirstAssistantMessage(chatResponse);
+        if (assistantMessage != null) {
+            history.add(assistantMessage);
+        }
+        return history;
+    }
+
+    private List<Message> buildPromptInstructions(Prompt prompt) {
+        List<Message> history = new ArrayList<>();
+        if (prompt != null && prompt.getInstructions() != null) {
+            history.addAll(prompt.getInstructions());
+        }
+        return history;
+    }
+
+    private AssistantMessage extractFirstAssistantMessage(ChatResponse chatResponse) {
+        if (chatResponse == null || chatResponse.getResults() == null) {
+            return null;
+        }
+        for (Generation generation : chatResponse.getResults()) {
+            if (generation != null && generation.getOutput() != null) {
+                return generation.getOutput();
+            }
+        }
+        return null;
+    }
+
     private List<AssistantMessage.ToolCall> normalizeToolCalls(List<AssistantMessage.ToolCall> toolCalls) {
         if (toolCalls == null || toolCalls.isEmpty()) {
             return toolCalls;
@@ -348,15 +489,22 @@ public class SkillAwareToolCallingManager implements ToolCallingManager {
 
         Map<String, ToolCallAggregate> aggregates = new LinkedHashMap<>();
         int index = 0;
+        String lastAggregateKey = null;
         for (AssistantMessage.ToolCall toolCall : toolCalls) {
             if (toolCall == null) {
                 continue;
             }
 
             String id = toolCall.id();
-            String key = (id == null || id.isBlank()) ? "idx-" + (index++) : id;
+            String key;
+            if (id == null || id.isBlank()) {
+                key = lastAggregateKey != null ? lastAggregateKey : "idx-" + (index++);
+            } else {
+                key = id;
+            }
             ToolCallAggregate aggregate = aggregates.computeIfAbsent(key, k -> new ToolCallAggregate());
             aggregate.merge(toolCall);
+            lastAggregateKey = key;
         }
 
         List<AssistantMessage.ToolCall> merged = new ArrayList<>(aggregates.size());
@@ -370,7 +518,7 @@ public class SkillAwareToolCallingManager implements ToolCallingManager {
                         agg.arguments);
                 continue;
             }
-            merged.add(new AssistantMessage.ToolCall(agg.id, agg.type, agg.name, agg.arguments));
+            merged.add(new AssistantMessage.ToolCall(agg.id, agg.type, agg.name, normalizeArguments(agg.arguments)));
         }
 
         boolean sameSize = merged.size() == toolCalls.size();
@@ -388,6 +536,10 @@ public class SkillAwareToolCallingManager implements ToolCallingManager {
         }
 
         return merged;
+    }
+
+    private String normalizeArguments(String arguments) {
+        return isBlank(arguments) ? "{}" : arguments;
     }
 
     private static final class ToolCallAggregate {
@@ -409,13 +561,25 @@ public class SkillAwareToolCallingManager implements ToolCallingManager {
             if (isBlank(name) && !isBlank(toolCall.name())) {
                 name = toolCall.name();
             }
-            if (isBlank(arguments) && !isBlank(toolCall.arguments())) {
-                arguments = toolCall.arguments();
+            if (!isBlank(toolCall.arguments())) {
+                if (isBlank(arguments)) {
+                    arguments = toolCall.arguments();
+                } else if (!arguments.equals(toolCall.arguments())) {
+                    arguments = arguments + toolCall.arguments();
+                }
             }
         }
 
         private static boolean isBlank(String value) {
             return value == null || value.isBlank();
+        }
+    }
+
+    private record ToolCallArgumentError(String id, String name, String reason, String responseData) {
+        private static ToolCallArgumentError of(AssistantMessage.ToolCall toolCall, String reason) {
+            String message = "工具调用参数非法：" + reason + "。请重新生成合法 JSON object 参数；"
+                    + "如果内容很长，请拆分为更小的工具调用，或改用查询聚合/脚本读取已有数据，避免把大段正文塞进单个 arguments。";
+            return new ToolCallArgumentError(toolCall.id(), toolCall.name(), reason, message);
         }
     }
 

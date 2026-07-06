@@ -13,7 +13,7 @@ public class DocumentBlock {
     private Embedding embedding;
     private String blockType;
     private String JsonStr;
-    private String fileId;
+    private String objectName;
     private String docId;
     private String reference;
 
@@ -25,12 +25,12 @@ public class DocumentBlock {
         this.suggestedQuestions = new ArrayList<>();
     }
 
-    public String getFileId() {
-        return fileId;
+    public String getObjectName() {
+        return objectName;
     }
 
-    public void setFileId(String fileId) {
-        this.fileId = fileId;
+    public void setObjectName(String objectName) {
+        this.objectName = objectName;
     }
 
     public String getJsonStr() {

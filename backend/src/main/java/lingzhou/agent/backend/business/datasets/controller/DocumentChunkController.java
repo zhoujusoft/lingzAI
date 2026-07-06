@@ -56,7 +56,7 @@ public class DocumentChunkController {
     }
 
     @PutMapping("/{kbId}")
-    public Map<String, Object> edit(@PathVariable String kbId, @RequestBody DocumentChunk documentChunk)
+    public Map<String, Object> edit(@PathVariable("kbId") String kbId, @RequestBody DocumentChunk documentChunk)
             throws TaskException {
         return Map.of(
                 "affected",
@@ -66,7 +66,7 @@ public class DocumentChunkController {
     }
 
     @DeleteMapping("/{chunkIds}")
-    public Map<String, Object> remove(@PathVariable Long[] chunkIds) {
+    public Map<String, Object> remove(@PathVariable("chunkIds") Long[] chunkIds) {
         return Map.of("affected", documentChunkService.deleteDocumentChunkByChunkIds(chunkIds));
     }
 

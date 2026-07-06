@@ -4,7 +4,8 @@ import { useRouter } from 'vue-router';
 import PageLayout from '@/components/PageLayout.vue';
 import DirectoryActionsMenu from './DirectoryActionsMenu.vue';
 import { alert, confirm, prompt } from '@/composables/useModal';
-import { clearUserSession } from '@/composables/useCurrentUser';
+import { clearUserSession, currentUserState } from '@/composables/useCurrentUser';
+import { canOperateKnowledgeBase } from '@/model/knowledge-permissions';
 import { ROUTE_PATHS } from '@/router/routePaths';
 import {
     createKnowledgeFolder,
@@ -47,6 +48,9 @@ const moveTargetParentId = ref('');
 const movingItem = ref(null);
 const moving = ref(false);
 const ERROR_MESSAGE_SUMMARY_LIMIT = 96;
+const canOperateCurrentKnowledge = computed(() =>
+    canOperateKnowledgeBase(props.knowledge, currentUserState.profile)
+);
 
 function handleUnauthorized() {
     clearUserSession();
@@ -255,6 +259,9 @@ function goToCrumb(item) {
 }
 
 function triggerFileUpload() {
+    if (!canOperateCurrentKnowledge.value) {
+        return;
+    }
     if (uploadingFile.value) {
         return;
     }
@@ -262,6 +269,10 @@ function triggerFileUpload() {
 }
 
 async function handleFileChange(event) {
+    if (!canOperateCurrentKnowledge.value) {
+        event.target.value = '';
+        return;
+    }
     const [file] = Array.from(event.target.files || []);
     event.target.value = '';
     if (!file) {
@@ -306,6 +317,9 @@ async function handleFileChange(event) {
 }
 
 async function createFolder() {
+    if (!canOperateCurrentKnowledge.value) {
+        return;
+    }
     const name = await prompt({
         title: '新建目录',
         message: '请输入目录名称',
@@ -335,6 +349,9 @@ async function createFolder() {
 }
 
 async function renameFolder(item) {
+    if (!canOperateCurrentKnowledge.value) {
+        return;
+    }
     const name = await prompt({
         title: '重命名目录',
         message: '请输入新的目录名称',
@@ -365,6 +382,9 @@ async function renameFolder(item) {
 }
 
 async function removeFolder(item) {
+    if (!canOperateCurrentKnowledge.value) {
+        return;
+    }
     const confirmed = await confirm({
         title: '删除目录',
         message: `确认删除目录“${item.name || ''}”吗？目录下文档会一并删除。`,
@@ -394,6 +414,9 @@ async function removeFolder(item) {
 }
 
 async function removeDocument(item) {
+    if (!canOperateCurrentKnowledge.value) {
+        return;
+    }
     const confirmed = await confirm({
         title: '删除文档',
         message: `确认删除文档“${item.name || ''}”吗？`,
@@ -417,6 +440,9 @@ async function removeDocument(item) {
 }
 
 async function rerunDocument(item) {
+    if (!canOperateCurrentKnowledge.value) {
+        return;
+    }
     try {
         await retryDocument(item.docId, handleUnauthorized);
         await refreshView();
@@ -429,6 +455,9 @@ async function rerunDocument(item) {
 }
 
 function processPendingDocument(item) {
+    if (!canOperateCurrentKnowledge.value) {
+        return;
+    }
     emit('process-document', {
         ...props.knowledge,
         parentId: currentParentId.value,
@@ -441,6 +470,9 @@ function processPendingDocument(item) {
 }
 
 function openMoveDialog(item) {
+    if (!canOperateCurrentKnowledge.value) {
+        return;
+    }
     movingItem.value = item;
     moveTargetParentId.value = item.parentId == null ? '' : String(item.parentId);
     moveDialogOpen.value = true;
@@ -453,6 +485,9 @@ function closeMoveDialog() {
 }
 
 async function confirmMove() {
+    if (!canOperateCurrentKnowledge.value) {
+        return;
+    }
     if (!movingItem.value) {
         return;
     }
@@ -526,7 +561,7 @@ watch(currentParentId, () => {
         </template>
 
         <template #right>
-            <div class="flex items-center gap-2">
+            <div v-if="canOperateCurrentKnowledge" class="flex items-center gap-2">
                 <button
                     type="button"
                     class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-5 py-2 font-medium text-slate-700 shadow-sm transition-all hover:border-slate-300 hover:bg-slate-50"
@@ -618,7 +653,12 @@ watch(currentParentId, () => {
                             <th class="px-8 py-4 text-sm font-semibold text-slate-500">大小</th>
                             <th class="px-8 py-4 text-sm font-semibold text-slate-500">状态</th>
                             <th class="px-8 py-4 text-sm font-semibold text-slate-500">上传时间</th>
-                            <th class="px-8 py-4 text-sm font-semibold text-slate-500">操作</th>
+                            <th
+                                v-if="canOperateCurrentKnowledge"
+                                class="px-8 py-4 text-sm font-semibold text-slate-500"
+                            >
+                                操作
+                            </th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-slate-50">
@@ -684,7 +724,7 @@ watch(currentParentId, () => {
                             <td class="px-8 py-4 text-sm text-slate-500">
                                 {{ item.uploadTime || '-' }}
                             </td>
-                            <td class="px-8 py-4">
+                            <td v-if="canOperateCurrentKnowledge" class="px-8 py-4">
                                 <div class="flex items-center gap-2">
                                     <DirectoryActionsMenu
                                         v-if="item.isFolder === 1"

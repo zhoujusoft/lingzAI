@@ -52,9 +52,39 @@ CREATE TABLE IF NOT EXISTS `model_default_binding` (
   KEY `idx_model_default_binding_model` (`model_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='默认模型绑定';
 
-ALTER TABLE `model_vendor`
-  ADD COLUMN IF NOT EXISTS `default_base_url` varchar(500) DEFAULT NULL COMMENT '厂商默认 Base URL' AFTER `description`,
-  ADD COLUMN IF NOT EXISTS `default_api_key` varchar(500) DEFAULT NULL COMMENT '厂商默认 API Key' AFTER `default_base_url`;
+SET @ddl := (
+  SELECT IF(
+    EXISTS(
+      SELECT 1
+      FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'model_vendor'
+        AND COLUMN_NAME = 'default_base_url'
+    ),
+    'SELECT ''[db-migrate] skipped add model_vendor.default_base_url''',
+    'ALTER TABLE `model_vendor` ADD COLUMN `default_base_url` varchar(500) DEFAULT NULL COMMENT ''厂商默认 Base URL'' AFTER `description`'
+  )
+);
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @ddl := (
+  SELECT IF(
+    EXISTS(
+      SELECT 1
+      FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'model_vendor'
+        AND COLUMN_NAME = 'default_api_key'
+    ),
+    'SELECT ''[db-migrate] skipped add model_vendor.default_api_key''',
+    'ALTER TABLE `model_vendor` ADD COLUMN `default_api_key` varchar(500) DEFAULT NULL COMMENT ''厂商默认 API Key'' AFTER `default_base_url`'
+  )
+);
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 INSERT INTO `model_vendor` (`vendor_code`, `vendor_name`, `description`, `default_base_url`, `default_api_key`, `status`)
 SELECT 'QWEN_ONLINE', '通义千问', '预置模型模式，默认只需要配置厂商级 API Key 即可使用。', 'https://dashscope.aliyuncs.com/compatible-mode', '', 'ACTIVE'

@@ -10,13 +10,6 @@ import java.util.List;
 import java.util.Map;
 import lingzhou.agent.backend.app.SkillFilesystemSupport;
 import lingzhou.agent.backend.capability.tool.registry.GlobalToolRegistry;
-import lingzhou.agent.backend.skills.FashionGuideSkill;
-import lingzhou.agent.backend.skills.InventorySkill;
-import lingzhou.agent.backend.skills.PricingSkill;
-import lingzhou.agent.backend.skills.PurchaseStrategySkill;
-import lingzhou.agent.backend.skills.SupplierSkill;
-import lingzhou.agent.backend.skills.TrendSkill;
-import lingzhou.agent.backend.skills.WeatherSkill;
 import lingzhou.agent.spring.ai.skill.capability.ReferencesLoader;
 import lingzhou.agent.spring.ai.skill.core.Skill;
 import lingzhou.agent.spring.ai.skill.core.SkillKit;
@@ -37,15 +30,18 @@ public class SkillRuntimeRegistry {
     private static final String FILESYSTEM_SOURCE = "filesystem";
 
     private final GlobalToolRegistry globalToolRegistry;
+    private final FilesystemSkillNativeToolRegistry filesystemSkillNativeToolRegistry;
 
     private final Object reloadMonitor = new Object();
 
-    public SkillRuntimeRegistry(GlobalToolRegistry globalToolRegistry) {
+    public SkillRuntimeRegistry(
+            GlobalToolRegistry globalToolRegistry,
+            FilesystemSkillNativeToolRegistry filesystemSkillNativeToolRegistry) {
         this.globalToolRegistry = globalToolRegistry;
+        this.filesystemSkillNativeToolRegistry = filesystemSkillNativeToolRegistry;
     }
 
     public void registerAll(SkillKit skillKit) {
-        registerBuiltinSkills(skillKit);
         registerFilesystemSkills(skillKit);
     }
 
@@ -85,28 +81,39 @@ public class SkillRuntimeRegistry {
                 .orElse(null);
     }
 
-    private void registerBuiltinSkills(SkillKit skillKit) {
-        skillKit.register(InventorySkill.create());
-        skillKit.register(PricingSkill.create());
-        skillKit.register(TrendSkill.create());
-        skillKit.register(SupplierSkill.class);
-        skillKit.register(PurchaseStrategySkill.class);
-        skillKit.register(WeatherSkill.class);
-        skillKit.register(FashionGuideSkill.class);
-    }
-
     private void registerFilesystemSkills(SkillKit skillKit) {
-        List<ToolCallback> baseTools = globalToolRegistry.getToolCallbacks();
+        List<ToolCallback> baseTools = globalToolRegistry.getSystemRuntimeToolCallbacks();
         for (FilesystemSkillDescriptor descriptor : listFilesystemSkills()) {
             String content = readSkillFileAsString(descriptor.skillMarkdownPath());
             Map<String, String> references = loadReferences(descriptor.directoryPath());
+            List<ToolCallback> tools = mergeTools(
+                    baseTools, filesystemSkillNativeToolRegistry.resolveNativeTools(descriptor.runtimeSkillName()));
             SkillMetadata metadata = SkillMetadata.builder(
-                            descriptor.runtimeSkillName(),
-                            descriptor.description(),
-                            FILESYSTEM_SOURCE)
+                            descriptor.runtimeSkillName(), descriptor.description(), FILESYSTEM_SOURCE)
                     .build();
-            skillKit.register(metadata, () -> new FilesystemSkill(metadata, content, baseTools, references));
+            skillKit.register(metadata, () -> new FilesystemSkill(metadata, content, tools, references));
         }
+    }
+
+    private List<ToolCallback> mergeTools(List<ToolCallback> baseTools, List<ToolCallback> nativeTools) {
+        Map<String, ToolCallback> merged = new LinkedHashMap<>();
+        for (ToolCallback callback : baseTools == null ? List.<ToolCallback>of() : baseTools) {
+            String toolName = callback == null || callback.getToolDefinition() == null
+                    ? null
+                    : callback.getToolDefinition().name();
+            if (StringUtils.hasText(toolName)) {
+                merged.putIfAbsent(toolName, callback);
+            }
+        }
+        for (ToolCallback callback : nativeTools == null ? List.<ToolCallback>of() : nativeTools) {
+            String toolName = callback == null || callback.getToolDefinition() == null
+                    ? null
+                    : callback.getToolDefinition().name();
+            if (StringUtils.hasText(toolName)) {
+                merged.putIfAbsent(toolName, callback);
+            }
+        }
+        return List.copyOf(merged.values());
     }
 
     private FilesystemSkillDescriptor toDescriptor(Path skillDir) {
@@ -116,7 +123,8 @@ public class SkillRuntimeRegistry {
         }
         String content = readSkillFileAsString(skillMarkdownPath);
         Map<String, String> frontMatter = parseFrontMatter(content);
-        String directoryName = skillDir.getFileName() == null ? "" : skillDir.getFileName().toString();
+        String directoryName =
+                skillDir.getFileName() == null ? "" : skillDir.getFileName().toString();
         String runtimeSkillName = normalize(frontMatter.get("name"), directoryName);
         String description = normalize(frontMatter.get("description"), "Filesystem skill: " + runtimeSkillName);
         return new FilesystemSkillDescriptor(runtimeSkillName, description, skillDir, skillMarkdownPath);
@@ -211,14 +219,12 @@ public class SkillRuntimeRegistry {
         private final Map<String, String> references;
 
         private FilesystemSkill(
-                SkillMetadata metadata,
-                String content,
-                List<ToolCallback> tools,
-                Map<String, String> references) {
+                SkillMetadata metadata, String content, List<ToolCallback> tools, Map<String, String> references) {
             this.metadata = metadata;
             this.content = content;
             this.tools = tools == null ? List.of() : List.copyOf(tools);
-            this.references = references == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(references));
+            this.references =
+                    references == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(references));
         }
 
         @Override

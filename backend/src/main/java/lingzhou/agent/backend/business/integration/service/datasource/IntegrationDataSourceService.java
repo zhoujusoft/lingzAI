@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.Objects;
 import lingzhou.agent.backend.business.integration.domain.IntegrationDataSource;
 import lingzhou.agent.backend.business.integration.mapper.IntegrationDataSourceMapper;
+import lingzhou.agent.backend.business.system.model.SysUserModel;
 import lingzhou.agent.backend.common.lzException.TaskException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,37 +29,56 @@ public class IntegrationDataSourceService {
     private static final ObjectMapper JSON = new ObjectMapper();
 
     private final IntegrationDataSourceMapper integrationDataSourceMapper;
+    private final IntegrationDataSourcePermissionService integrationDataSourcePermissionService;
 
-    public IntegrationDataSourceService(IntegrationDataSourceMapper integrationDataSourceMapper) {
+    public IntegrationDataSourceService(
+            IntegrationDataSourceMapper integrationDataSourceMapper,
+            IntegrationDataSourcePermissionService integrationDataSourcePermissionService) {
         this.integrationDataSourceMapper = integrationDataSourceMapper;
+        this.integrationDataSourcePermissionService = integrationDataSourcePermissionService;
     }
 
-    public List<DataSourceSummary> listDataSources(String keyword, String dbType, String status) {
+    public List<DataSourceSummary> listDataSources(String keyword, String dbType, String status, Long operatorUserId) {
+        SysUserModel operator = integrationDataSourcePermissionService.resolveOperator(operatorUserId);
         return integrationDataSourceMapper.search(keyword, dbType, status).stream()
-                .map(this::toSummary)
+                .filter(item -> integrationDataSourcePermissionService.canViewDataSource(item, operator))
+                .map(item -> toSummary(item, operator))
                 .toList();
     }
 
-    public DataSourceDetail getDataSource(Long id) throws TaskException {
+    public DataSourceDetail getDataSource(Long id, Long operatorUserId) throws TaskException {
         IntegrationDataSource dataSource = requireDataSource(id);
-        return toDetail(dataSource);
+        SysUserModel operator = integrationDataSourcePermissionService.resolveOperator(operatorUserId);
+        integrationDataSourcePermissionService.assertCanViewDataSource(dataSource, operator);
+        return toDetail(dataSource, operator);
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public DataSourceDetail create(CreateOrUpdateDataSourceRequest request) throws TaskException {
+    public DataSourceDetail create(CreateOrUpdateDataSourceRequest request, Long operatorUserId) throws TaskException {
         NormalizedDataSource normalized = normalizeRequest(request, null);
         if (integrationDataSourceMapper.selectByName(normalized.name()) != null) {
             throw new TaskException("数据源名称已存在：" + normalized.name(), TaskException.Code.UNKNOWN);
         }
         IntegrationDataSource entity = new IntegrationDataSource();
+        entity.setOwnerUserId(operatorUserId);
         applyNormalized(entity, normalized);
         integrationDataSourceMapper.insert(entity);
-        return toDetail(entity);
+        return toDetail(entity, integrationDataSourcePermissionService.resolveOperator(operatorUserId));
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public DataSourceDetail update(Long id, CreateOrUpdateDataSourceRequest request) throws TaskException {
+    public DataSourceDetail update(Long id, CreateOrUpdateDataSourceRequest request, Long operatorUserId)
+            throws TaskException {
         IntegrationDataSource existing = requireDataSource(id);
+        SysUserModel operator = integrationDataSourcePermissionService.resolveOperator(operatorUserId);
+        integrationDataSourcePermissionService.assertCanOperateDataSource(existing, operator);
+        if (request != null && request.permissionScope() != null) {
+            int normalizedRequestScope = normalizePermissionScope(request.permissionScope());
+            int existingScope = normalizePermissionScope(existing.getPermissionScope());
+            if (normalizedRequestScope != existingScope) {
+                integrationDataSourcePermissionService.assertCanChangePermissionScope(existing, operator);
+            }
+        }
         NormalizedDataSource normalized = normalizeRequest(request, existing);
         IntegrationDataSource sameName = integrationDataSourceMapper.selectByName(normalized.name());
         if (sameName != null && !Objects.equals(sameName.getId(), existing.getId())) {
@@ -66,13 +86,17 @@ public class IntegrationDataSourceService {
         }
         applyNormalized(existing, normalized);
         integrationDataSourceMapper.updateById(existing);
-        return toDetail(existing);
+        return toDetail(existing, operator);
     }
 
-    public ConnectionTestResult testConnection(ConnectionTestRequest request) throws TaskException {
-        IntegrationDataSource existing = request == null || request.id() == null
-                ? null
-                : requireDataSource(request.id());
+    public ConnectionTestResult testConnection(ConnectionTestRequest request, Long operatorUserId)
+            throws TaskException {
+        IntegrationDataSource existing =
+                request == null || request.id() == null ? null : requireDataSource(request.id());
+        SysUserModel operator = integrationDataSourcePermissionService.resolveOperator(operatorUserId);
+        if (existing != null) {
+            integrationDataSourcePermissionService.assertCanOperateDataSource(existing, operator);
+        }
         NormalizedDataSource normalized = normalizeRequest(
                 new CreateOrUpdateDataSourceRequest(
                         request.name(),
@@ -82,6 +106,7 @@ public class IntegrationDataSourceService {
                         request.authType(),
                         request.username(),
                         request.password(),
+                        request.permissionScope(),
                         request.status()),
                 existing);
         try (Connection ignored = openConnection(normalized)) {
@@ -91,13 +116,16 @@ public class IntegrationDataSourceService {
         }
     }
 
-    public List<ObjectView> listObjects(Long dataSourceId) throws TaskException {
+    public List<ObjectView> listObjects(Long dataSourceId, Long operatorUserId) throws TaskException {
         IntegrationDataSource dataSource = requireDataSource(dataSourceId);
+        SysUserModel operator = integrationDataSourcePermissionService.resolveOperator(operatorUserId);
+        integrationDataSourcePermissionService.assertCanViewDataSource(dataSource, operator);
         try (Connection connection = openConnection(toNormalized(dataSource))) {
             DatabaseMetaData metaData = connection.getMetaData();
             Map<String, String> tableCommentMap = loadTableComments(connection, dataSource.getDbType());
             List<ObjectView> objects = new ArrayList<>();
-            try (ResultSet resultSet = metaData.getTables(connection.getCatalog(), null, "%", new String[] {"TABLE", "VIEW"})) {
+            try (ResultSet resultSet =
+                    metaData.getTables(connection.getCatalog(), null, "%", new String[] {"TABLE", "VIEW"})) {
                 while (resultSet.next()) {
                     String objectName = trimText(resultSet.getString("TABLE_NAME"));
                     if (!StringUtils.hasText(objectName)) {
@@ -110,11 +138,7 @@ public class IntegrationDataSourceService {
                             tableCommentMap.get(buildObjectCommentKey(schema, objectName)),
                             tableCommentMap.get(buildObjectCommentKey("", objectName)));
                     objects.add(new ObjectView(
-                            objectName,
-                            StringUtils.hasText(remarks) ? remarks : objectName,
-                            schema,
-                            type,
-                            remarks));
+                            objectName, StringUtils.hasText(remarks) ? remarks : objectName, schema, type, remarks));
                 }
             }
             return objects.stream()
@@ -125,12 +149,15 @@ public class IntegrationDataSourceService {
         }
     }
 
-    public List<FieldView> listFields(Long dataSourceId, String objectCode) throws TaskException {
+    public List<FieldView> listFields(Long dataSourceId, String objectCode, Long operatorUserId) throws TaskException {
         String normalizedObjectCode = requireText(objectCode, "objectCode 不能为空");
         IntegrationDataSource dataSource = requireDataSource(dataSourceId);
+        SysUserModel operator = integrationDataSourcePermissionService.resolveOperator(operatorUserId);
+        integrationDataSourcePermissionService.assertCanViewDataSource(dataSource, operator);
         try (Connection connection = openConnection(toNormalized(dataSource))) {
             DatabaseMetaData metaData = connection.getMetaData();
-            Map<String, String> columnCommentMap = loadColumnComments(connection, dataSource.getDbType(), normalizedObjectCode);
+            Map<String, String> columnCommentMap =
+                    loadColumnComments(connection, dataSource.getDbType(), normalizedObjectCode);
             List<FieldView> fields = new ArrayList<>();
             try (ResultSet resultSet = metaData.getColumns(connection.getCatalog(), null, normalizedObjectCode, "%")) {
                 while (resultSet.next()) {
@@ -156,11 +183,18 @@ public class IntegrationDataSourceService {
         }
     }
 
-    public List<RelationView> listRelations(Long dataSourceId, List<String> objectCodes) throws TaskException {
+    public List<RelationView> listRelations(Long dataSourceId, List<String> objectCodes, Long operatorUserId)
+            throws TaskException {
         IntegrationDataSource dataSource = requireDataSource(dataSourceId);
+        SysUserModel operator = integrationDataSourcePermissionService.resolveOperator(operatorUserId);
+        integrationDataSourcePermissionService.assertCanViewDataSource(dataSource, operator);
         List<String> normalizedObjectCodes = objectCodes == null
                 ? List.of()
-                : objectCodes.stream().filter(StringUtils::hasText).map(String::trim).distinct().toList();
+                : objectCodes.stream()
+                        .filter(StringUtils::hasText)
+                        .map(String::trim)
+                        .distinct()
+                        .toList();
         try (Connection connection = openConnection(toNormalized(dataSource))) {
             DatabaseMetaData metaData = connection.getMetaData();
             List<RelationView> relations = new ArrayList<>();
@@ -185,7 +219,8 @@ public class IntegrationDataSourceService {
             }
             return relations.stream()
                     .distinct()
-                    .sorted(Comparator.comparing(RelationView::leftObjectCode).thenComparing(RelationView::leftFieldName))
+                    .sorted(Comparator.comparing(RelationView::leftObjectCode)
+                            .thenComparing(RelationView::leftFieldName))
                     .toList();
         } catch (SQLException ex) {
             throw new TaskException("读取对象关系失败：" + safeMessage(ex), TaskException.Code.UNKNOWN, ex);
@@ -193,18 +228,11 @@ public class IntegrationDataSourceService {
     }
 
     private IntegrationDataSource requireDataSource(Long id) throws TaskException {
-        if (id == null) {
-            throw new TaskException("数据源 id 不能为空", TaskException.Code.UNKNOWN);
-        }
-        IntegrationDataSource entity = integrationDataSourceMapper.selectById(id);
-        if (entity == null) {
-            throw new TaskException("数据源不存在：" + id, TaskException.Code.UNKNOWN);
-        }
-        return entity;
+        return integrationDataSourcePermissionService.requireDataSource(id);
     }
 
-    private NormalizedDataSource normalizeRequest(CreateOrUpdateDataSourceRequest request, IntegrationDataSource existing)
-            throws TaskException {
+    private NormalizedDataSource normalizeRequest(
+            CreateOrUpdateDataSourceRequest request, IntegrationDataSource existing) throws TaskException {
         if (request == null) {
             throw new TaskException("请求参数不能为空", TaskException.Code.UNKNOWN);
         }
@@ -230,6 +258,10 @@ public class IntegrationDataSourceService {
                 authType,
                 username,
                 password,
+                normalizePermissionScope(
+                        request.permissionScope() != null
+                                ? request.permissionScope()
+                                : (existing == null ? null : existing.getPermissionScope())),
                 normalizeStatus(request.status()));
     }
 
@@ -250,11 +282,14 @@ public class IntegrationDataSourceService {
         entity.setConnectionUri(normalized.connectionUri());
         entity.setAuthType(normalized.authType());
         entity.setAuthConfigJson(serializeAuthConfig(normalized.username(), normalized.password()));
+        entity.setPermissionScope(normalized.permissionScope());
         entity.setStatus(normalized.status());
     }
 
-    private DataSourceSummary toSummary(IntegrationDataSource entity) {
+    private DataSourceSummary toSummary(IntegrationDataSource entity, SysUserModel operator) {
         ParsedAuthConfig authConfig = parseAuthConfig(entity.getAuthConfigJson());
+        boolean canOperate = integrationDataSourcePermissionService.canOperateDataSource(entity, operator);
+        boolean canChangePermission = integrationDataSourcePermissionService.canChangePermissionScope(entity, operator);
         return new DataSourceSummary(
                 entity.getId(),
                 entity.getName(),
@@ -264,13 +299,17 @@ public class IntegrationDataSourceService {
                 entity.getAuthType(),
                 authConfig.username(),
                 StringUtils.hasText(authConfig.password()),
+                entity.getOwnerUserId(),
+                normalizePermissionScope(entity.getPermissionScope()),
+                canOperate,
+                canChangePermission,
                 entity.getStatus(),
                 entity.getCreatedAt(),
                 entity.getUpdatedAt());
     }
 
-    private DataSourceDetail toDetail(IntegrationDataSource entity) {
-        DataSourceSummary summary = toSummary(entity);
+    private DataSourceDetail toDetail(IntegrationDataSource entity, SysUserModel operator) {
+        DataSourceSummary summary = toSummary(entity, operator);
         return new DataSourceDetail(
                 summary.id(),
                 summary.name(),
@@ -280,6 +319,10 @@ public class IntegrationDataSourceService {
                 summary.authType(),
                 summary.username(),
                 summary.passwordConfigured(),
+                summary.ownerUserId(),
+                summary.permissionScope(),
+                summary.canOperate(),
+                summary.canChangePermission(),
                 summary.status(),
                 summary.createdAt(),
                 summary.updatedAt());
@@ -287,7 +330,8 @@ public class IntegrationDataSourceService {
 
     private Connection openConnection(NormalizedDataSource normalized) throws SQLException {
         if ("USERNAME_PASSWORD".equals(normalized.authType())) {
-            return DriverManager.getConnection(normalized.connectionUri(), normalized.username(), normalized.password());
+            return DriverManager.getConnection(
+                    normalized.connectionUri(), normalized.username(), normalized.password());
         }
         return DriverManager.getConnection(normalized.connectionUri());
     }
@@ -302,6 +346,7 @@ public class IntegrationDataSourceService {
                 normalizeAuthType(entity.getAuthType()),
                 authConfig.username(),
                 authConfig.password(),
+                normalizePermissionScope(entity.getPermissionScope()),
                 normalizeStatus(entity.getStatus()));
     }
 
@@ -350,6 +395,10 @@ public class IntegrationDataSourceService {
         return status.trim().toUpperCase(Locale.ROOT);
     }
 
+    private Integer normalizePermissionScope(Integer value) {
+        return integrationDataSourcePermissionService.normalizePermissionScope(value);
+    }
+
     private String requireText(String value, String message) throws TaskException {
         if (!StringUtils.hasText(value)) {
             throw new TaskException(message, TaskException.Code.UNKNOWN);
@@ -374,7 +423,8 @@ public class IntegrationDataSourceService {
         if (!StringUtils.hasText(catalog)) {
             return Map.of();
         }
-        String sql = """
+        String sql =
+                """
                 SELECT table_schema, table_name, table_comment
                 FROM information_schema.tables
                 WHERE table_schema = ?
@@ -406,7 +456,8 @@ public class IntegrationDataSourceService {
         if (!StringUtils.hasText(catalog)) {
             return Map.of();
         }
-        String sql = """
+        String sql =
+                """
                 SELECT column_name, column_comment
                 FROM information_schema.columns
                 WHERE table_schema = ? AND table_name = ?
@@ -460,6 +511,7 @@ public class IntegrationDataSourceService {
             String authType,
             String username,
             String password,
+            Integer permissionScope,
             String status) {}
 
     private record ParsedAuthConfig(String username, String password) {}
@@ -472,6 +524,7 @@ public class IntegrationDataSourceService {
             String authType,
             String username,
             String password,
+            Integer permissionScope,
             String status) {}
 
     public record ConnectionTestRequest(
@@ -483,13 +536,16 @@ public class IntegrationDataSourceService {
             String authType,
             String username,
             String password,
+            Integer permissionScope,
             String status) {}
 
     public record ConnectionTestResult(boolean success, String message) {}
 
     @Transactional(rollbackFor = Exception.class)
-    public void delete(Long id) throws TaskException {
+    public void delete(Long id, Long operatorUserId) throws TaskException {
         IntegrationDataSource existing = requireDataSource(id);
+        SysUserModel operator = integrationDataSourcePermissionService.resolveOperator(operatorUserId);
+        integrationDataSourcePermissionService.assertCanOperateDataSource(existing, operator);
         integrationDataSourceMapper.deleteById(existing.getId());
     }
 
@@ -502,6 +558,10 @@ public class IntegrationDataSourceService {
             String authType,
             String username,
             boolean passwordConfigured,
+            Long ownerUserId,
+            Integer permissionScope,
+            boolean canOperate,
+            boolean canChangePermission,
             String status,
             java.util.Date createdAt,
             java.util.Date updatedAt) {}
@@ -515,11 +575,16 @@ public class IntegrationDataSourceService {
             String authType,
             String username,
             boolean passwordConfigured,
+            Long ownerUserId,
+            Integer permissionScope,
+            boolean canOperate,
+            boolean canChangePermission,
             String status,
             java.util.Date createdAt,
             java.util.Date updatedAt) {}
 
-    public record ObjectView(String objectCode, String objectName, String schemaName, String objectType, String comment) {}
+    public record ObjectView(
+            String objectCode, String objectName, String schemaName, String objectType, String comment) {}
 
     public record FieldView(
             String objectCode,

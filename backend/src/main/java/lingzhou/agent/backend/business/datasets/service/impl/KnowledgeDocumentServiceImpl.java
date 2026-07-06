@@ -1,16 +1,16 @@
 package lingzhou.agent.backend.business.datasets.service.impl;
 
+import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.io.InputStream;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
-import com.alibaba.fastjson.JSON;
 import lingzhou.agent.backend.business.datasets.domain.DocumentChunk;
 import lingzhou.agent.backend.business.datasets.domain.KnowledgeDocument;
 import lingzhou.agent.backend.business.datasets.domain.MateDataParam;
@@ -26,14 +26,14 @@ import lingzhou.agent.backend.business.datasets.service.IKnowledgeDocumentServic
 import lingzhou.agent.backend.business.datasets.service.MinioService;
 import lingzhou.agent.backend.business.datasets.service.knowledge.ElasticsearchChunkIndexService;
 import lingzhou.agent.backend.business.monitor.service.ISysJobService;
-import lingzhou.agent.backend.capability.rag.embedding.DocumentEmbeddingService;
-import lingzhou.agent.backend.common.lzException.TaskException;
 import lingzhou.agent.backend.capability.rag.chunk.config.ChunkRequest;
 import lingzhou.agent.backend.capability.rag.chunk.config.ChunkRequestFactory;
 import lingzhou.agent.backend.capability.rag.chunk.model.ChunkedSection;
 import lingzhou.agent.backend.capability.rag.chunk.service.DocumentParseChunkServiceV2;
 import lingzhou.agent.backend.capability.rag.chunk.tool.LawDocumentStructureAnalyzer;
 import lingzhou.agent.backend.capability.rag.chunk.tool.TableChunkContentSupport;
+import lingzhou.agent.backend.capability.rag.embedding.DocumentEmbeddingService;
+import lingzhou.agent.backend.common.lzException.TaskException;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.quartz.SchedulerException;
@@ -126,7 +126,7 @@ public class KnowledgeDocumentServiceImpl implements IKnowledgeDocumentService {
         int row = knowledgeDocumentMapper.insertKnowledgeDocument(knowledgeDocument);
         if (row > 0
                 && Long.valueOf(0L).equals(knowledgeDocument.getIsFolder())
-                && StringUtils.isNotBlank(knowledgeDocument.getFileId())) {
+                && StringUtils.isNotBlank(knowledgeDocument.getObjectName())) {
             sysJobService.runParseDocument(knowledgeDocument.getDocId());
         }
         return row;
@@ -270,7 +270,7 @@ public class KnowledgeDocumentServiceImpl implements IKnowledgeDocumentService {
         KnowledgeDocument document = requireProcessableDocument(docId);
         ChunkRequest request = ChunkRequestFactory.build(document.getFileType(), chunkStrategy, chunkConfig);
 
-        try (InputStream inputStream = minioService.getFile(document.getFileId())) {
+        try (InputStream inputStream = minioService.getFile(document.getObjectName())) {
             List<ChunkedSection> sections = parseChunkService.parseAndChunk(inputStream, document.getName(), request);
             List<ChunkPreviewVo> previews = new ArrayList<>();
             for (int i = 0; i < sections.size() && i < 10; i++) {
@@ -323,7 +323,7 @@ public class KnowledgeDocumentServiceImpl implements IKnowledgeDocumentService {
             populateHierarchy(document);
             insertKnowledgeDocument(document);
             objectName = minioService.uploadFile(file, kbId, document.getDocId());
-            document.setFileId(objectName);
+            document.setObjectName(objectName);
             knowledgeDocumentMapper.updateKnowledgeDocument(document);
             return document;
         } catch (Exception ex) {
@@ -459,7 +459,7 @@ public class KnowledgeDocumentServiceImpl implements IKnowledgeDocumentService {
         if (document == null) {
             throw new TaskException("文档不存在", TaskException.Code.UNKNOWN);
         }
-        if (StringUtils.isBlank(document.getFileId())) {
+        if (StringUtils.isBlank(document.getObjectName())) {
             throw new TaskException("文档文件未上传完成", TaskException.Code.UNKNOWN);
         }
         sysJobService.runParseDocument(docId);
@@ -547,16 +547,16 @@ public class KnowledgeDocumentServiceImpl implements IKnowledgeDocumentService {
     }
 
     private void deleteSourceFileQuietly(KnowledgeDocument document) {
-        if (document == null || StringUtils.isBlank(document.getFileId())) {
+        if (document == null || StringUtils.isBlank(document.getObjectName())) {
             return;
         }
         try {
-            minioService.deleteFile(document.getFileId());
+            minioService.deleteFile(document.getObjectName());
         } catch (Exception ex) {
             log.warn(
                     "删除知识库源文件失败，继续删除数据库记录：docId={}, objectName={}, error={}",
                     document.getDocId(),
-                    document.getFileId(),
+                    document.getObjectName(),
                     ex.getMessage(),
                     ex);
         }
@@ -604,8 +604,8 @@ public class KnowledgeDocumentServiceImpl implements IKnowledgeDocumentService {
         if (document == null || chunk == null) {
             return;
         }
-        ChunkRequest chunkRequest =
-                ChunkRequestFactory.build(document.getFileType(), document.getChunkStrategy(), document.getChunkConfig());
+        ChunkRequest chunkRequest = ChunkRequestFactory.build(
+                document.getFileType(), document.getChunkStrategy(), document.getChunkConfig());
         if (!chunkRequest.isLawDocument()) {
             return;
         }
@@ -663,7 +663,8 @@ public class KnowledgeDocumentServiceImpl implements IKnowledgeDocumentService {
     }
 
     private void sortTreeNodes(List<KnowledgeDocumentTreeNodeVo> nodes) {
-        nodes.sort(Comparator.comparing(KnowledgeDocumentTreeNodeVo::getIsFolder).reversed()
+        nodes.sort(Comparator.comparing(KnowledgeDocumentTreeNodeVo::getIsFolder)
+                .reversed()
                 .thenComparing(KnowledgeDocumentTreeNodeVo::getName, String.CASE_INSENSITIVE_ORDER));
         for (KnowledgeDocumentTreeNodeVo node : nodes) {
             sortTreeNodes(node.getChildren());
@@ -678,10 +679,9 @@ public class KnowledgeDocumentServiceImpl implements IKnowledgeDocumentService {
         if (Long.valueOf(1L).equals(document.getIsFolder())) {
             throw new TaskException("目录不支持该操作", TaskException.Code.UNKNOWN);
         }
-        if (StringUtils.isBlank(document.getFileId())) {
+        if (StringUtils.isBlank(document.getObjectName())) {
             throw new TaskException("文档文件未上传完成", TaskException.Code.UNKNOWN);
         }
         return document;
     }
-
 }

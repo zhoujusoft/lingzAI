@@ -1,0 +1,8 @@
+用户原始请求：
+{{userRequest}}
+{{observationTraceSection}}
+{{completionBlockersSection}}
+
+请基于当前信息输出下一步决策。
+如果已经能回答，直接输出给用户的最终回答正文。
+如果需要调用工具，且用户能从一句简短前置说明里获益，请先输出这句自然语言，再发起工具调用。

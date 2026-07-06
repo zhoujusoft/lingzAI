@@ -4,8 +4,56 @@ set -eu
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)"
 DEPLOY_DIR="$REPO_ROOT/deploy"
+. "$SCRIPT_DIR/lib/release-meta.sh"
 
-ENV_FILE_ARG="${1:-deploy/release.env}"
+usage() {
+  cat <<'EOF'
+Usage:
+  ./deploy/manage.sh release-publish [options] [deploy/release.env]
+
+Options:
+  --platform     指定目标平台，例如 linux/arm64；非 amd64 平台会自动追加镜像 tag 后缀
+  -h, --help     查看帮助
+EOF
+}
+
+ENV_FILE_ARG="deploy/release.env"
+ENV_FILE_SPECIFIED="0"
+TARGET_PLATFORM_CLI=""
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --platform)
+      shift
+      if [ "$#" -eq 0 ]; then
+        echo "Missing value for --platform" >&2
+        usage
+        exit 1
+      fi
+      TARGET_PLATFORM_CLI="$1"
+      ;;
+    -h|--help|help)
+      usage
+      exit 0
+      ;;
+    -*)
+      echo "Unknown option: $1" >&2
+      usage
+      exit 1
+      ;;
+    *)
+      if [ "$ENV_FILE_SPECIFIED" = "1" ]; then
+        echo "Only one env file path is allowed." >&2
+        usage
+        exit 1
+      fi
+      ENV_FILE_ARG="$1"
+      ENV_FILE_SPECIFIED="1"
+      ;;
+  esac
+  shift
+done
+
 case "$ENV_FILE_ARG" in
   /*) ENV_FILE="$ENV_FILE_ARG" ;;
   *) ENV_FILE="$REPO_ROOT/$ENV_FILE_ARG" ;;
@@ -89,14 +137,15 @@ FRONTEND_IMAGE_NAME="${FRONTEND_IMAGE_NAME:-lingzhou-frontend}"
 BACKEND_IMAGE_NAME="${BACKEND_IMAGE_NAME:-lingzhou-backend}"
 FORCE_CLASSIC="${FORCE_CLASSIC:-0}"
 FORCE_BUILDX="${FORCE_BUILDX:-0}"
+TARGET_PLATFORM_RAW="${TARGET_PLATFORM_CLI:-${TARGET_PLATFORM:-}}"
 
 if [ -z "$IMAGE_TAG" ]; then
-  echo "IMAGE_TAG is required in $ENV_FILE (example: IMAGE_TAG=1.1.0)" >&2
+  echo "IMAGE_TAG is required in $ENV_FILE (example: IMAGE_TAG=1.4.2)" >&2
   exit 1
 fi
 
-if ! echo "$IMAGE_TAG" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-  echo "IMAGE_TAG must be semantic version x.y.z, got: $IMAGE_TAG" >&2
+if ! validate_image_tag "$IMAGE_TAG"; then
+  echo "IMAGE_TAG must be base semantic version x.y.z, got: $IMAGE_TAG" >&2
   exit 1
 fi
 
@@ -107,17 +156,21 @@ if [ ! -f "$BACKEND_JAR_PATH" ]; then
   exit 1
 fi
 
+TARGET_PLATFORM="$(normalize_target_platform "$TARGET_PLATFORM_RAW")"
+warn_if_non_default_platform_generates_variant_tag "$TARGET_PLATFORM"
+EFFECTIVE_IMAGE_TAG="$(effective_image_tag "$IMAGE_TAG" "$TARGET_PLATFORM")"
+
 ALLOW_DIRTY="0"
 if [ -n "${RELEASE_ALLOW_DIRTY:-}" ] && is_true "${RELEASE_ALLOW_DIRTY:-}"; then
   ALLOW_DIRTY="1"
   echo "Warning: RELEASE_ALLOW_DIRTY enabled. Skipping clean-worktree enforcement."
 fi
 
-FRONTEND_IMAGE="${REGISTRY}/${FRONTEND_IMAGE_NAME}:${IMAGE_TAG}"
-BACKEND_IMAGE="${REGISTRY}/${BACKEND_IMAGE_NAME}:${IMAGE_TAG}"
+FRONTEND_IMAGE="${REGISTRY}/${FRONTEND_IMAGE_NAME}:${EFFECTIVE_IMAGE_TAG}"
+BACKEND_IMAGE="${REGISTRY}/${BACKEND_IMAGE_NAME}:${EFFECTIVE_IMAGE_TAG}"
 FRONTEND_CACHE_REF="${FRONTEND_CACHE_REF:-${REGISTRY}/${FRONTEND_IMAGE_NAME}:buildcache}"
 BACKEND_CACHE_REF="${BACKEND_CACHE_REF:-${REGISTRY}/${BACKEND_IMAGE_NAME}:buildcache}"
-TAG="v${IMAGE_TAG}"
+TAG="v${EFFECTIVE_IMAGE_TAG}"
 
 if is_true "$FORCE_CLASSIC" && is_true "$FORCE_BUILDX"; then
   echo "Invalid options: FORCE_CLASSIC and FORCE_BUILDX cannot both be enabled." >&2
@@ -153,6 +206,9 @@ fi
 echo "Release preflight:"
 echo "  Repo root: $REPO_ROOT"
 echo "  Env file: $ENV_FILE_GIT_PATH"
+echo "  Target platform: $TARGET_PLATFORM"
+echo "  Base image tag: $IMAGE_TAG"
+echo "  Effective image tag: $EFFECTIVE_IMAGE_TAG"
 echo "  Frontend image: $FRONTEND_IMAGE"
 echo "  Backend image: $BACKEND_IMAGE"
 echo "  Builder mode: $BUILDER_MODE"
@@ -166,6 +222,9 @@ if [ "$ALLOW_DIRTY" = "1" ]; then
 else
   echo "  Dirty worktree allowed: no"
 fi
+
+PIP_PLATFORM="$(pip_platform_for_target "$TARGET_PLATFORM")"
+echo "  PIP platform: $PIP_PLATFORM"
 
 if git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1 && [ "$ALLOW_DIRTY" = "0" ]; then
   STATUS_LINES="$(git -C "$REPO_ROOT" status --porcelain)"
@@ -199,6 +258,15 @@ if git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1 && [ "$AL
   fi
 fi
 
+if [ "$BUILDER_MODE" = "classic" ] && [ "$TARGET_PLATFORM" != "linux/amd64" ]; then
+  echo "Release blocked: classic builder only supports the default linux/amd64 workflow." >&2
+  echo "Current target platform: $TARGET_PLATFORM" >&2
+  echo "How to continue:" >&2
+  echo "  1) Enable docker buildx (recommended)" >&2
+  echo "  2) Or rerun without --platform to use the default amd64 target" >&2
+  exit 1
+fi
+
 if [ -n "${REGISTRY_USERNAME:-}" ] && [ -n "${REGISTRY_PASSWORD:-}" ]; then
   printf '%s' "$REGISTRY_PASSWORD" | docker login "$REGISTRY" --username "$REGISTRY_USERNAME" --password-stdin
 fi
@@ -209,6 +277,7 @@ if [ "$BUILDER_MODE" = "buildx" ]; then
     if [ -n "${BUILDX_BUILDER:-}" ]; then
       docker buildx build \
         --builder "$BUILDX_BUILDER" \
+        --platform "$TARGET_PLATFORM" \
         -f deploy/docker/frontend.Dockerfile \
         -t "$FRONTEND_IMAGE" \
         --build-arg "PNPM_REGISTRY=${PNPM_REGISTRY:-https://registry.npmmirror.com}" \
@@ -222,6 +291,7 @@ if [ "$BUILDER_MODE" = "buildx" ]; then
         frontend
     else
       docker buildx build \
+        --platform "$TARGET_PLATFORM" \
         -f deploy/docker/frontend.Dockerfile \
         -t "$FRONTEND_IMAGE" \
         --build-arg "PNPM_REGISTRY=${PNPM_REGISTRY:-https://registry.npmmirror.com}" \
@@ -241,8 +311,10 @@ if [ "$BUILDER_MODE" = "buildx" ]; then
     if [ -n "${BUILDX_BUILDER:-}" ]; then
       docker buildx build \
         --builder "$BUILDX_BUILDER" \
+        --platform "$TARGET_PLATFORM" \
         -f deploy/docker/backend.Dockerfile \
         -t "$BACKEND_IMAGE" \
+        --build-arg "PIP_PLATFORM=${PIP_PLATFORM}" \
         --cache-from "type=registry,ref=${BACKEND_CACHE_REF}" \
         --cache-to "type=registry,ref=${BACKEND_CACHE_REF},mode=max" \
         --provenance=false \
@@ -251,8 +323,10 @@ if [ "$BUILDER_MODE" = "buildx" ]; then
         .
     else
       docker buildx build \
+        --platform "$TARGET_PLATFORM" \
         -f deploy/docker/backend.Dockerfile \
         -t "$BACKEND_IMAGE" \
+        --build-arg "PIP_PLATFORM=${PIP_PLATFORM}" \
         --cache-from "type=registry,ref=${BACKEND_CACHE_REF}" \
         --cache-to "type=registry,ref=${BACKEND_CACHE_REF},mode=max" \
         --provenance=false \
@@ -278,6 +352,7 @@ else
     docker build \
       -f deploy/docker/backend.Dockerfile \
       -t "$BACKEND_IMAGE" \
+      --build-arg "PIP_PLATFORM=${PIP_PLATFORM}" \
       .
   )
 
@@ -295,8 +370,8 @@ if git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     echo "$ENV_FILE_GIT_PATH has no version change; skip release commit." >&2
   else
     git -C "$REPO_ROOT" add "$ENV_FILE_GIT_PATH"
-    git -C "$REPO_ROOT" commit -m "chore(release): v${IMAGE_TAG}"
-    echo "Created release commit: chore(release): v${IMAGE_TAG}"
+    git -C "$REPO_ROOT" commit -m "chore(release): v${EFFECTIVE_IMAGE_TAG}"
+    echo "Created release commit: chore(release): v${EFFECTIVE_IMAGE_TAG}"
   fi
 
   FORCE_TAG_OVERWRITE="${RELEASE_FORCE_TAG_OVERWRITE:-0}"
@@ -337,7 +412,7 @@ if git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     fi
   fi
 
-  git -C "$REPO_ROOT" tag -a "$TAG" -m "release ${IMAGE_TAG}"
+  git -C "$REPO_ROOT" tag -a "$TAG" -m "release ${EFFECTIVE_IMAGE_TAG}"
   echo "Created git tag: $TAG"
 
   if git -C "$REPO_ROOT" remote get-url origin >/dev/null 2>&1; then

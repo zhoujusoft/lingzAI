@@ -28,6 +28,8 @@ public class RSAEncryptor {
     private static final String RSA = "RSA";
 
     private static final int KEY_SIZE = 2048;
+    private static final int MAX_ENCRYPT_BLOCK = KEY_SIZE / 8 - 11;
+    private static final int MAX_DECRYPT_BLOCK = KEY_SIZE / 8;
 
     public static String defaultPublicKey() {
         return publicKeyStr;
@@ -48,6 +50,16 @@ public class RSAEncryptor {
         return rsaEncryptor.encrypt(plainText);
     }
 
+    public static String encryptLargeText(String plainText) throws Exception {
+        RSAEncryptor rsaEncryptor = new RSAEncryptor(privateKeyStr, publicKeyStr);
+        return rsaEncryptor.encryptLarge(plainText);
+    }
+
+    public static String decryptLargeText(String encryptedText) throws Exception {
+        RSAEncryptor rsaEncryptor = new RSAEncryptor(privateKeyStr, publicKeyStr);
+        return rsaEncryptor.decryptLarge(encryptedText);
+    }
+
     public static String encryptWithPublicKey(String plainText, String publicKey) throws Exception {
         if (!StringUtils.hasText(publicKey)) {
             throw new IllegalArgumentException("publicKey 不能为空");
@@ -58,8 +70,7 @@ public class RSAEncryptor {
 
     private static byte[] encryptBytes(byte[] content, String publicKey) throws Exception {
         byte[] publicKeyBytes = Base64.getDecoder().decode(publicKey);
-        PublicKey rsaPublicKey =
-                KeyFactory.getInstance(RSA).generatePublic(new X509EncodedKeySpec(publicKeyBytes));
+        PublicKey rsaPublicKey = KeyFactory.getInstance(RSA).generatePublic(new X509EncodedKeySpec(publicKeyBytes));
         Cipher cipher = Cipher.getInstance(RSA);
         cipher.init(Cipher.ENCRYPT_MODE, rsaPublicKey);
         return cipher.doFinal(content);
@@ -101,6 +112,50 @@ public class RSAEncryptor {
         byte[] encryptedBytes = Base64.getDecoder().decode(encryptedText);
         byte[] decryptedBytes = cipher.doFinal(encryptedBytes);
         return new String(decryptedBytes);
+    }
+
+    public String encryptLarge(String plainText) throws Exception {
+        if (!StringUtils.hasText(plainText)) {
+            return "";
+        }
+        Cipher cipher = Cipher.getInstance(RSA);
+        cipher.init(Cipher.ENCRYPT_MODE, _publicKeyRsaProvider);
+        byte[] source = plainText.getBytes(StandardCharsets.UTF_8);
+        StringBuilder builder = new StringBuilder();
+        for (int offset = 0; offset < source.length; offset += MAX_ENCRYPT_BLOCK) {
+            int blockSize = Math.min(MAX_ENCRYPT_BLOCK, source.length - offset);
+            byte[] encrypted = cipher.doFinal(source, offset, blockSize);
+            if (builder.length() > 0) {
+                builder.append('.');
+            }
+            builder.append(Base64.getEncoder().encodeToString(encrypted));
+        }
+        return builder.toString();
+    }
+
+    public String decryptLarge(String encryptedText) throws Exception {
+        if (!StringUtils.hasText(encryptedText)) {
+            return "";
+        }
+        Cipher cipher = Cipher.getInstance(RSA);
+        cipher.init(Cipher.DECRYPT_MODE, _privateKeyRsaProvider);
+        String[] blocks = encryptedText.split("\\.");
+        byte[] merged = new byte[0];
+        for (String block : blocks) {
+            if (!StringUtils.hasText(block)) {
+                continue;
+            }
+            byte[] encrypted = Base64.getDecoder().decode(block);
+            if (encrypted.length > MAX_DECRYPT_BLOCK) {
+                throw new IllegalArgumentException("RSA 密文块长度非法");
+            }
+            byte[] decrypted = cipher.doFinal(encrypted);
+            byte[] next = new byte[merged.length + decrypted.length];
+            System.arraycopy(merged, 0, next, 0, merged.length);
+            System.arraycopy(decrypted, 0, next, merged.length, decrypted.length);
+            merged = next;
+        }
+        return new String(merged, StandardCharsets.UTF_8);
     }
 
     public static KeyPair loadKeyPair(String publicKeyStr, String privateKeyStr) throws Exception {

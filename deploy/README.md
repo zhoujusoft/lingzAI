@@ -76,11 +76,161 @@ cp ../.env ./.env
 发布版本文件为：`deploy/release.env`。
 该文件中仅保留仍在配置文件中的模型运行参数，不再按 `qwen/vllm profile` 切换。
 
+`deploy/release.env` 中的 `IMAGE_TAG` 现仅维护基础版本号 `x.y.z`。
+默认不指定平台时，构建/发布产物直接使用该版本号作为镜像 tag，例如：
+
+- `IMAGE_TAG=1.4.2` -> 默认构建 `linux/amd64`，镜像 tag 为 `1.4.2`
+
+当显式指定平台时，脚本会自动把平台后缀追加到最终镜像 tag：
+
+```bash
+./deploy/manage.sh release --platform linux/arm64
+```
+
+对应最终镜像 tag 为：
+
+- `IMAGE_TAG=1.4.2` + `--platform linux/arm64` -> `1.4.2-arm64`
+- `IMAGE_TAG=1.4.2` + `--platform linux/riscv64` -> `1.4.2-riscv64`
+
 若需分步发布：
 
 ```bash
 ./deploy/manage.sh release-prepare
-./deploy/manage.sh release-publish
+./deploy/manage.sh release-publish --platform linux/arm64
+```
+
+## 统一构建（本地）
+
+若你要一次性构建前后端产物（不推送镜像），可在仓库根目录执行：
+
+```bash
+./deploy/manage.sh build
+```
+
+若你只构建后端并希望自动处理 `target` 目录权限问题（例如 `backend.jar is read-only`），推荐使用：
+
+```bash
+./deploy/manage.sh fix-build --backend-only
+```
+
+说明：
+
+- `fix-build` 会先检查 `core/target`、`backend/target` 的可写性
+- 检测到权限异常时会尝试执行 `sudo chown -R $USER:$USER core/target backend/target`
+- 然后再进入正常构建流程，减少容器/宿主混合构建导致的只读报错
+
+默认会生成：
+
+- 后端：`backend/target/backend.jar`
+- 前端：`frontend/dist/`
+
+可选参数：
+
+```bash
+./deploy/manage.sh build --backend-only
+./deploy/manage.sh build --frontend-only
+./deploy/manage.sh build --with-tests
+./deploy/manage.sh build --skip-frontend-install
+```
+
+## 本地构建 Docker 镜像
+
+若你需要一次性构建前后端 Docker 镜像（仅本地构建，不推送仓库），可执行：
+
+```bash
+./deploy/manage.sh build-images
+```
+
+对应脚本关系：
+
+- 统一入口命令：`./deploy/manage.sh build-images`
+- 实际执行脚本：`deploy/scripts/build-images.sh`
+- 发版流程脚本：`./deploy/manage.sh release`（内部调用 `deploy/scripts/release-prepare.sh` + `deploy/scripts/build-and-push-images.sh`）
+
+默认读取 `deploy/release.env` 中的 `REGISTRY`、`IMAGE_TAG`、`FRONTEND_IMAGE_NAME`、`BACKEND_IMAGE_NAME` 作为镜像名与标签。
+`IMAGE_TAG` 仅表示基础版本，目标平台通过命令参数决定：
+
+- 未指定 `--platform` -> `linux/amd64`，镜像 tag 直接使用 `IMAGE_TAG`
+- `--platform linux/arm64` -> 镜像 tag 自动变为 `IMAGE_TAG-arm64`
+- `--platform linux/<arch>` -> 镜像 tag 自动变为 `IMAGE_TAG-<arch>`
+
+也可指定其他配置文件：
+
+```bash
+./deploy/manage.sh build-images deploy/release.env
+```
+
+如需构建后直接推送（需提前自行 `docker login`）：
+
+```bash
+./deploy/manage.sh build-images --push
+```
+
+说明：
+
+- `--push` 仅负责推送镜像，不会自动修改 `deploy/release.env` 中的 `IMAGE_TAG`
+- `--platform` 只影响本次构建/发布的目标平台与最终镜像 tag，不会回写 `deploy/release.env`
+
+如需在构建前自动升级 `IMAGE_TAG`（patch +1）再推送，可执行：
+
+```bash
+./deploy/manage.sh build-images --auto-bump --push
+```
+
+例如：
+
+```bash
+# release.env 中假设 IMAGE_TAG=1.4.2
+./deploy/manage.sh build-images --platform linux/arm64 --push
+# 实际推送 tag: 1.4.2-arm64
+
+./deploy/manage.sh build-images --platform linux/riscv64 --push
+# 实际推送 tag: 1.4.2-riscv64
+```
+
+### 打包 arm64（当前推荐方式）
+
+若你当前要打包 `arm64` 镜像，请直接维护基础版本号，例如：
+
+```bash
+# deploy/release.env
+IMAGE_TAG=1.4.2
+```
+
+然后在命令上显式传入平台：
+
+```bash
+./deploy/manage.sh build-images --platform linux/arm64 deploy/release.env
+```
+
+若要在构建完成后直接推送镜像仓库：
+
+```bash
+./deploy/manage.sh build-images --platform linux/arm64 --push deploy/release.env
+```
+
+若要走完整 release 流程：
+
+```bash
+./deploy/manage.sh release --platform linux/arm64 deploy/release.env
+```
+
+说明：
+
+- `deploy/release.env` 中仍然只写基础版本，例如 `IMAGE_TAG=1.4.2`
+- 当传入 `--platform linux/arm64` 时，最终镜像 tag 会自动变成 `1.4.2-arm64`
+- 默认不传 `--platform` 时，仍按 `linux/amd64` 构建，最终镜像 tag 仍是 `1.4.2`
+
+构建后可用以下命令检查镜像是否为 `arm64`：
+
+```bash
+# 本地镜像
+docker inspect 125.75.152.167:5001/lingzhou-frontend:1.4.2-arm64 --format '{{.Os}}/{{.Architecture}}'
+docker inspect 125.75.152.167:5001/lingzhou-backend:1.4.2-arm64 --format '{{.Os}}/{{.Architecture}}'
+
+# 仓库镜像
+docker buildx imagetools inspect 125.75.152.167:5001/lingzhou-frontend:1.4.2-arm64
+docker buildx imagetools inspect 125.75.152.167:5001/lingzhou-backend:1.4.2-arm64
 ```
 
 ## 部署辅助命令

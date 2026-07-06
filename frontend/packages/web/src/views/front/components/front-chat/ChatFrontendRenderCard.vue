@@ -41,6 +41,11 @@ const schemaFields = computed(() => {
     return Array.isArray(rows) ? rows : [];
 });
 
+const sectionDefinitions = computed(() => {
+    const rows = componentProps.value?.sections;
+    return Array.isArray(rows) ? rows.filter(item => item && typeof item === 'object') : [];
+});
+
 const dataEntries = computed(() => {
     const data = props.payload?.data;
     if (!data || typeof data !== 'object' || Array.isArray(data)) {
@@ -62,23 +67,90 @@ const unknownFields = computed(() => {
     return Array.isArray(rows) ? rows.filter(Boolean) : [];
 });
 
+const fieldDefinitionMap = computed(() => {
+    const map = {};
+    schemaFields.value.forEach(field => registerFieldDefinition(map, field));
+    sectionDefinitions.value.forEach(section => {
+        if (String(section?.type || '').trim() === 'table') {
+            const columns = getSectionTableFields(section);
+            columns.forEach(column => {
+                registerFieldDefinition(map, applySectionFieldPolicy(section, toFieldSeed(column)));
+            });
+            return;
+        }
+        const fields = Array.isArray(section?.fields) ? section.fields : [];
+        fields.forEach(field => {
+            registerFieldDefinition(map, applySectionFieldPolicy(section, toFieldSeed(field)));
+        });
+    });
+    dataEntries.value.forEach(entry => {
+        if (!map[entry.key]) {
+            map[entry.key] = {
+                key: entry.key,
+                label: entry.key,
+                description: entry.key,
+                required: false,
+                readonly: false,
+                inputType: 'text',
+            };
+        }
+    });
+    return map;
+});
+
 const displayRows = computed(() => {
     if (schemaFields.value.length) {
-        return schemaFields.value.map(field => ({
-            key: field?.key || '',
-            label: resolveFieldLabel(field),
-            value: draftData.value[field?.key],
-            required: Boolean(field?.required),
-            multiline: isMultilineValue(draftData.value[field?.key]),
-        }));
+        return schemaFields.value.map(field => buildDisplayRow(resolveFieldDefinition(field)));
     }
-    return dataEntries.value.map(entry => ({
-        key: entry.key,
-        label: entry.key,
-        value: draftData.value[entry.key],
-        required: false,
-        multiline: isMultilineValue(draftData.value[entry.key]),
-    }));
+    return dataEntries.value.map(entry =>
+        buildDisplayRow({
+            key: entry.key,
+            label: entry.key,
+            description: entry.key,
+            required: false,
+            readonly: false,
+            inputType: 'text',
+        })
+    );
+});
+
+const displaySections = computed(() => {
+    if (!sectionDefinitions.value.length) {
+        return [];
+    }
+    return sectionDefinitions.value
+        .map(section => {
+            const type = normalizeSectionType(section?.type);
+            if (type === 'table') {
+                const columns = getSectionTableFields(section)
+                    .map(column => buildDisplayRow(resolveFieldDefinition(column)))
+                    .filter(column => column.key);
+                if (!columns.length) {
+                    return null;
+                }
+                return {
+                    key: String(section?.key || section?.code || section?.title || 'table').trim(),
+                    title: String(section?.title || '明细').trim(),
+                    type,
+                    columns,
+                };
+            }
+            const fields = Array.isArray(section?.fields)
+                ? section.fields
+                      .map(field => buildDisplayRow(resolveFieldDefinition(field)))
+                      .filter(field => field.key)
+                : [];
+            if (!fields.length) {
+                return null;
+            }
+            return {
+                key: String(section?.key || section?.code || section?.title || 'form').trim(),
+                title: String(section?.title || '基础信息').trim(),
+                type,
+                fields,
+            };
+        })
+        .filter(Boolean);
 });
 
 const cardTitle = computed(() => props.payload?.title || '结构化草稿');
@@ -112,10 +184,12 @@ const confirmLabel = computed(() => {
     }
     return String(confirmAction.value?.label || componentProps.value.confirmText || '确认').trim();
 });
-const cancelLabel = computed(() => String(cancelAction.value?.label || componentProps.value.cancelText || '取消').trim());
+const cancelLabel = computed(() =>
+    String(cancelAction.value?.label || componentProps.value.cancelText || '取消').trim()
+);
 
 watch(
-    () => [props.payload?.schema, props.payload?.data],
+    () => [props.payload?.schema, props.payload?.data, props.payload?.componentProps],
     () => {
         draftData.value = buildInitialDraftData();
     },
@@ -137,8 +211,9 @@ watch(
 
 function buildInitialDraftData() {
     const next = {};
-    if (schemaFields.value.length) {
-        schemaFields.value.forEach(field => {
+    const definitions = Object.values(fieldDefinitionMap.value);
+    if (definitions.length) {
+        definitions.forEach(field => {
             const key = field?.key;
             if (!key) {
                 return;
@@ -155,6 +230,102 @@ function buildInitialDraftData() {
 
 function resolveFieldLabel(field) {
     return String(field?.description || field?.label || field?.key || '-').trim();
+}
+
+function toFieldSeed(field) {
+    if (typeof field === 'string') {
+        return { key: field, label: field, description: field };
+    }
+    if (!field || typeof field !== 'object' || Array.isArray(field)) {
+        return null;
+    }
+    return field;
+}
+
+function resolveFieldDefinition(field) {
+    if (typeof field === 'string') {
+        return fieldDefinitionMap.value[field] || { key: field, label: field, description: field };
+    }
+    if (!field || typeof field !== 'object' || Array.isArray(field)) {
+        return { key: '', label: '', description: '' };
+    }
+    const key = String(field?.key || '').trim();
+    const base = key ? fieldDefinitionMap.value[key] || {} : {};
+    return {
+        ...base,
+        ...field,
+        key,
+    };
+}
+
+function registerFieldDefinition(target, field) {
+    if (!field || typeof field !== 'object' || Array.isArray(field)) {
+        return;
+    }
+    const key = String(field?.key || '').trim();
+    if (!key) {
+        return;
+    }
+    const current = target[key] || {};
+    target[key] = {
+        ...current,
+        ...field,
+        key,
+        label: String(field?.label || current?.label || key).trim(),
+        description: String(
+            field?.description || current?.description || field?.label || key
+        ).trim(),
+        required: Boolean(field?.required || current?.required),
+        readonly: Boolean(field?.readonly || current?.readonly),
+        inputType: String(field?.inputType || current?.inputType || 'text').trim(),
+    };
+}
+
+function buildDisplayRow(field) {
+    const normalizedField = resolveFieldDefinition(field);
+    return {
+        key: normalizedField?.key || '',
+        label: resolveFieldLabel(normalizedField),
+        value: draftData.value[normalizedField?.key],
+        required: Boolean(normalizedField?.required),
+        multiline: isMultilineValue(draftData.value[normalizedField?.key]),
+        readonly: Boolean(normalizedField?.readonly),
+        inputType: normalizeInputType(normalizedField?.inputType),
+    };
+}
+
+function getSectionTableFields(section) {
+    const columns = Array.isArray(section?.columns) ? section.columns : [];
+    if (columns.length) {
+        return columns.map(column => applySectionFieldPolicy(section, column)).filter(Boolean);
+    }
+    const fields = Array.isArray(section?.fields) ? section.fields : [];
+    return fields.map(field => applySectionFieldPolicy(section, field)).filter(Boolean);
+}
+
+function applySectionFieldPolicy(section, field) {
+    const normalizedField = toFieldSeed(field);
+    if (!normalizedField) {
+        return null;
+    }
+    const sectionType = normalizeSectionType(section?.type);
+    if (sectionType !== 'table') {
+        return normalizedField;
+    }
+    const editableFields = Array.isArray(section?.editableFields)
+        ? section.editableFields.map(item => String(item || '').trim()).filter(Boolean)
+        : null;
+    if (!editableFields) {
+        return normalizedField;
+    }
+    const key = String(normalizedField?.key || '').trim();
+    if (!key) {
+        return normalizedField;
+    }
+    return {
+        ...normalizedField,
+        readonly: !editableFields.includes(key),
+    };
 }
 
 function resolveFieldValue(field) {
@@ -186,8 +357,30 @@ function isMultilineValue(value) {
     return value.includes('\n') || value.length > 48;
 }
 
+function normalizeSectionType(value) {
+    return String(value || 'form').trim() === 'table' ? 'table' : 'form';
+}
+
+function normalizeInputType(value) {
+    const text = String(value || '')
+        .trim()
+        .toLowerCase();
+    if (text === 'number') {
+        return 'number';
+    }
+    return 'text';
+}
+
 function isEmptyValue(value) {
     return value == null || String(value).trim() === '';
+}
+
+function formatDisplayValue(value) {
+    return isEmptyValue(value) ? '-' : value;
+}
+
+function isFieldReadonly(row) {
+    return formReadonly.value || Boolean(row?.readonly);
 }
 
 function handleCancel() {
@@ -217,12 +410,14 @@ function toggleExpanded() {
 }
 
 function buildActionPayload(actionDefinition, actionCode, state) {
-    const normalizedAction = actionDefinition && typeof actionDefinition === 'object' ? actionDefinition : {};
+    const normalizedAction =
+        actionDefinition && typeof actionDefinition === 'object' ? actionDefinition : {};
     return {
         renderId: props.payload?.renderId || '',
         templateCode: props.payload?.templateCode || '',
         componentCode: props.payload?.componentCode || props.payload?.componentType || '',
         targetToolName: props.payload?.targetToolName || '',
+        title: String(componentProps.value.title || cardTitle.value || '').trim(),
         actionCode,
         messageType: normalizeActionMessageType(normalizedAction.messageType),
         message: buildActionMessage(normalizedAction, actionCode),
@@ -254,7 +449,10 @@ function buildActionMessage(actionDefinition, actionCode) {
 function applyTemplatePlaceholders(template) {
     return template
         .replaceAll('{{dataJson}}', buildDataJson())
-        .replaceAll('{{title}}', String(componentProps.value.title || props.payload?.title || '').trim())
+        .replaceAll(
+            '{{title}}',
+            String(componentProps.value.title || props.payload?.title || '').trim()
+        )
         .replaceAll('{{templateCode}}', String(props.payload?.templateCode || '').trim());
 }
 
@@ -342,7 +540,7 @@ function isActionDisabled(code) {
 
 <template>
     <div
-        class="w-full max-w-full space-y-4 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4 sm:w-[500px]"
+        class="w-full max-w-full space-y-4 rounded-2xl border border-emerald-200 bg-emerald-50/80 p-4 sm:max-w-[640px] lg:max-w-[760px]"
     >
         <button
             type="button"
@@ -350,15 +548,15 @@ function isActionDisabled(code) {
             @click="toggleExpanded"
         >
             <div class="min-w-0">
-                <h4 class="truncate text-sm font-semibold text-slate-900">
+                <h4 class="truncate text-sm font-semibold text-emerald-900">
                     {{ componentProps.title || cardTitle }}
                 </h4>
-                <p class="mt-1 text-xs leading-5 text-slate-500">
+                <p class="mt-1 text-xs leading-5 text-emerald-700">
                     {{ cardSubtitle }}
                 </p>
             </div>
             <span
-                class="material-symbols-outlined mt-0.5 shrink-0 text-[20px] text-slate-400 transition"
+                class="material-symbols-outlined mt-0.5 shrink-0 text-[20px] text-emerald-600 transition"
             >
                 {{ expanded ? 'expand_less' : 'expand_more' }}
             </span>
@@ -366,15 +564,132 @@ function isActionDisabled(code) {
 
         <div
             v-if="expanded"
-            class="space-y-2 rounded-xl border border-white/90 bg-white/90 p-3 shadow-sm"
+            class="space-y-2 rounded-xl border border-emerald-100 bg-white p-3 shadow-sm"
         >
+            <template v-if="displaySections.length">
+                <section
+                    v-for="section in displaySections"
+                    :key="section.key"
+                    class="space-y-3 border-b border-slate-100 py-3 first:pt-0 last:border-b-0 last:pb-0"
+                >
+                    <div class="flex items-center justify-between gap-3">
+                        <h5 class="text-sm font-semibold text-slate-900">
+                            {{ section.title }}
+                        </h5>
+                        <span
+                            class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500"
+                        >
+                            {{ section.type === 'table' ? '明细' : '主表' }}
+                        </span>
+                    </div>
+
+                    <div
+                        v-if="section.type === 'table'"
+                        class="overflow-hidden rounded-xl border border-slate-200"
+                    >
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full divide-y divide-slate-200 text-sm">
+                                <thead class="bg-slate-50">
+                                    <tr>
+                                        <th
+                                            v-for="column in section.columns"
+                                            :key="column.key"
+                                            class="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-slate-500"
+                                        >
+                                            <span v-if="column.required" class="mr-1 text-rose-500">
+                                                *
+                                            </span>
+                                            {{ column.label }}
+                                        </th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-100 bg-white">
+                                    <tr>
+                                        <td
+                                            v-for="column in section.columns"
+                                            :key="column.key"
+                                            class="px-3 py-2 align-top"
+                                        >
+                                            <input
+                                                v-if="!isFieldReadonly(column)"
+                                                v-model="draftData[column.key]"
+                                                :type="column.inputType"
+                                                class="h-10 w-full min-w-[96px] rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-800 outline-none transition focus:border-emerald-400 focus:bg-white focus:ring-2 focus:ring-emerald-100"
+                                                :placeholder="`请输入${column.label}`"
+                                            />
+                                            <div
+                                                v-else
+                                                class="min-h-10 min-w-[96px] rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700"
+                                            >
+                                                {{ formatDisplayValue(draftData[column.key]) }}
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div v-else class="space-y-2">
+                        <div
+                            v-for="row in section.fields"
+                            :key="row.key"
+                            class="border-b border-slate-100 py-2.5 last:border-b-0 last:pb-0 first:pt-0"
+                        >
+                            <div class="flex items-start gap-3">
+                                <label
+                                    class="flex w-28 shrink-0 items-center gap-1 pt-2 text-sm text-slate-500"
+                                >
+                                    <span
+                                        v-if="row.required"
+                                        class="text-sm font-semibold leading-none text-rose-500"
+                                    >
+                                        *
+                                    </span>
+                                    <span class="break-all">{{ row.label }}</span>
+                                </label>
+                                <div class="min-w-0 flex-1">
+                                    <textarea
+                                        v-if="row.multiline"
+                                        v-model="draftData[row.key]"
+                                        rows="3"
+                                        class="min-h-[88px] w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-emerald-400 focus:bg-white focus:ring-2 focus:ring-emerald-100"
+                                        :placeholder="`请输入${row.label}`"
+                                        :readonly="isFieldReadonly(row)"
+                                        :disabled="isFieldReadonly(row)"
+                                    />
+                                    <input
+                                        v-else
+                                        v-model="draftData[row.key]"
+                                        :type="row.inputType"
+                                        class="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-800 outline-none transition focus:border-emerald-400 focus:bg-white focus:ring-2 focus:ring-emerald-100"
+                                        :placeholder="`请输入${row.label}`"
+                                        :readonly="isFieldReadonly(row)"
+                                        :disabled="isFieldReadonly(row)"
+                                    />
+                                    <p
+                                        v-if="row.required && isEmptyValue(draftData[row.key])"
+                                        class="mt-1 text-[11px] text-rose-500"
+                                    >
+                                        该字段建议补充
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </template>
+
             <div
+                v-else
                 v-for="row in displayRows"
                 :key="row.key"
                 class="border-b border-slate-100 py-2.5 last:border-b-0 last:pb-0 first:pt-0"
             >
                 <div class="flex items-start gap-3">
-                    <label class="flex w-28 shrink-0 items-center gap-1 pt-2 text-sm text-slate-500">
+                    <label
+                        class="flex w-28 shrink-0 items-center gap-1 pt-2 text-sm text-slate-500"
+                    >
                         <span
                             v-if="row.required"
                             class="text-sm font-semibold leading-none text-rose-500"
@@ -390,17 +705,17 @@ function isActionDisabled(code) {
                             rows="3"
                             class="min-h-[88px] w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-emerald-400 focus:bg-white focus:ring-2 focus:ring-emerald-100"
                             :placeholder="`请输入${row.label}`"
-                            :readonly="formReadonly"
-                            :disabled="formReadonly"
+                            :readonly="isFieldReadonly(row)"
+                            :disabled="isFieldReadonly(row)"
                         />
                         <input
                             v-else
                             v-model="draftData[row.key]"
-                            type="text"
+                            :type="row.inputType"
                             class="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-800 outline-none transition focus:border-emerald-400 focus:bg-white focus:ring-2 focus:ring-emerald-100"
                             :placeholder="`请输入${row.label}`"
-                            :readonly="formReadonly"
-                            :disabled="formReadonly"
+                            :readonly="isFieldReadonly(row)"
+                            :disabled="isFieldReadonly(row)"
                         />
                         <p
                             v-if="row.required && isEmptyValue(draftData[row.key])"
@@ -414,13 +729,26 @@ function isActionDisabled(code) {
         </div>
 
         <div
-            v-if="expanded && (missingFields.length || unknownFields.length)"
+            v-if="expanded && displaySections.length && unknownFields.length"
+            class="space-y-1 rounded-xl border border-slate-200 bg-slate-50/80 p-3"
+        >
+            <p class="text-xs leading-5 text-slate-500">
+                未展示字段：{{ unknownFields.join('、') }}
+            </p>
+        </div>
+
+        <div
+            v-if="expanded && missingFields.length"
             class="space-y-1 rounded-xl border border-amber-200 bg-amber-50/80 p-3"
         >
-            <p v-if="missingFields.length" class="text-xs leading-5 text-amber-700">
-                缺失字段：{{ missingFields.join('、') }}
-            </p>
-            <p v-if="unknownFields.length" class="text-xs leading-5 text-slate-500">
+            <p class="text-xs leading-5 text-amber-700">缺失字段：{{ missingFields.join('、') }}</p>
+        </div>
+
+        <div
+            v-if="expanded && !displaySections.length && unknownFields.length"
+            class="space-y-1 rounded-xl border border-slate-200 bg-slate-50/80 p-3"
+        >
+            <p class="text-xs leading-5 text-slate-500">
                 未映射字段：{{ unknownFields.join('、') }}
             </p>
         </div>

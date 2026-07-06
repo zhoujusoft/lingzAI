@@ -30,6 +30,8 @@ public class LowcodeApiCatalog {
 
     private String toolName;
 
+    private String toolRemark;
+
     private Integer enabled;
 
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
@@ -119,6 +121,14 @@ public class LowcodeApiCatalog {
 
     public void setToolName(String toolName) {
         this.toolName = toolName;
+    }
+
+    public String getToolRemark() {
+        return toolRemark;
+    }
+
+    public void setToolRemark(String toolRemark) {
+        this.toolRemark = toolRemark;
     }
 
     public Integer getEnabled() {

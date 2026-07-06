@@ -6,11 +6,14 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import lingzhou.agent.backend.capability.api.client.LowcodePlatformClient;
 import lingzhou.agent.backend.business.skill.domain.LowcodeApiCatalog;
+import lingzhou.agent.backend.business.tool.domain.ToolCatalog;
+import lingzhou.agent.backend.business.tool.mapper.ToolCatalogMapper;
 import lingzhou.agent.backend.business.system.model.PlatformEndpointItem;
+import lingzhou.agent.backend.capability.api.client.LowcodePlatformClient;
 import lingzhou.agent.backend.common.lzException.TaskException;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -22,16 +25,19 @@ public class LowcodeApiBrowseService {
     private final LowcodeTokenService lowcodeTokenService;
     private final LowcodePlatformClient lowcodePlatformClient;
     private final LowcodeApiCatalogService lowcodeApiCatalogService;
+    private final ToolCatalogMapper toolCatalogMapper;
 
     public LowcodeApiBrowseService(
             LowcodePlatformConfigService lowcodePlatformConfigService,
             LowcodeTokenService lowcodeTokenService,
             LowcodePlatformClient lowcodePlatformClient,
-            LowcodeApiCatalogService lowcodeApiCatalogService) {
+            LowcodeApiCatalogService lowcodeApiCatalogService,
+            ToolCatalogMapper toolCatalogMapper) {
         this.lowcodePlatformConfigService = lowcodePlatformConfigService;
         this.lowcodeTokenService = lowcodeTokenService;
         this.lowcodePlatformClient = lowcodePlatformClient;
         this.lowcodeApiCatalogService = lowcodeApiCatalogService;
+        this.toolCatalogMapper = toolCatalogMapper;
     }
 
     public List<PlatformOption> listPlatforms() {
@@ -44,11 +50,9 @@ public class LowcodeApiBrowseService {
         PlatformEndpointItem platform = lowcodePlatformConfigService.requirePlatform(platformKey);
         String token = lowcodeTokenService.getTokenIfConfigured(platform);
         return lowcodePlatformClient.getAppList(platform, token).stream()
-                .sorted(
-                        Comparator.comparing(
-                                        this::extractAppCreatedAtMillis,
-                                        Comparator.nullsLast(Comparator.reverseOrder()))
-                                .thenComparing(item -> firstNonBlank(item.get("name"), item.get("code"))))
+                .sorted(Comparator.comparing(
+                                this::extractAppCreatedAtMillis, Comparator.nullsLast(Comparator.reverseOrder()))
+                        .thenComparing(item -> firstNonBlank(item.get("name"), item.get("code"))))
                 .map(this::toAppView)
                 .toList();
     }
@@ -60,8 +64,12 @@ public class LowcodeApiBrowseService {
         PlatformEndpointItem platform = lowcodePlatformConfigService.requirePlatform(platformKey);
         String token = lowcodeTokenService.getTokenIfConfigured(platform);
         Map<String, LowcodeApiCatalog> registeredMap = lowcodeApiCatalogService.mapByPlatformAndApiCode(platformKey);
+        Map<String, ToolCatalog> toolCatalogMap = loadToolCatalogMap(registeredMap);
         return lowcodePlatformClient.loadApiList(platform, token, appId).stream()
-                .map(item -> toApiView(item, registeredMap.get(asText(item.get("apiCode")))))
+                .map(item -> toApiView(
+                        item,
+                        registeredMap.get(asText(item.get("apiCode"))),
+                        toolCatalogMap))
                 .toList();
     }
 
@@ -72,8 +80,8 @@ public class LowcodeApiBrowseService {
         }
         PlatformEndpointItem platform = lowcodePlatformConfigService.requirePlatform(platformKey);
         String token = lowcodeTokenService.getTokenIfConfigured(platform);
-        LowcodePlatformClient.PlatformEnvelope envelope =
-                lowcodePlatformClient.executeApi(platform, token, apiCode.trim(), arguments == null ? Map.of() : arguments);
+        LowcodePlatformClient.PlatformEnvelope envelope = lowcodePlatformClient.executeApi(
+                platform, token, apiCode.trim(), arguments == null ? Map.of() : arguments);
         return new TestExecuteResult(
                 platformKey.trim(),
                 apiCode.trim(),
@@ -93,7 +101,8 @@ public class LowcodeApiBrowseService {
                 asInteger(item.get("apiCount")));
     }
 
-    private ApiView toApiView(Map<String, Object> item, LowcodeApiCatalog registered) {
+    private ApiView toApiView(Map<String, Object> item, LowcodeApiCatalog registered, Map<String, ToolCatalog> toolCatalogMap) {
+        ToolCatalog toolCatalog = registered == null ? null : toolCatalogMap.get(asText(registered.getToolName()));
         return new ApiView(
                 asText(item.get("objectId")),
                 asText(item.get("parentId")),
@@ -108,8 +117,32 @@ public class LowcodeApiBrowseService {
                 item.get("body"),
                 item.get("sqlText"),
                 registered != null && registered.getEnabled() != null && registered.getEnabled() == 1,
+                toolCatalog == null ? "" : asText(toolCatalog.getDisplayName()),
                 registered == null ? "" : asText(registered.getToolName()),
+                registered == null ? "" : asText(registered.getToolRemark()),
                 item);
+    }
+
+    private Map<String, ToolCatalog> loadToolCatalogMap(Map<String, LowcodeApiCatalog> registeredMap) {
+        Map<String, ToolCatalog> result = new LinkedHashMap<>();
+        if (registeredMap == null || registeredMap.isEmpty()) {
+            return result;
+        }
+        List<String> toolNames = registeredMap.values().stream()
+                .map(LowcodeApiCatalog::getToolName)
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .distinct()
+                .toList();
+        if (toolNames.isEmpty()) {
+            return result;
+        }
+        for (ToolCatalog toolCatalog : toolCatalogMapper.selectByToolNames(toolNames)) {
+            if (toolCatalog != null && StringUtils.hasText(toolCatalog.getToolName())) {
+                result.put(toolCatalog.getToolName().trim(), toolCatalog);
+            }
+        }
+        return result;
     }
 
     private String firstNonBlank(Object first, Object second) {
@@ -211,7 +244,9 @@ public class LowcodeApiBrowseService {
             Object body,
             Object sqlText,
             boolean registered,
+            String toolDisplayName,
             String toolName,
+            String toolRemark,
             Map<String, Object> raw) {}
 
     public record TestExecuteResult(

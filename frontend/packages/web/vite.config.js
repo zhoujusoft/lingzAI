@@ -8,7 +8,9 @@ export default defineConfig(({ mode }) => {
     const proxyTargetOverride = (env.VITE_PROXY_TARGET || '').trim();
     const appBasePath = (env.VITE_BASE_PATH || '/').trim() || '/';
     const isAbsoluteApiBase = /^https?:\/\//i.test(apiBaseUrl);
-    const proxyTarget = proxyTargetOverride || (isAbsoluteApiBase ? new URL(apiBaseUrl).origin : 'http://localhost:5050');
+    const proxyTarget =
+        proxyTargetOverride ||
+        (isAbsoluteApiBase ? new URL(apiBaseUrl).origin : 'http://localhost:5050');
 
     return {
         base: appBasePath,

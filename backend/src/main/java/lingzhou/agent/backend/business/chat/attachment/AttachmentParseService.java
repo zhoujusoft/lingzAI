@@ -65,57 +65,72 @@ public class AttachmentParseService {
             item.put("success", result.success());
             item.put("fileName", result.fileName());
             item.put("fileType", result.fileType());
-            item.put("summary", Map.of(
-                    "paragraphCount", result.summary().paragraphCount(),
-                    "tableCount", result.summary().tableCount(),
-                    "sheetCount", result.summary().sheetCount(),
-                    "sectionCount", result.summary().sectionCount()));
-            item.put("sections", result.sections().stream().limit(12).map(section -> {
-                Map<String, Object> sectionMap = new LinkedHashMap<>();
-                sectionMap.put("type", section.type());
-                sectionMap.put("index", section.index());
-                if (StringUtils.hasText(section.name())) {
-                    sectionMap.put("name", section.name());
-                }
-                if (StringUtils.hasText(section.text())) {
-                    sectionMap.put("text", section.text());
-                }
-                if (section.rowCount() != null) {
-                    sectionMap.put("rowCount", section.rowCount());
-                }
-                if (section.columnCount() != null) {
-                    sectionMap.put("columnCount", section.columnCount());
-                }
-                if (section.headerRowIndex() != null) {
-                    sectionMap.put("headerRowIndex", section.headerRowIndex());
-                }
-                if (!section.header().isEmpty()) {
-                    sectionMap.put("header", section.header());
-                }
-                if (!section.sampleRows().isEmpty()) {
-                    sectionMap.put("sampleRows", section.sampleRows());
-                }
-                if (!section.columns().isEmpty()) {
-                    sectionMap.put("columns", section.columns().stream().limit(20).map(column -> Map.of(
-                                    "index", column.index(),
-                                    "name", column.name(),
-                                    "inferredType", column.inferredType(),
-                                    "nullCount", column.nullCount(),
-                                    "totalCount", column.totalCount(),
-                                    "sampleValues", column.sampleValues()))
+            item.put(
+                    "summary",
+                    Map.of(
+                            "paragraphCount", result.summary().paragraphCount(),
+                            "tableCount", result.summary().tableCount(),
+                            "sheetCount", result.summary().sheetCount(),
+                            "sectionCount", result.summary().sectionCount()));
+            item.put(
+                    "sections",
+                    result.sections().stream()
+                            .limit(12)
+                            .map(section -> {
+                                Map<String, Object> sectionMap = new LinkedHashMap<>();
+                                sectionMap.put("type", section.type());
+                                sectionMap.put("index", section.index());
+                                if (StringUtils.hasText(section.name())) {
+                                    sectionMap.put("name", section.name());
+                                }
+                                if (StringUtils.hasText(section.text())) {
+                                    sectionMap.put("text", section.text());
+                                }
+                                if (section.rowCount() != null) {
+                                    sectionMap.put("rowCount", section.rowCount());
+                                }
+                                if (section.columnCount() != null) {
+                                    sectionMap.put("columnCount", section.columnCount());
+                                }
+                                if (section.headerRowZeroBasedIndex() != null) {
+                                    sectionMap.put("headerRowZeroBasedIndex", section.headerRowZeroBasedIndex());
+                                }
+                                if (!section.header().isEmpty()) {
+                                    sectionMap.put("header", section.header());
+                                }
+                                if (!section.sampleRows().isEmpty()) {
+                                    sectionMap.put("sampleRows", section.sampleRows());
+                                }
+                                if (!section.columns().isEmpty()) {
+                                    sectionMap.put(
+                                            "columns",
+                                            section.columns().stream()
+                                                    .limit(20)
+                                                    .map(column -> Map.of(
+                                                            "index", column.index(),
+                                                            "name", column.name(),
+                                                            "inferredType", column.inferredType(),
+                                                            "nullCount", column.nullCount(),
+                                                            "totalCount", column.totalCount(),
+                                                            "sampleValues", column.sampleValues()))
+                                                    .toList());
+                                }
+                                return sectionMap;
+                            })
                             .toList());
-                }
-                return sectionMap;
-            }).toList());
-            item.put("entities", Map.of(
-                    "headings", result.entities().headings(),
-                    "labels", result.entities().labels(),
-                    "tables", result.entities().tables().stream().map(table -> Map.of(
-                                    "name", table.name(),
-                                    "header", table.header(),
-                                    "sampleRows", table.sampleRows()))
-                            .toList(),
-                    "sheetNames", result.entities().sheetNames()));
+            item.put(
+                    "entities",
+                    Map.of(
+                            "headings", result.entities().headings(),
+                            "labels", result.entities().labels(),
+                            "tables",
+                                    result.entities().tables().stream()
+                                            .map(table -> Map.of(
+                                                    "name", table.name(),
+                                                    "header", table.header(),
+                                                    "sampleRows", table.sampleRows()))
+                                            .toList(),
+                            "sheetNames", result.entities().sheetNames()));
             item.put("warnings", result.warnings());
             if (StringUtils.hasText(result.error())) {
                 item.put("error", result.error());

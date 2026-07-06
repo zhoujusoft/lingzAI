@@ -8,6 +8,7 @@ public class CreateUserInput {
     private String mobile;
     private String email;
     private Integer userType;
+    private Long roleId;
 
     public String getName() {
         return name;
@@ -55,5 +56,13 @@ public class CreateUserInput {
 
     public void setUserType(Integer userType) {
         this.userType = userType;
+    }
+
+    public Long getRoleId() {
+        return roleId;
+    }
+
+    public void setRoleId(Long roleId) {
+        this.roleId = roleId;
     }
 }

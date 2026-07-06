@@ -58,7 +58,7 @@ public class DocumentMetadataController {
     }
 
     @DeleteMapping("/{metadataIds}")
-    public Map<String, Object> remove(@PathVariable Long[] metadataIds) {
+    public Map<String, Object> remove(@PathVariable("metadataIds") Long[] metadataIds) {
         return Map.of("affected", documentMetadataService.deleteDocumentMetadataByMetadataIds(metadataIds));
     }
 

@@ -22,9 +22,15 @@ public class ToolCatalog {
 
     private Integer bindable;
 
+    private Integer enabledGlobal;
+
     private String ownerSkillName;
 
     private String source;
+
+    private Long ownerUserId;
+
+    private Integer permissionScope;
 
     private Integer sortOrder;
 
@@ -82,6 +88,14 @@ public class ToolCatalog {
         this.bindable = bindable;
     }
 
+    public Integer getEnabledGlobal() {
+        return enabledGlobal;
+    }
+
+    public void setEnabledGlobal(Integer enabledGlobal) {
+        this.enabledGlobal = enabledGlobal;
+    }
+
     public String getOwnerSkillName() {
         return ownerSkillName;
     }
@@ -96,6 +110,22 @@ public class ToolCatalog {
 
     public void setSource(String source) {
         this.source = source;
+    }
+
+    public Long getOwnerUserId() {
+        return ownerUserId;
+    }
+
+    public void setOwnerUserId(Long ownerUserId) {
+        this.ownerUserId = ownerUserId;
+    }
+
+    public Integer getPermissionScope() {
+        return permissionScope;
+    }
+
+    public void setPermissionScope(Integer permissionScope) {
+        this.permissionScope = permissionScope;
     }
 
     public Integer getSortOrder() {

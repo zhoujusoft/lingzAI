@@ -5,14 +5,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.List;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
-import lingzhou.agent.backend.common.security.RSAEncryptor;
-import lingzhou.agent.backend.common.security.Rsa;
 import lingzhou.agent.backend.business.system.model.PlatformAuthConfig;
 import lingzhou.agent.backend.business.system.model.PlatformEndpointItem;
 import lingzhou.agent.backend.common.lzException.TaskException;
+import lingzhou.agent.backend.common.security.RSAEncryptor;
+import lingzhou.agent.backend.common.security.Rsa;
 import lombok.AllArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,7 +52,6 @@ public class LowcodePlatformClient {
     private final ObjectMapper objectMapper;
     private final Clock clock = Clock.systemDefaultZone();
 
-
     public PlatformEnvelope getToken(PlatformEndpointItem platform) throws TaskException {
         Map<String, Object> requestBody = new LinkedHashMap<>();
         requestBody.put("Code", TOKEN_CODE);
@@ -76,9 +75,7 @@ public class LowcodePlatformClient {
                     ex.getStatusCode().value(),
                     body);
             throw new TaskException(
-                    "平台登录失败，HTTP " + ex.getStatusCode().value() + "：" + body,
-                    TaskException.Code.UNKNOWN,
-                    ex);
+                    "平台登录失败，HTTP " + ex.getStatusCode().value() + "：" + body, TaskException.Code.UNKNOWN, ex);
         } catch (TaskException ex) {
             throw ex;
         } catch (Exception ex) {
@@ -101,10 +98,12 @@ public class LowcodePlatformClient {
         }
     }
 
-    public List<Map<String, Object>> getAccessibleApps(PlatformEndpointItem platform, String token) throws TaskException {
+    public List<Map<String, Object>> getAccessibleApps(PlatformEndpointItem platform, String token)
+            throws TaskException {
         PlatformAuthConfig authConfig = getAuthConfig(platform);
         try {
-            RestClient.RequestHeadersSpec<?> request = buildRestClient(platform).get().uri(ACCESS_APP_LIST_PATH);
+            RestClient.RequestHeadersSpec<?> request =
+                    buildRestClient(platform).get().uri(ACCESS_APP_LIST_PATH);
             applyCommonHeaders(request, token, authConfig);
             Object response = request.retrieve().body(Object.class);
             PlatformEnvelope envelope = parseEnvelope(response);
@@ -114,13 +113,15 @@ public class LowcodePlatformClient {
         }
     }
 
-    public List<Map<String, Object>> loadApiList(PlatformEndpointItem platform, String token, String appId) throws TaskException {
+    public List<Map<String, Object>> loadApiList(PlatformEndpointItem platform, String token, String appId)
+            throws TaskException {
         PlatformAuthConfig authConfig = getAuthConfig(platform);
         if (!StringUtils.hasText(appId)) {
             throw new TaskException("appId 不能为空", TaskException.Code.UNKNOWN);
         }
         try {
-            RestClient.RequestHeadersSpec<?> request = buildRestClient(platform).get().uri(API_LIST_PATH_TEMPLATE, appId.trim());
+            RestClient.RequestHeadersSpec<?> request =
+                    buildRestClient(platform).get().uri(API_LIST_PATH_TEMPLATE, appId.trim());
             applyCommonHeaders(request, token, authConfig);
             Object response = request.retrieve().body(Object.class);
             PlatformEnvelope envelope = parseEnvelope(response);
@@ -185,7 +186,8 @@ public class LowcodePlatformClient {
     }
 
     public PlatformEnvelope executeApi(
-            PlatformEndpointItem platform, String token, String apiCode, Map<String, Object> requestBody) throws TaskException {
+            PlatformEndpointItem platform, String token, String apiCode, Map<String, Object> requestBody)
+            throws TaskException {
         PlatformAuthConfig authConfig = getAuthConfig(platform);
         if (!StringUtils.hasText(apiCode)) {
             throw new TaskException("apiCode 不能为空", TaskException.Code.UNKNOWN);
@@ -199,7 +201,9 @@ public class LowcodePlatformClient {
             if (StringUtils.hasText(authConfig.getUserId())) {
                 request.header("UserId", authConfig.getUserId().trim());
             }
-            Object response = request.body(requestBody == null ? Map.of() : requestBody).retrieve().body(Object.class);
+            Object response = request.body(requestBody == null ? Map.of() : requestBody)
+                    .retrieve()
+                    .body(Object.class);
             return parseEnvelope(response);
         } catch (RestClientResponseException ex) {
             throw toHttpException("执行低代码 API 失败", platform, ex);
@@ -207,16 +211,15 @@ public class LowcodePlatformClient {
     }
 
     public List<Map<String, Object>> sqlSelect(
-            PlatformEndpointItem platform, String token, String encryptedSql, List<Object> argsPart) throws TaskException {
+            PlatformEndpointItem platform, String token, String encryptedSql, List<Object> argsPart)
+            throws TaskException {
         PlatformAuthConfig authConfig = getAuthConfig(platform);
         if (!StringUtils.hasText(encryptedSql)) {
             throw new TaskException("sqlPart 不能为空", TaskException.Code.UNKNOWN);
         }
         try {
-            RestClient.RequestBodySpec request = buildRestClient(platform)
-                    .post()
-                    .uri(SQL_SELECT_PATH)
-                    .contentType(MediaType.APPLICATION_JSON);
+            RestClient.RequestBodySpec request =
+                    buildRestClient(platform).post().uri(SQL_SELECT_PATH).contentType(MediaType.APPLICATION_JSON);
             applyCommonHeaders(request, token, authConfig);
             Map<String, Object> requestBody = new LinkedHashMap<>();
             requestBody.put("sqlPart", encryptedSql.trim());
@@ -285,8 +288,9 @@ public class LowcodePlatformClient {
             if (rawItem == null) {
                 continue;
             }
-            Map<String, Object> item = objectMapper.convertValue(rawItem, objectMapper.getTypeFactory()
-                    .constructMapType(LinkedHashMap.class, String.class, Object.class));
+            Map<String, Object> item = objectMapper.convertValue(
+                    rawItem,
+                    objectMapper.getTypeFactory().constructMapType(LinkedHashMap.class, String.class, Object.class));
             items.add(item);
         }
         return items;
@@ -297,7 +301,8 @@ public class LowcodePlatformClient {
             return Map.of();
         }
         return objectMapper.convertValue(
-                rawMap, objectMapper.getTypeFactory().constructMapType(LinkedHashMap.class, String.class, Object.class));
+                rawMap,
+                objectMapper.getTypeFactory().constructMapType(LinkedHashMap.class, String.class, Object.class));
     }
 
     private String normalizeBaseUrl(String baseUrl) {
@@ -321,7 +326,8 @@ public class LowcodePlatformClient {
         return body;
     }
 
-    private void applyCommonHeaders(RestClient.RequestHeadersSpec<?> request, String token, PlatformAuthConfig authConfig)
+    private void applyCommonHeaders(
+            RestClient.RequestHeadersSpec<?> request, String token, PlatformAuthConfig authConfig)
             throws TaskException {
         if (request == null) {
             return;
@@ -329,7 +335,9 @@ public class LowcodePlatformClient {
         if (!usesSignatureAuth(authConfig) && StringUtils.hasText(token)) {
             request.header(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim());
         }
-        String tnCode = StringUtils.hasText(authConfig.getTncode()) ? authConfig.getTncode().trim() : "00000000";
+        String tnCode = StringUtils.hasText(authConfig.getTncode())
+                ? authConfig.getTncode().trim()
+                : "00000000";
         String userId = StringUtils.hasText(authConfig.getUserId())
                 ? authConfig.getUserId().trim()
                 : DEFAULT_USER_ID;
@@ -338,7 +346,8 @@ public class LowcodePlatformClient {
         applyRsaHeaders(request, authConfig);
     }
 
-    private void applyRsaHeaders(RestClient.RequestHeadersSpec<?> request, PlatformAuthConfig authConfig) throws TaskException {
+    private void applyRsaHeaders(RestClient.RequestHeadersSpec<?> request, PlatformAuthConfig authConfig)
+            throws TaskException {
         if (request == null || authConfig == null) {
             return;
         }
@@ -362,7 +371,8 @@ public class LowcodePlatformClient {
                 && StringUtils.hasText(authConfig.getAppSecret());
     }
 
-    String buildRsaSignature(String appKey, String timestamp, String appSecret, String rsaPublicKey) throws TaskException {
+    String buildRsaSignature(String appKey, String timestamp, String appSecret, String rsaPublicKey)
+            throws TaskException {
         try {
             return RSAEncryptor.encryptWithPublicKey(appKey + "|" + appSecret + "|" + timestamp, rsaPublicKey);
         } catch (Exception ex) {
@@ -370,7 +380,8 @@ public class LowcodePlatformClient {
         }
     }
 
-    private TaskException toHttpException(String action, PlatformEndpointItem platform, RestClientResponseException ex) {
+    private TaskException toHttpException(
+            String action, PlatformEndpointItem platform, RestClientResponseException ex) {
         String body = shorten(ex.getResponseBodyAsString(), 300);
         logger.warn(
                 "{}：platformKey={}, status={}, body={}",
@@ -379,9 +390,7 @@ public class LowcodePlatformClient {
                 ex.getStatusCode().value(),
                 body);
         return new TaskException(
-                action + "，HTTP " + ex.getStatusCode().value() + "：" + body,
-                TaskException.Code.UNKNOWN,
-                ex);
+                action + "，HTTP " + ex.getStatusCode().value() + "：" + body, TaskException.Code.UNKNOWN, ex);
     }
 
     private String textOrNull(JsonNode node) {

@@ -1,7 +1,7 @@
 package lingzhou.agent.backend.business.datasets.service.knowledge;
 
-import java.util.Collection;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import lingzhou.agent.backend.business.datasets.domain.KnowledgeDocument;
@@ -40,7 +40,8 @@ public class ElasticsearchChunkIndexService {
         retriever.assertAvailable();
     }
 
-    public void indexDocumentChunks(KnowledgeDocument document, List<DocumentEmbeddingService.VectorizedChunk> vectorizedChunks) {
+    public void indexDocumentChunks(
+            KnowledgeDocument document, List<DocumentEmbeddingService.VectorizedChunk> vectorizedChunks) {
         retriever.indexDocumentChunks(document, vectorizedChunks);
     }
 

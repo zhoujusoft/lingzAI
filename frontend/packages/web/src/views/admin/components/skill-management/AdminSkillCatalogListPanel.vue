@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import {
+    deleteSkillCatalog,
     confirmSkillPackageImport,
     exportSkillPackage,
     listSkillCatalogs,
@@ -11,6 +12,7 @@ import {
 import { alert, confirm } from '@/composables/useModal';
 import { clearUserSession } from '@/composables/useCurrentUser';
 import { ROUTE_PATHS } from '@/router/routePaths';
+import { getSkillIconGradientClass, resolveSkillIcon } from '@/utils/skillVisuals';
 
 const emit = defineEmits(['open-skill-detail']);
 
@@ -20,66 +22,83 @@ const loading = ref(false);
 const importing = ref(false);
 const refreshing = ref(false);
 const exportingSkillId = ref(null);
+const deletingSkillId = ref(null);
 const loadError = ref('');
 const searchKeyword = ref('');
 const visibilityFilter = ref('ALL');
 const categoryFilter = ref('ALL');
 const skills = ref([]);
 
-const skillIcons = ['grid_view', 'smart_toy', 'rocket_launch', 'inventory_2', 'dataset', 'hub'];
-const skillGradients = [
-    'from-blue-500 via-blue-500 to-cyan-400',
-    'from-indigo-500 via-indigo-500 to-sky-400',
-    'from-emerald-500 via-teal-500 to-cyan-400',
-    'from-amber-500 via-orange-500 to-rose-400',
-    'from-slate-600 via-slate-500 to-slate-400',
-    'from-violet-500 via-fuchsia-500 to-pink-400',
-];
-
 const skillCategories = computed(() => {
-    const categories = skills.value
-        .map(item => item.category || '')
-        .filter(Boolean);
+    const categories = skills.value.map(item => item.category || '').filter(Boolean);
     return ['ALL', ...Array.from(new Set(categories))];
 });
 
 const filteredSkills = computed(() => {
     const keyword = searchKeyword.value.trim().toLowerCase();
     return skills.value.filter(item => {
-        const matchesKeyword = !keyword
-            || `${item.displayName || ''} ${item.description || ''} ${item.runtimeSkillName || ''}`
+        const matchesKeyword =
+            !keyword ||
+            `${item.displayName || ''} ${item.description || ''} ${item.runtimeSkillName || ''}`
                 .toLowerCase()
                 .includes(keyword);
-        const matchesVisibility = visibilityFilter.value === 'ALL'
-            || (visibilityFilter.value === 'VISIBLE' && item.visible)
-            || (visibilityFilter.value === 'HIDDEN' && !item.visible);
-        const matchesCategory = categoryFilter.value === 'ALL'
-            || (item.category || '') === categoryFilter.value;
+        const matchesVisibility =
+            visibilityFilter.value === 'ALL' ||
+            (visibilityFilter.value === 'VISIBLE' && item.visible) ||
+            (visibilityFilter.value === 'HIDDEN' && !item.visible);
+        const matchesCategory =
+            categoryFilter.value === 'ALL' || (item.category || '') === categoryFilter.value;
         return matchesKeyword && matchesVisibility && matchesCategory;
     });
 });
 
 const visibleSkillCount = computed(() => skills.value.filter(item => item.visible).length);
 const hiddenSkillCount = computed(() => skills.value.filter(item => !item.visible).length);
-const businessCategoryCount = computed(() => skillCategories.value.filter(item => item !== 'ALL').length);
+const businessCategoryCount = computed(
+    () => skillCategories.value.filter(item => item !== 'ALL').length
+);
 
 function handleUnauthorized() {
     clearUserSession();
     router.replace(ROUTE_PATHS.login);
 }
 
-function getSkillIcon(skillId) {
-    if (!skillId) {
-        return skillIcons[0];
-    }
-    return skillIcons[skillId % skillIcons.length];
+function getSkillIcon(skill) {
+    return resolveSkillIcon(skill?.icon);
 }
 
-function getSkillGradient(skillId) {
-    if (!skillId) {
-        return skillGradients[0];
+function getSkillGradient(skill) {
+    return getSkillIconGradientClass(skill?.iconColor);
+}
+
+function hasToolBindingIssue(skill) {
+    return skill?.toolBindingStatus && skill.toolBindingStatus !== 'READY';
+}
+
+function getToolBindingStatusLabel(skill) {
+    switch (skill?.toolBindingStatus) {
+        case 'MISSING_DEPENDENCY':
+            return '工具缺失';
+        case 'NEEDS_REBIND':
+            return '待重绑';
+        case 'UNSUPPORTED':
+            return '待处理';
+        default:
+            return '正常';
     }
-    return skillGradients[skillId % skillGradients.length];
+}
+
+function getToolBindingStatusClass(skill) {
+    switch (skill?.toolBindingStatus) {
+        case 'MISSING_DEPENDENCY':
+            return 'bg-rose-50 text-rose-600';
+        case 'NEEDS_REBIND':
+            return 'bg-amber-50 text-amber-700';
+        case 'UNSUPPORTED':
+            return 'bg-blue-50 text-primary';
+        default:
+            return 'bg-emerald-50 text-emerald-600';
+    }
 }
 
 async function loadSkills() {
@@ -96,6 +115,9 @@ async function loadSkills() {
 }
 
 function openSkillDetail(skill) {
+    if (!skill?.canViewDetail) {
+        return;
+    }
     emit('open-skill-detail', skill);
 }
 
@@ -111,7 +133,7 @@ function downloadBlobFile(filename, blob) {
 }
 
 async function handleExportSkill(item) {
-    if (!item?.id || exportingSkillId.value) {
+    if (!item?.id || !item?.canViewDetail || exportingSkillId.value) {
         return;
     }
     exportingSkillId.value = item.id;
@@ -125,6 +147,40 @@ async function handleExportSkill(item) {
         });
     } finally {
         exportingSkillId.value = null;
+    }
+}
+
+async function handleDeleteSkill(item) {
+    if (!item?.id || !item?.canDelete || deletingSkillId.value) {
+        return;
+    }
+    const confirmed = await confirm({
+        title: '删除技能',
+        message: '删除技能后将不可恢复。是否继续？',
+        confirmText: '删除',
+        cancelText: '取消',
+    });
+    if (!confirmed) {
+        return;
+    }
+    deletingSkillId.value = item.id;
+    try {
+        const result = await deleteSkillCatalog(item.id, handleUnauthorized);
+        await loadSkills();
+        const message = result?.skillStudioRepublishRequired
+            ? '技能已删除，技能工坊项目已回退为未发布状态，请重新点击发布。'
+            : '技能已删除';
+        await alert({
+            title: '删除成功',
+            message,
+        });
+    } catch (error) {
+        await alert({
+            title: '删除失败',
+            message: error?.message || '删除技能失败',
+        });
+    } finally {
+        deletingSkillId.value = null;
     }
 }
 
@@ -171,19 +227,68 @@ function summarizePreview(preview) {
     }
     const lines = [
         `包标识：${preview?.packageId || '-'}`,
-        `运行时技能：${preview?.runtimeSkillName || '-'}`,
+        `技能名称：${preview?.displayName || preview?.runtimeSkillName || '-'}`,
         `导入模式：${preview?.installMode || '-'}`,
         `版本：${preview?.installedVersion ? `${preview.installedVersion} -> ${preview.importedVersion}` : preview?.importedVersion || '-'}`,
         `文件变更：新增 ${counts.ADDED} / 更新 ${counts.UPDATED} / 删除 ${counts.REMOVED} / 不变 ${counts.UNCHANGED}`,
     ];
+    const bindingSummary = preview?.toolBindingSummary;
+    if (Number(bindingSummary?.totalCount || 0) > 0) {
+        lines.push(
+            `工具绑定：共 ${bindingSummary.totalCount} 项 / 已恢复 ${bindingSummary.restoredCount || 0} / 缺失依赖 ${bindingSummary.missingDependencyCount || 0} / 需要重绑 ${bindingSummary.needsRebindCount || 0} / 不支持 ${bindingSummary.unsupportedCount || 0}`
+        );
+    }
     if (Number(preview?.unmanagedFileCount || 0) > 0) {
-        lines.push(`非受管本地文件：${preview.unmanagedFileCount} 个（导入时保留）`);
+        lines.push(
+            `本地额外文件：${preview.unmanagedFileCount} 个（不在技能包管理范围内，导入时会保留）`
+        );
+    }
+    const unresolvedBindings = Array.isArray(preview?.toolBindingResults)
+        ? preview.toolBindingResults.filter(
+              item => item?.restoreStatus && item.restoreStatus !== 'RESTORED'
+          )
+        : [];
+    if (unresolvedBindings.length) {
+        lines.push('');
+        lines.push('未完全恢复的绑定：');
+        for (const item of unresolvedBindings.slice(0, 8)) {
+            lines.push(`- ${item.toolName || '-'}：${item.message || item.restoreStatus}`);
+        }
+        if (unresolvedBindings.length > 8) {
+            lines.push(`- 其余 ${unresolvedBindings.length - 8} 项请在导入后查看结果摘要`);
+        }
     }
     if (Array.isArray(preview?.warnings) && preview.warnings.length) {
         lines.push('');
         lines.push(`提示：${preview.warnings.join('；')}`);
     }
     return lines.join('\n');
+}
+
+function summarizeImportBindingResults(result) {
+    const lines = [];
+    const bindingSummary = result?.toolBindingSummary;
+    if (Number(bindingSummary?.totalCount || 0) > 0) {
+        lines.push(
+            `工具绑定：共 ${bindingSummary.totalCount} 项 / 已恢复 ${bindingSummary.restoredCount || 0} / 缺失依赖 ${bindingSummary.missingDependencyCount || 0} / 需要重绑 ${bindingSummary.needsRebindCount || 0} / 不支持 ${bindingSummary.unsupportedCount || 0}`
+        );
+    }
+    const unresolvedBindings = Array.isArray(result?.toolBindingResults)
+        ? result.toolBindingResults.filter(
+              item => item?.restoreStatus && item.restoreStatus !== 'RESTORED'
+          )
+        : [];
+    if (unresolvedBindings.length) {
+        lines.push('');
+        lines.push('未完全恢复的绑定：');
+        for (const item of unresolvedBindings.slice(0, 8)) {
+            lines.push(`- ${item.toolName || '-'}：${item.message || item.restoreStatus}`);
+        }
+        if (unresolvedBindings.length > 8) {
+            lines.push(`- 其余 ${unresolvedBindings.length - 8} 项请导入后在技能详情中重新绑定`);
+        }
+    }
+    return lines;
 }
 
 async function handleImport(event) {
@@ -210,8 +315,9 @@ async function handleImport(event) {
         const result = await confirmSkillPackageImport(
             file,
             Boolean(preview?.requiresDowngradeConfirmation),
-            handleUnauthorized,
+            handleUnauthorized
         );
+        await loadSkills();
         await alert({
             title: '导入完成',
             message: [
@@ -220,9 +326,12 @@ async function handleImport(event) {
                 `安装状态：${result?.installStatus || '-'}`,
                 `依赖安装：${result?.dependencyStatus || '-'}`,
                 result?.backupDir ? `备份目录：${result.backupDir}` : '',
+                ...summarizeImportBindingResults(result),
                 '',
                 '文件已写入技能目录。请再点击“刷新技能目录”使运行时生效。',
-            ].filter(Boolean).join('\n'),
+            ]
+                .filter(Boolean)
+                .join('\n'),
         });
     } catch (error) {
         await alert({
@@ -241,11 +350,10 @@ onMounted(() => {
 
 <template>
     <section class="flex h-full min-h-0 flex-col bg-slate-100">
-        <header class="border-b border-slate-200 bg-white px-8 py-6">
+        <header class="border-b border-slate-200 bg-white px-8 py-5">
             <div class="flex flex-col gap-6 2xl:flex-row 2xl:items-start 2xl:justify-between">
                 <div>
-                    <p class="text-xs font-semibold tracking-[0.32em] text-slate-400">SKILLS</p>
-                    <h2 class="mt-3 text-3xl font-bold tracking-tight text-slate-900">技能管理</h2>
+                    <h2 class="text-3xl font-bold tracking-tight text-slate-900">技能管理</h2>
                     <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
                         按业务能力查看技能目录，再进入详情页编辑展示信息。技能包支持导入预检、确认导入和手动刷新技能目录生效。
                     </p>
@@ -280,24 +388,20 @@ onMounted(() => {
 
             <div class="mt-6 grid gap-3 sm:grid-cols-4">
                 <article class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-                    <p class="text-xs font-semibold tracking-[0.24em] text-slate-400">技能总数</p>
-                    <p class="mt-2 text-2xl font-bold text-slate-900">{{ skills.length }}</p>
-                    <p class="mt-1 text-xs text-slate-500">当前镜像技能总数</p>
+                    <p class="text-2xl font-bold text-slate-900">{{ skills.length }}</p>
+                    <p class="mt-1 text-xs text-slate-500">技能总数</p>
                 </article>
                 <article class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-                    <p class="text-xs font-semibold tracking-[0.24em] text-slate-400">已上架</p>
-                    <p class="mt-2 text-2xl font-bold text-emerald-600">{{ visibleSkillCount }}</p>
-                    <p class="mt-1 text-xs text-slate-500">前台技能市场可见</p>
+                    <p class="text-2xl font-bold text-emerald-600">{{ visibleSkillCount }}</p>
+                    <p class="mt-1 text-xs text-slate-500">已上架前台</p>
                 </article>
                 <article class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-                    <p class="text-xs font-semibold tracking-[0.24em] text-slate-400">已隐藏</p>
-                    <p class="mt-2 text-2xl font-bold text-slate-700">{{ hiddenSkillCount }}</p>
-                    <p class="mt-1 text-xs text-slate-500">当前未在前台展示</p>
+                    <p class="text-2xl font-bold text-slate-700">{{ hiddenSkillCount }}</p>
+                    <p class="mt-1 text-xs text-slate-500">当前已隐藏</p>
                 </article>
                 <article class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-                    <p class="text-xs font-semibold tracking-[0.24em] text-slate-400">业务分类</p>
-                    <p class="mt-2 text-2xl font-bold text-blue-600">{{ businessCategoryCount }}</p>
-                    <p class="mt-1 text-xs text-slate-500">按业务能力组织的分类数</p>
+                    <p class="text-2xl font-bold text-blue-600">{{ businessCategoryCount }}</p>
+                    <p class="mt-1 text-xs text-slate-500">业务分类数</p>
                 </article>
             </div>
 
@@ -306,7 +410,11 @@ onMounted(() => {
                     <button
                         type="button"
                         class="rounded-full px-4 py-2 text-sm font-medium transition-colors"
-                        :class="visibilityFilter === 'ALL' ? 'bg-blue-600 text-white shadow-sm shadow-blue-100' : 'border border-slate-200 bg-white text-slate-600 hover:border-blue-200 hover:text-blue-600'"
+                        :class="
+                            visibilityFilter === 'ALL'
+                                ? 'bg-blue-600 text-white shadow-sm shadow-blue-100'
+                                : 'border border-slate-200 bg-white text-slate-600 hover:border-blue-200 hover:text-blue-600'
+                        "
                         @click="visibilityFilter = 'ALL'"
                     >
                         全部
@@ -314,7 +422,11 @@ onMounted(() => {
                     <button
                         type="button"
                         class="rounded-full px-4 py-2 text-sm font-medium transition-colors"
-                        :class="visibilityFilter === 'VISIBLE' ? 'bg-blue-600 text-white shadow-sm shadow-blue-100' : 'border border-slate-200 bg-white text-slate-600 hover:border-blue-200 hover:text-blue-600'"
+                        :class="
+                            visibilityFilter === 'VISIBLE'
+                                ? 'bg-blue-600 text-white shadow-sm shadow-blue-100'
+                                : 'border border-slate-200 bg-white text-slate-600 hover:border-blue-200 hover:text-blue-600'
+                        "
                         @click="visibilityFilter = 'VISIBLE'"
                     >
                         已上架
@@ -322,7 +434,11 @@ onMounted(() => {
                     <button
                         type="button"
                         class="rounded-full px-4 py-2 text-sm font-medium transition-colors"
-                        :class="visibilityFilter === 'HIDDEN' ? 'bg-blue-600 text-white shadow-sm shadow-blue-100' : 'border border-slate-200 bg-white text-slate-600 hover:border-blue-200 hover:text-blue-600'"
+                        :class="
+                            visibilityFilter === 'HIDDEN'
+                                ? 'bg-blue-600 text-white shadow-sm shadow-blue-100'
+                                : 'border border-slate-200 bg-white text-slate-600 hover:border-blue-200 hover:text-blue-600'
+                        "
                         @click="visibilityFilter = 'HIDDEN'"
                     >
                         已隐藏
@@ -330,7 +446,9 @@ onMounted(() => {
                 </div>
 
                 <div class="relative w-full max-w-sm">
-                    <span class="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+                    <span
+                        class="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                    >
                         search
                     </span>
                     <input
@@ -348,7 +466,11 @@ onMounted(() => {
                     :key="category"
                     type="button"
                     class="rounded-full px-3 py-1.5 text-xs font-medium transition-colors"
-                    :class="categoryFilter === category ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700'"
+                    :class="
+                        categoryFilter === category
+                            ? 'bg-slate-900 text-white'
+                            : 'border border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700'
+                    "
                     @click="categoryFilter = category"
                 >
                     {{ category === 'ALL' ? '全部分类' : category }}
@@ -357,7 +479,10 @@ onMounted(() => {
         </header>
 
         <div class="custom-scrollbar flex-1 overflow-y-auto p-6">
-            <p v-if="loadError" class="mb-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
+            <p
+                v-if="loadError"
+                class="mb-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600"
+            >
                 {{ loadError }}
             </p>
 
@@ -372,56 +497,121 @@ onMounted(() => {
                 <article
                     v-for="item in filteredSkills"
                     :key="item.id"
-                    class="flex h-[292px] flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                    class="flex h-[336px] flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
                 >
                     <div class="flex flex-1 items-start gap-4">
                         <div
                             class="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br text-white shadow-lg"
-                            :class="getSkillGradient(item.id)"
+                            :class="getSkillGradient(item)"
                         >
-                            <span class="material-symbols-outlined text-[28px]">{{ getSkillIcon(item.id) }}</span>
+                            <span class="material-symbols-outlined text-[28px]">{{
+                                getSkillIcon(item)
+                            }}</span>
                         </div>
                         <div class="min-w-0 flex-1">
                             <div class="flex items-start justify-between gap-3">
                                 <div class="min-w-0">
-                                    <h3 class="truncate text-lg font-bold text-slate-900">{{ item.displayName }}</h3>
-                                    <p class="mt-1 truncate text-xs text-slate-400">{{ item.runtimeSkillName }}</p>
+                                    <h3 class="truncate text-lg font-bold text-slate-900">
+                                        {{ item.displayName }}
+                                    </h3>
+                                    <p class="mt-1 truncate text-xs text-slate-400">
+                                        {{ item.runtimeSkillName }}
+                                    </p>
                                 </div>
                                 <span
                                     class="rounded-full px-2 py-0.5 text-[11px] font-semibold"
-                                    :class="item.visible ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-500'"
+                                    :class="
+                                        item.visible
+                                            ? 'bg-emerald-50 text-emerald-600'
+                                            : 'bg-slate-100 text-slate-500'
+                                    "
                                 >
                                     {{ item.visible ? '已上架' : '已隐藏' }}
                                 </span>
+                                <span
+                                    v-if="hasToolBindingIssue(item)"
+                                    class="rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                                    :class="getToolBindingStatusClass(item)"
+                                >
+                                    {{ getToolBindingStatusLabel(item) }}
+                                </span>
                             </div>
-                            <p class="mt-3 line-clamp-3 min-h-[4.5rem] overflow-hidden text-sm leading-6 text-slate-500">
+                            <p
+                                class="mt-3 line-clamp-3 min-h-[4.5rem] overflow-hidden text-sm leading-6 text-slate-500"
+                            >
                                 {{ item.description }}
                             </p>
+                            <p
+                                v-if="hasToolBindingIssue(item) && item.toolBindingMessage"
+                                class="mt-2 rounded-2xl border border-rose-100 bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700"
+                            >
+                                {{ item.toolBindingMessage }}
+                            </p>
                             <div class="mt-4 flex flex-wrap gap-2">
-                                <span class="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-600">
+                                <span
+                                    class="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-600"
+                                >
                                     {{ item.category || '通用能力' }}
                                 </span>
-                                <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500">
-                                    {{ item.runtimeTools.length }} 个运行时工具
+                                <span
+                                    class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500"
+                                >
+                                    {{
+                                        Array.isArray(item.boundGlobalToolNames)
+                                            ? item.boundGlobalToolNames.length
+                                            : 0
+                                    }}
+                                    个已绑定工具
+                                </span>
+                                <span
+                                    v-if="item.version"
+                                    class="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700"
+                                >
+                                    v{{ item.version }}
+                                </span>
+                                <span
+                                    v-if="item.author"
+                                    class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700"
+                                >
+                                    {{ item.author }}
                                 </span>
                             </div>
                         </div>
                     </div>
 
-                    <div class="mt-auto flex items-center justify-between border-t border-slate-100 pt-4">
-                        <p class="text-xs text-slate-400">点击查看详情并编辑展示信息</p>
+                    <div
+                        class="mt-auto flex items-center justify-end border-t border-slate-100 pt-4"
+                    >
                         <div class="flex items-center gap-2">
                             <button
+                                v-if="item.canViewDetail"
                                 type="button"
                                 class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                                :disabled="exportingSkillId === item.id || item.source !== 'filesystem'"
+                                :disabled="
+                                    exportingSkillId === item.id ||
+                                    deletingSkillId === item.id ||
+                                    item.source !== 'filesystem'
+                                "
                                 @click="handleExportSkill(item)"
                             >
                                 {{ exportingSkillId === item.id ? '导出中...' : '导出技能包' }}
                             </button>
                             <button
+                                v-if="item.canDelete"
+                                type="button"
+                                class="rounded-xl border border-rose-200 bg-white px-3 py-2 text-sm font-semibold text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                :disabled="
+                                    deletingSkillId === item.id || exportingSkillId === item.id
+                                "
+                                @click="handleDeleteSkill(item)"
+                            >
+                                {{ deletingSkillId === item.id ? '删除中...' : '删除技能' }}
+                            </button>
+                            <button
+                                v-if="item.canViewDetail"
                                 type="button"
                                 class="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
+                                :disabled="deletingSkillId === item.id"
                                 @click="openSkillDetail(item)"
                             >
                                 查看详情

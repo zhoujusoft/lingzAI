@@ -8,10 +8,8 @@ import org.apache.commons.lang3.StringUtils;
 public class LawDocumentStructureAnalyzer {
 
     private static final Pattern LAW_TITLE_PATTERN = Pattern.compile("^.*?(条例|规定|办法|法|解释|决定)$");
-    private static final Pattern CHAPTER_PATTERN =
-            Pattern.compile("^第([一二三四五六七八九十百千万零两〇0-9]+)章\\s*(.*)$");
-    private static final Pattern ARTICLE_PATTERN =
-            Pattern.compile("^第([一二三四五六七八九十百千万零两〇0-9]+)条\\s*(.*)$");
+    private static final Pattern CHAPTER_PATTERN = Pattern.compile("^第([一二三四五六七八九十百千万零两〇0-9]+)章\\s*(.*)$");
+    private static final Pattern ARTICLE_PATTERN = Pattern.compile("^第([一二三四五六七八九十百千万零两〇0-9]+)条\\s*(.*)$");
 
     public LawMetadata analyze(String documentName, List<String> headings, String content) {
         String lawTitle = resolveLawTitle(documentName, headings);
@@ -46,7 +44,8 @@ public class LawDocumentStructureAnalyzer {
         if (headings == null || headings.isEmpty()) {
             return false;
         }
-        return headings.stream().anyMatch(heading -> matches(heading, ARTICLE_PATTERN) || matches(heading, CHAPTER_PATTERN));
+        return headings.stream()
+                .anyMatch(heading -> matches(heading, ARTICLE_PATTERN) || matches(heading, CHAPTER_PATTERN));
     }
 
     private String resolveLawTitle(String documentName, List<String> headings) {
@@ -62,7 +61,8 @@ public class LawDocumentStructureAnalyzer {
 
     private boolean isLawTitle(String text) {
         String normalized = normalizeDocumentName(text);
-        return StringUtils.isNotBlank(normalized) && LAW_TITLE_PATTERN.matcher(normalized).matches();
+        return StringUtils.isNotBlank(normalized)
+                && LAW_TITLE_PATTERN.matcher(normalized).matches();
     }
 
     private String buildLawAlias(String lawTitle) {

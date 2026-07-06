@@ -34,6 +34,14 @@ public interface IKnowledgeBaseService {
 
     IPage<KnowledgeBase> selectKnowledgeBasePage(KnowledgeBase knowledgeBase, long pageNum, long pageSize);
 
+    IPage<KnowledgeBase> selectVisibleKnowledgeBasePage(
+            KnowledgeBase knowledgeBase,
+            long pageNum,
+            long pageSize,
+            String keyword,
+            boolean admin,
+            Long operatorUserId);
+
     /**
      * 新增存储知识库基本信息
      *

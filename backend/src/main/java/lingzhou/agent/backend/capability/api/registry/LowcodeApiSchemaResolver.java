@@ -12,7 +12,8 @@ import org.springframework.util.StringUtils;
 public final class LowcodeApiSchemaResolver {
 
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
-    private static final String GENERIC_OBJECT_SCHEMA = """
+    private static final String GENERIC_OBJECT_SCHEMA =
+            """
             {
               "type": "object",
               "additionalProperties": true
@@ -80,7 +81,9 @@ public final class LowcodeApiSchemaResolver {
         if (inputParams instanceof Map<?, ?> map) {
             List<FieldDefinition> fields = new ArrayList<>();
             for (Map.Entry<?, ?> entry : map.entrySet()) {
-                String fallbackKey = entry.getKey() == null ? "" : String.valueOf(entry.getKey()).trim();
+                String fallbackKey = entry.getKey() == null
+                        ? ""
+                        : String.valueOf(entry.getKey()).trim();
                 if (!StringUtils.hasText(fallbackKey)) {
                     continue;
                 }
@@ -102,12 +105,7 @@ public final class LowcodeApiSchemaResolver {
             return null;
         }
         String key = firstText(
-                map.get("name"),
-                map.get("field"),
-                map.get("code"),
-                map.get("paramName"),
-                map.get("key"),
-                fallbackKey);
+                map.get("name"), map.get("field"), map.get("code"), map.get("paramName"), map.get("key"), fallbackKey);
         if (!StringUtils.hasText(key)) {
             return null;
         }
@@ -192,12 +190,7 @@ public final class LowcodeApiSchemaResolver {
     }
 
     public record FieldDefinition(
-            String key,
-            String label,
-            String jsonType,
-            boolean required,
-            String description,
-            Object defaultValue) {}
+            String key, String label, String jsonType, boolean required, String description, Object defaultValue) {}
 
     public record ResolvedSchema(String jsonSchema, List<FieldDefinition> fields) {}
 }

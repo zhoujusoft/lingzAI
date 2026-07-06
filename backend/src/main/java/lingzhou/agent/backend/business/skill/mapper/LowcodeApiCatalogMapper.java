@@ -12,13 +12,19 @@ public interface LowcodeApiCatalogMapper extends BaseMapper<LowcodeApiCatalog> {
 
     default List<LowcodeApiCatalog> selectAllOrdered() {
         QueryWrapper<LowcodeApiCatalog> wrapper = new QueryWrapper<>();
-        wrapper.orderByAsc("platform_key").orderByAsc("app_name").orderByAsc("api_name").orderByAsc("id");
+        wrapper.orderByAsc("platform_key")
+                .orderByAsc("app_name")
+                .orderByAsc("api_name")
+                .orderByAsc("id");
         return this.selectList(wrapper);
     }
 
     default List<LowcodeApiCatalog> selectByPlatformKey(String platformKey) {
         QueryWrapper<LowcodeApiCatalog> wrapper = new QueryWrapper<>();
-        wrapper.eq("platform_key", platformKey).orderByAsc("app_name").orderByAsc("api_name").orderByAsc("id");
+        wrapper.eq("platform_key", platformKey)
+                .orderByAsc("app_name")
+                .orderByAsc("api_name")
+                .orderByAsc("id");
         return this.selectList(wrapper);
     }
 

@@ -6,17 +6,18 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import lingzhou.agent.backend.capability.api.registry.LowcodeApiSchemaResolver;
 import lingzhou.agent.backend.business.chat.util.UlidGenerator;
 import lingzhou.agent.backend.business.skill.domain.LowcodeApiCatalog;
 import lingzhou.agent.backend.business.skill.service.LowcodeApiCatalogService;
+import lingzhou.agent.backend.capability.api.registry.LowcodeApiSchemaResolver;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 @Service
 public class FrontendRenderToolService {
 
-    private static final String GET_TEMPLATE_INPUT_SCHEMA = """
+    private static final String GET_TEMPLATE_INPUT_SCHEMA =
+            """
             {
               "type": "object",
               "properties": {
@@ -34,7 +35,8 @@ public class FrontendRenderToolService {
             }
             """;
 
-    private static final String BUILD_PAYLOAD_INPUT_SCHEMA = """
+    private static final String BUILD_PAYLOAD_INPUT_SCHEMA =
+            """
             {
               "type": "object",
               "properties": {
@@ -169,8 +171,8 @@ public class FrontendRenderToolService {
 
     private Map<String, Object> buildInitialState(String componentCode, Map<String, Object> componentProps) {
         Map<String, Object> state = new LinkedHashMap<>();
-        boolean editable = "StructuredFormCard".equals(componentCode)
-                && !Boolean.FALSE.equals(componentProps.get("editable"));
+        boolean editable =
+                "StructuredFormCard".equals(componentCode) && !Boolean.FALSE.equals(componentProps.get("editable"));
         state.put("stage", "draft");
         state.put("editable", editable);
 
@@ -213,17 +215,16 @@ public class FrontendRenderToolService {
                 effectiveDataSchema = buildDataSchema(schemaContext.fields());
                 effectiveDefaultData = deepMerge(buildDefaultData(schemaContext.fields()), effectiveDefaultData);
                 effectiveDefaultComponentProps = deepMerge(
-                        effectiveDefaultComponentProps,
-                        Map.of("fields", toComponentFields(schemaContext.fields())));
+                        effectiveDefaultComponentProps, Map.of("fields", toComponentFields(schemaContext.fields())));
             }
             if (StringUtils.hasText(schemaContext.targetDisplayName())
                     && !StringUtils.hasText(normalizeText(effectiveDefaultComponentProps.get("title")))) {
                 effectiveDefaultComponentProps = deepMerge(
-                        effectiveDefaultComponentProps,
-                        Map.of("title", schemaContext.targetDisplayName() + " 草稿"));
+                        effectiveDefaultComponentProps, Map.of("title", schemaContext.targetDisplayName() + " 草稿"));
             }
         } else {
-            effectiveFields.addAll(extractFieldDefinitionsFromTemplate(effectiveDataSchema, effectiveDefaultComponentProps));
+            effectiveFields.addAll(
+                    extractFieldDefinitionsFromTemplate(effectiveDataSchema, effectiveDefaultComponentProps));
         }
 
         return new TemplateContext(
@@ -250,9 +251,11 @@ public class FrontendRenderToolService {
         result.put("defaultData", templateContext.defaultData());
         result.put("defaultComponentProps", templateContext.defaultComponentProps());
         result.put("actions", templateContext.actions());
-        result.put("templateConfig", Map.of(
-                "sourceType", templateContext.sourceType(),
-                "sourceRef", templateContext.sourceRef()));
+        result.put(
+                "templateConfig",
+                Map.of(
+                        "sourceType", templateContext.sourceType(),
+                        "sourceRef", templateContext.sourceRef()));
         return result;
     }
 
@@ -266,9 +269,8 @@ public class FrontendRenderToolService {
         }
         LowcodeApiSchemaResolver.ResolvedSchema resolved =
                 LowcodeApiSchemaResolver.resolve(catalog.getRemoteSchemaJson(), objectMapper);
-        String displayName = StringUtils.hasText(catalog.getApiName())
-                ? catalog.getApiName().trim()
-                : targetToolName.trim();
+        String displayName =
+                StringUtils.hasText(catalog.getApiName()) ? catalog.getApiName().trim() : targetToolName.trim();
         return new SchemaContext(resolved.jsonSchema(), resolved.fields(), displayName);
     }
 
@@ -315,7 +317,9 @@ public class FrontendRenderToolService {
             row.put("label", StringUtils.hasText(field.label()) ? field.label() : field.key());
             row.put(
                     "description",
-                    StringUtils.hasText(field.description()) ? field.description() : (StringUtils.hasText(field.label()) ? field.label() : field.key()));
+                    StringUtils.hasText(field.description())
+                            ? field.description()
+                            : (StringUtils.hasText(field.label()) ? field.label() : field.key()));
             row.put("required", field.required());
             row.put("jsonType", field.jsonType());
             result.add(row);
@@ -398,7 +402,9 @@ public class FrontendRenderToolService {
             return List.of();
         }
         List<String> unknownFields = new ArrayList<>();
-        List<String> knownFields = fields.stream().map(LowcodeApiSchemaResolver.FieldDefinition::key).toList();
+        List<String> knownFields = fields.stream()
+                .map(LowcodeApiSchemaResolver.FieldDefinition::key)
+                .toList();
         for (String key : inputData.keySet()) {
             if (!knownFields.contains(key)) {
                 unknownFields.add(key);
@@ -431,8 +437,7 @@ public class FrontendRenderToolService {
             Object incoming = entry.getValue();
             if (current instanceof Map<?, ?> currentMap && incoming instanceof Map<?, ?> incomingMap) {
                 result.put(
-                        entry.getKey(),
-                        deepMerge((Map<String, Object>) currentMap, (Map<String, Object>) incomingMap));
+                        entry.getKey(), deepMerge((Map<String, Object>) currentMap, (Map<String, Object>) incomingMap));
                 continue;
             }
             result.put(entry.getKey(), incoming);
@@ -498,9 +503,7 @@ public class FrontendRenderToolService {
     }
 
     private record SchemaContext(
-            String jsonSchema,
-            List<LowcodeApiSchemaResolver.FieldDefinition> fields,
-            String targetDisplayName) {}
+            String jsonSchema, List<LowcodeApiSchemaResolver.FieldDefinition> fields, String targetDisplayName) {}
 
     private record TemplateContext(
             String templateCode,

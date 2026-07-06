@@ -4,17 +4,18 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.spec.McpSchema;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import lingzhou.agent.backend.business.skill.domain.McpServer;
+import lingzhou.agent.backend.business.skill.mapper.McpServerMapper;
+import lingzhou.agent.backend.business.tool.domain.ToolCatalog;
+import lingzhou.agent.backend.business.tool.mapper.ToolCatalogMapper;
 import lingzhou.agent.backend.capability.mcp.adapter.ExternalMcpAdapterRegistry;
 import lingzhou.agent.backend.capability.mcp.adapter.ExternalMcpSession;
 import lingzhou.agent.backend.capability.mcp.client.McpClientFactory;
 import lingzhou.agent.backend.capability.mcp.naming.McpToolNaming;
 import lingzhou.agent.backend.capability.mcp.support.McpServerScope;
-import lingzhou.agent.backend.business.skill.domain.McpServer;
-import lingzhou.agent.backend.business.skill.mapper.McpServerMapper;
-import lingzhou.agent.backend.business.tool.domain.ToolCatalog;
-import lingzhou.agent.backend.business.tool.mapper.ToolCatalogMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.tool.ToolCallback;
@@ -79,6 +80,19 @@ public class McpToolRegistryService {
         for (String serverKey : handles.keySet()) {
             invalidate(serverKey);
         }
+    }
+
+    public List<ToolCallback> getCallbacksByServerKey(String serverKey) {
+        if (!StringUtils.hasText(serverKey)) {
+            return List.of();
+        }
+        ServerHandle handle = handles.get(serverKey);
+        if (handle == null || handle.callbacks() == null) {
+            return List.of();
+        }
+        return Arrays.stream(handle.callbacks())
+                .filter(callback -> callback != null && callback.getToolDefinition() != null)
+                .toList();
     }
 
     private ToolCallback lookup(String toolName, String serverKey, boolean forceReload) {
@@ -149,14 +163,18 @@ public class McpToolRegistryService {
                 .filter(tool -> tool != null && StringUtils.hasText(tool.name()))
                 .map(tool -> FunctionToolCallback.builder(
                                 McpToolNaming.internalToolName(serverKey, tool.name()),
-                                (Map<String, Object> arguments, org.springframework.ai.chat.model.ToolContext toolContext) -> {
+                                (Map<String, Object> arguments,
+                                        org.springframework.ai.chat.model.ToolContext toolContext) -> {
                                     try {
                                         return session.callTool(tool.name(), arguments == null ? Map.of() : arguments);
                                     } catch (lingzhou.agent.backend.common.lzException.TaskException ex) {
                                         throw new IllegalStateException(ex.getMessage(), ex);
                                     }
                                 })
-                        .description(StringUtils.hasText(tool.description()) ? tool.description().trim() : "")
+                        .description(
+                                StringUtils.hasText(tool.description())
+                                        ? tool.description().trim()
+                                        : "")
                         .inputType(new ParameterizedTypeReference<Map<String, Object>>() {})
                         .inputSchema(toJsonSchemaString(serverKey, tool.inputSchema()))
                         .build())

@@ -19,7 +19,9 @@ export function validatePasswordPolicy(password) {
         return '密码至少6位';
     }
 
-    const categories = [hasLetter(value), hasNumber(value), hasSymbol(value)].filter(Boolean).length;
+    const categories = [hasLetter(value), hasNumber(value), hasSymbol(value)].filter(
+        Boolean
+    ).length;
     if (categories < 2) {
         return '密码需至少包含字母、数字、符号中的两种';
     }

@@ -77,7 +77,8 @@ public class WordAttachmentParser implements AttachmentParser {
                     }
                     tableCount++;
                     List<String> header = rows.get(0);
-                    List<List<String>> sampleRows = limitRows(rows.subList(Math.min(1, rows.size()), rows.size()), MAX_SAMPLE_ROWS);
+                    List<List<String>> sampleRows =
+                            limitRows(rows.subList(Math.min(1, rows.size()), rows.size()), MAX_SAMPLE_ROWS);
                     sections.add(new AttachmentParseResult.Section(
                             "table",
                             sectionIndex++,

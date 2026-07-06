@@ -1,70 +1,69 @@
 <script setup>
-import { computed, shallowRef, watch } from 'vue';
+import { computed } from 'vue';
 import BaseModal from './BaseModal.vue';
-import { overlayState, resolveActiveOverlay } from '@/composables/useModal.js';
+import { finalizeOverlayById, overlayState, resolveOverlayById } from '@/composables/useModal.js';
 
-const activeModal = computed(() => overlayState.active.modal || null);
-const renderedModal = shallowRef(null);
+const overlayStack = computed(() => overlayState.stack);
 
-watch(
-    activeModal,
-    modal => {
-        if (modal) {
-            renderedModal.value = modal;
-        }
-    },
-    { immediate: true }
-);
-
-function handleConfirm(value) {
-    resolveActiveOverlay(value);
+function handleConfirm(requestId, value) {
+    resolveOverlayById(requestId, value);
 }
 
-function handleCancel() {
-    resolveActiveOverlay(false);
+function handleCancel(requestId) {
+    resolveOverlayById(requestId, false);
 }
 
-function handleAfterLeave() {
-    renderedModal.value = null;
+function handleAfterLeave(requestId) {
+    finalizeOverlayById(requestId);
 }
 </script>
 
 <template>
     <BaseModal
-        v-if="renderedModal"
-        :open="overlayState.active.open"
-        :panel-class="renderedModal?.panelClass || ''"
-        @close="handleCancel"
-        @after-leave="handleAfterLeave"
+        v-for="(request, index) in overlayStack"
+        :key="request.id"
+        :open="request.open"
+        :closable="index === overlayStack.length - 1"
+        :constrained-height="request.modal?.constrainedHeight"
+        :panel-class="request.modal?.panelClass || ''"
+        :z-index="1000 + index * 20"
+        @close="handleCancel(request.id)"
+        @after-leave="handleAfterLeave(request.id)"
     >
         <template #header>
-            <component
-                :is="renderedModal?.header?.component"
-                v-if="renderedModal?.header?.component"
-                v-bind="renderedModal.header.props"
-                :context="renderedModal.context"
-                @close="handleCancel"
-            />
+            <div v-if="request.modal?.header?.component" class="shrink-0">
+                <component
+                    :is="request.modal.header.component"
+                    v-bind="request.modal.header.props"
+                    :context="request.modal.context"
+                    @close="handleCancel(request.id)"
+                />
+            </div>
         </template>
 
         <template #content>
-            <component
-                :is="renderedModal?.content?.component"
-                v-if="renderedModal?.content?.component"
-                v-bind="renderedModal.content.props"
-                :context="renderedModal.context"
-            />
+            <div
+                v-if="request.modal?.content?.component"
+                :class="request.modal?.contentScrollable ? 'min-h-0 flex-1 overflow-y-auto' : ''"
+            >
+                <component
+                    :is="request.modal.content.component"
+                    v-bind="request.modal.content.props"
+                    :context="request.modal.context"
+                />
+            </div>
         </template>
 
         <template #footer>
-            <component
-                :is="renderedModal?.footer?.component"
-                v-if="renderedModal?.footer?.component"
-                v-bind="renderedModal.footer.props"
-                :context="renderedModal.context"
-                @confirm="handleConfirm"
-                @cancel="handleCancel"
-            />
+            <div v-if="request.modal?.footer?.component" class="shrink-0">
+                <component
+                    :is="request.modal.footer.component"
+                    v-bind="request.modal.footer.props"
+                    :context="request.modal.context"
+                    @confirm="handleConfirm(request.id, $event)"
+                    @cancel="handleCancel(request.id)"
+                />
+            </div>
         </template>
     </BaseModal>
 </template>

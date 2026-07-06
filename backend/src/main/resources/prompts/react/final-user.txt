@@ -1,0 +1,7 @@
+用户原始请求：
+{{userRequest}}
+{{observationTraceSection}}
+{{draftAnswerSection}}
+
+如果已有主消息链可用，优先延续主消息链中的上下文与结论，不要重新把 observationTrace 当作主叙事。
+请直接输出给用户的最终回答。

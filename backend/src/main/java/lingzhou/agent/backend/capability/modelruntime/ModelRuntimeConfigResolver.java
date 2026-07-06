@@ -47,6 +47,13 @@ public class ModelRuntimeConfigResolver {
         return toChatConfig(requireActiveDefaultModel(ModelCapabilityType.CHAT));
     }
 
+    public ResolvedChatModelConfig resolveChatConfig(Long overrideModelId) {
+        if (overrideModelId == null || overrideModelId <= 0) {
+            return resolveChatConfig();
+        }
+        return toChatConfig(requireActiveModelById(overrideModelId, ModelCapabilityType.CHAT));
+    }
+
     public ResolvedEmbeddingModelConfig resolveEmbeddingConfig() {
         return toEmbeddingConfig(requireActiveDefaultModel(ModelCapabilityType.EMBEDDING));
     }
@@ -60,9 +67,13 @@ public class ModelRuntimeConfigResolver {
         if (binding == null || binding.getModelId() == null) {
             throw new IllegalStateException("未设置默认" + capabilityLabel(capabilityType) + "模型");
         }
-        ModelDefinition model = modelDefinitionMapper.selectById(binding.getModelId());
+        return requireActiveModelById(binding.getModelId(), capabilityType);
+    }
+
+    private ModelDefinition requireActiveModelById(Long modelId, ModelCapabilityType capabilityType) {
+        ModelDefinition model = modelDefinitionMapper.selectById(modelId);
         if (model == null) {
-            throw new IllegalStateException("默认" + capabilityLabel(capabilityType) + "模型不存在：" + binding.getModelId());
+            throw new IllegalStateException("默认" + capabilityLabel(capabilityType) + "模型不存在：" + modelId);
         }
         if (!capabilityType.name().equalsIgnoreCase(model.getCapabilityType())) {
             throw new IllegalStateException("默认" + capabilityLabel(capabilityType) + "模型能力类型不匹配");
@@ -70,6 +81,7 @@ public class ModelRuntimeConfigResolver {
         if (!"ACTIVE".equalsIgnoreCase(model.getStatus())) {
             throw new IllegalStateException("默认" + capabilityLabel(capabilityType) + "模型未启用：" + model.getId());
         }
+        requireVendor(model);
         return model;
     }
 
@@ -83,6 +95,7 @@ public class ModelRuntimeConfigResolver {
         requireRuntimeFields(baseUrl, apiKey, model.getModelName(), adapterType, "对话模型");
         return new ResolvedChatModelConfig(
                 "DATABASE",
+                adapterType,
                 ModelAdapterType.toChatProvider(adapterType),
                 firstNonBlank(model.getDisplayName(), model.getModelCode()),
                 model.getId(),
@@ -90,10 +103,10 @@ public class ModelRuntimeConfigResolver {
                 apiKey,
                 normalizePath(defaultChatPath(adapterType, model.getPath())),
                 model.getModelName(),
-                providerChat.getTemperature(),
-                providerChat.getMaxTokens(),
+                resolveChatTemperature(model.getTemperature(), providerChat.getTemperature()),
+                resolveChatMaxTokens(model.getMaxTokens(), providerChat.getMaxTokens()),
                 trimToEmpty(providerChat.getSystemPrompt()),
-                providerChat.getEnableThinking());
+                model.getEnableThinking() != null ? model.getEnableThinking() : providerChat.getEnableThinking());
     }
 
     private ResolvedEmbeddingModelConfig toEmbeddingConfig(ModelDefinition model) {
@@ -139,10 +152,13 @@ public class ModelRuntimeConfigResolver {
                         ? providerRerank.getProtocol().trim()
                         : defaultRerankProtocol(adapterType),
                 providerRerank.getTimeoutMs() != null ? providerRerank.getTimeoutMs() : rerankProperties.getTimeoutMs(),
-                providerRerank.getFallbackRrf() != null ? providerRerank.getFallbackRrf() : rerankProperties.getFallbackRrf());
+                providerRerank.getFallbackRrf() != null
+                        ? providerRerank.getFallbackRrf()
+                        : rerankProperties.getFallbackRrf());
     }
 
-    private void requireRuntimeFields(String baseUrl, String apiKey, String modelName, String adapterType, String label) {
+    private void requireRuntimeFields(
+            String baseUrl, String apiKey, String modelName, String adapterType, String label) {
         boolean apiKeyRequired = !ModelAdapterType.VLLM.name().equalsIgnoreCase(trimToEmpty(adapterType));
         if (!StringUtils.hasText(baseUrl)
                 || !StringUtils.hasText(modelName)
@@ -236,6 +252,23 @@ public class ModelRuntimeConfigResolver {
         return StringUtils.hasText(second) ? second.trim() : "";
     }
 
+    private Integer resolveChatMaxTokens(Integer modelMaxTokens, Integer providerMaxTokens) {
+        if (modelMaxTokens != null && modelMaxTokens > 0) {
+            return modelMaxTokens;
+        }
+        if (providerMaxTokens != null && providerMaxTokens > 0) {
+            return providerMaxTokens;
+        }
+        return null;
+    }
+
+    private Double resolveChatTemperature(Double modelTemperature, Double providerTemperature) {
+        if (modelTemperature != null) {
+            return modelTemperature;
+        }
+        return providerTemperature;
+    }
+
     private String trimToEmpty(String value) {
         return StringUtils.hasText(value) ? value.trim() : "";
     }
@@ -249,6 +282,7 @@ public class ModelRuntimeConfigResolver {
 
     public record ResolvedChatModelConfig(
             String source,
+            String adapterType,
             String provider,
             String displayName,
             Long modelId,

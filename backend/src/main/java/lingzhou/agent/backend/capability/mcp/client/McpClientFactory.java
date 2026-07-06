@@ -11,9 +11,9 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
+import lingzhou.agent.backend.business.skill.domain.McpServer;
 import lingzhou.agent.backend.capability.mcp.naming.McpToolNaming;
 import lingzhou.agent.backend.capability.mcp.support.McpJsonSupport;
-import lingzhou.agent.backend.business.skill.domain.McpServer;
 import lingzhou.agent.backend.common.lzException.TaskException;
 import org.springframework.ai.mcp.McpConnectionInfo;
 import org.springframework.ai.mcp.McpToolNamePrefixGenerator;
@@ -36,23 +36,26 @@ public class McpClientFactory {
             throw new TaskException("MCP server 不存在", TaskException.Code.UNKNOWN);
         }
         String endpoint = normalizeRequired(server.getEndpoint(), "MCP server endpoint 不能为空");
-        McpClientTransport transport = switch (normalizeTransportType(server.getTransportType())) {
-            case "SSE" -> HttpClientSseClientTransport.builder(endpoint)
-                    .connectTimeout(CONNECT_TIMEOUT)
-                    .httpRequestCustomizer(buildRequestCustomizer(server))
-                    .build();
-            case "STREAMABLE_HTTP" -> HttpClientStreamableHttpTransport.builder(endpoint)
-                    .connectTimeout(CONNECT_TIMEOUT)
-                    .httpRequestCustomizer(buildRequestCustomizer(server))
-                    .build();
-            default -> throw new TaskException("不支持的 MCP transport 类型", TaskException.Code.UNKNOWN);
-        };
+        McpClientTransport transport =
+                switch (normalizeTransportType(server.getTransportType())) {
+                    case "SSE" -> HttpClientSseClientTransport.builder(endpoint)
+                            .connectTimeout(CONNECT_TIMEOUT)
+                            .httpRequestCustomizer(buildRequestCustomizer(server))
+                            .build();
+                    case "STREAMABLE_HTTP" -> HttpClientStreamableHttpTransport.builder(endpoint)
+                            .connectTimeout(CONNECT_TIMEOUT)
+                            .httpRequestCustomizer(buildRequestCustomizer(server))
+                            .build();
+                    default -> throw new TaskException("不支持的 MCP transport 类型", TaskException.Code.UNKNOWN);
+                };
         McpSyncClient client = McpClient.sync(transport)
                 .requestTimeout(REQUEST_TIMEOUT)
                 .initializationTimeout(INITIALIZATION_TIMEOUT)
                 .clientInfo(new McpSchema.Implementation(
                         normalizeRequired(server.getServerKey(), "MCP server key 不能为空"),
-                        StringUtils.hasText(server.getDisplayName()) ? server.getDisplayName().trim() : server.getServerKey(),
+                        StringUtils.hasText(server.getDisplayName())
+                                ? server.getDisplayName().trim()
+                                : server.getServerKey(),
                         "1.1.0"))
                 .capabilities(McpSchema.ClientCapabilities.builder().build())
                 .toolsChangeConsumer(toolsChangeConsumer)

@@ -36,7 +36,12 @@ function handleMenuButtonClick(event) {
 </script>
 
 <template>
-    <Menu as="div" class="relative inline-block text-left" data-component="KnowledgeCardActionsMenu" @click.stop>
+    <Menu
+        as="div"
+        class="relative inline-block text-left"
+        data-component="KnowledgeCardActionsMenu"
+        @click.stop
+    >
         <MenuButton
             class="flex h-8 w-8 items-center justify-center rounded text-slate-400 transition hover:bg-slate-50 hover:text-slate-600"
             @click="handleMenuButtonClick"
@@ -66,7 +71,10 @@ function handleMenuButtonClick(event) {
                         :class="active ? 'bg-slate-50' : ''"
                         @click="emit('recall-test')"
                     >
-                        <span class="material-symbols-outlined block fill-0 text-[18px] leading-none">science</span>
+                        <span
+                            class="material-symbols-outlined block fill-0 text-[18px] leading-none"
+                            >science</span
+                        >
                         <span class="leading-none">召回测试</span>
                     </button>
                 </MenuItem>
@@ -78,7 +86,10 @@ function handleMenuButtonClick(event) {
                         :class="active ? 'bg-slate-50' : ''"
                         @click="emit('edit')"
                     >
-                        <span class="material-symbols-outlined block fill-0 text-[18px] leading-none">edit_square</span>
+                        <span
+                            class="material-symbols-outlined block fill-0 text-[18px] leading-none"
+                            >edit_square</span
+                        >
                         <span class="leading-none">编辑</span>
                     </button>
                 </MenuItem>
@@ -90,7 +101,10 @@ function handleMenuButtonClick(event) {
                         :class="active ? 'bg-red-50' : ''"
                         @click="emit('delete')"
                     >
-                        <span class="material-symbols-outlined block fill-0 text-[18px] leading-none">delete</span>
+                        <span
+                            class="material-symbols-outlined block fill-0 text-[18px] leading-none"
+                            >delete</span
+                        >
                         <span class="leading-none">删除</span>
                     </button>
                 </MenuItem>

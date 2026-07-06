@@ -10,6 +10,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -42,8 +43,13 @@ public class GlobalExceptionHandler {
         logger.warn("Illegal state", ex);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(ApiResponse.fail(
-                        HttpStatus.INTERNAL_SERVER_ERROR.value(),
-                        ModelRuntimeErrorMessageResolver.resolve(ex)));
+                        HttpStatus.INTERNAL_SERVER_ERROR.value(), ModelRuntimeErrorMessageResolver.resolve(ex)));
+    }
+
+    @ExceptionHandler(AsyncRequestNotUsableException.class)
+    public ResponseEntity<Void> handleAsyncRequestNotUsableException(AsyncRequestNotUsableException ex) {
+        logger.debug("Async request already closed: {}", ex.getMessage());
+        return ResponseEntity.noContent().build();
     }
 
     @ExceptionHandler(Exception.class)

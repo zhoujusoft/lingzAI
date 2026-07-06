@@ -41,7 +41,8 @@ public class DocumentEmbeddingService {
             }
 
             for (int i = 0; i < batchChunks.size(); i++) {
-                vectorizedChunks.add(new VectorizedChunk(batchChunks.get(i), embeddings.get(i).getOutput()));
+                vectorizedChunks.add(new VectorizedChunk(
+                        batchChunks.get(i), embeddings.get(i).getOutput()));
             }
         }
         return vectorizedChunks;

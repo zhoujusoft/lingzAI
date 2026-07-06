@@ -1,9 +1,23 @@
+import {
+    RESOURCE_PERMISSION_UI_OPTIONS,
+    getResourcePermissionDescription,
+    getResourcePermissionLabel,
+    normalizeResourcePermissionScope,
+} from '@/model/resource-permissions';
+
 export const ADMIN_SELECT_BUTTON_CLASS =
     'bg-slate-50 shadow-none hover:bg-white focus-visible:bg-white';
 
 export const MCP_SERVER_SCOPE_OPTIONS = [
     { value: 'INTERNAL', label: '内部 MCP' },
     { value: 'EXTERNAL', label: '外部 MCP' },
+];
+
+export const MCP_RESOURCE_PERMISSION_OPTIONS = [
+    ...RESOURCE_PERMISSION_UI_OPTIONS.map(item => ({
+        value: item.value,
+        label: item.label,
+    })),
 ];
 
 export const MCP_TRANSPORT_OPTIONS = [
@@ -63,6 +77,18 @@ export function getMcpAuthLabel(authType, hasAuthConfig = false) {
         return hasAuthConfig ? 'Bearer Token 已配置' : 'Bearer Token 未配置';
     }
     return '无鉴权';
+}
+
+export function normalizeMcpPermissionScope(value) {
+    return normalizeResourcePermissionScope(value);
+}
+
+export function getMcpPermissionScopeLabel(permissionScope) {
+    return getResourcePermissionLabel(permissionScope);
+}
+
+export function getMcpPermissionScopeDescription(permissionScope) {
+    return getResourcePermissionDescription(permissionScope);
 }
 
 export function formatMcpTime(value) {

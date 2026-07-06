@@ -5,8 +5,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import lingzhou.agent.backend.business.chat.domain.ChatSession;
-import lingzhou.agent.backend.business.chat.mapper.ChatSessionMapper;
+import lingzhou.agent.backend.business.chat.domain.ConversationSession;
+import lingzhou.agent.backend.business.chat.mapper.ConversationSessionMapper;
 import lingzhou.agent.backend.business.skill.domain.SkillCatalog;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -18,10 +18,10 @@ public class SkillRecommendationService {
     private static final int MAX_RECENT_SKILL_SESSIONS = 200;
     private static final int MAX_RECENCY_WINDOW = 18;
 
-    private final ChatSessionMapper chatSessionMapper;
+    private final ConversationSessionMapper conversationSessionMapper;
 
-    public SkillRecommendationService(ChatSessionMapper chatSessionMapper) {
-        this.chatSessionMapper = chatSessionMapper;
+    public SkillRecommendationService(ConversationSessionMapper conversationSessionMapper) {
+        this.conversationSessionMapper = conversationSessionMapper;
     }
 
     public Map<Long, RecommendationProfile> buildRecommendationMap(Long userId, List<SkillCatalog> catalogs) {
@@ -40,10 +40,8 @@ public class SkillRecommendationService {
             return Map.of();
         }
 
-        List<ChatSession> sessions = chatSessionMapper.selectRecentSkillSessions(
-                userId,
-                catalogById.keySet().stream().toList(),
-                MAX_RECENT_SKILL_SESSIONS);
+        List<ConversationSession> sessions = conversationSessionMapper.selectRecentSkillSessions(
+                userId, catalogById.keySet().stream().toList(), MAX_RECENT_SKILL_SESSIONS);
         if (sessions.isEmpty()) {
             return Map.of();
         }
@@ -54,7 +52,7 @@ public class SkillRecommendationService {
         Map<String, Integer> categoryUsageCount = new LinkedHashMap<>();
 
         for (int index = 0; index < sessions.size(); index += 1) {
-            ChatSession session = sessions.get(index);
+            ConversationSession session = sessions.get(index);
             Long skillId = session == null ? null : session.getScopeId();
             if (skillId == null || !catalogById.containsKey(skillId)) {
                 continue;

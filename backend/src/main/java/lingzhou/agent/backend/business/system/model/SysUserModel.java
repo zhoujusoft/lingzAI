@@ -1,5 +1,6 @@
 package lingzhou.agent.backend.business.system.model;
 
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
@@ -34,6 +35,15 @@ public class SysUserModel {
 
     @TableField("parent_id")
     private String parentId;
+
+    @TableField(value = "role_id", updateStrategy = FieldStrategy.ALWAYS)
+    private Long roleId;
+
+    @TableField("avatar_object_name")
+    private String avatarObjectName;
+
+    @TableField("license_exempt")
+    private Integer licenseExempt;
 
     public Long getId() {
         return id;
@@ -105,5 +115,29 @@ public class SysUserModel {
 
     public void setParentId(String parentId) {
         this.parentId = parentId;
+    }
+
+    public Long getRoleId() {
+        return roleId;
+    }
+
+    public void setRoleId(Long roleId) {
+        this.roleId = roleId;
+    }
+
+    public String getAvatarObjectName() {
+        return avatarObjectName;
+    }
+
+    public void setAvatarObjectName(String avatarObjectName) {
+        this.avatarObjectName = avatarObjectName;
+    }
+
+    public Integer getLicenseExempt() {
+        return licenseExempt;
+    }
+
+    public void setLicenseExempt(Integer licenseExempt) {
+        this.licenseExempt = licenseExempt;
     }
 }

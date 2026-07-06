@@ -11,6 +11,13 @@ export const ChatMessageRender = Object.freeze({
 export const ChatStreamEventType = Object.freeze({
     done: 'done',
     meta: 'meta',
+    phasePlan: 'phase-plan',
+    phaseProgress: 'phase-progress',
+    runtimeEngine: 'runtime-engine',
+    approval: 'approval',
+    formArtifact: 'form-artifact',
+    formPreview: 'form-preview',
+    workflowPreview: 'workflow-preview',
     tool: 'tool',
     skill: 'skill',
     result: 'result',
@@ -29,7 +36,18 @@ export const ChatToolStatus = Object.freeze({
 
 export const ChatSegmentType = Object.freeze({
     tool: 'tool',
+    runtimeEngine: 'runtime-engine',
+    approval: 'approval',
+    artifact: 'artifact',
     citation: 'citation',
     fallbackNotice: 'fallback_notice',
     text: 'text',
+});
+
+export const ChatApprovalStatus = Object.freeze({
+    pending: 'pending',
+    approving: 'approving',
+    approved: 'approved',
+    rejected: 'rejected',
+    failed: 'failed',
 });

@@ -2,19 +2,47 @@
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { KnowledgeBean } from '@/model/bean';
+import MiniPagination from '@/components/MiniPagination.vue';
 import { alert, confirm } from '@/composables/useModal';
-import { clearUserSession } from '@/composables/useCurrentUser';
+import { clearUserSession, currentUserState } from '@/composables/useCurrentUser';
+import { canOperateKnowledgeBase } from '@/model/knowledge-permissions';
+import {
+    getResourcePermissionBadgeClass,
+    getResourcePermissionDescription,
+} from '@/model/resource-permissions';
 import { ROUTE_PATHS } from '@/router/routePaths';
-import { deleteKnowledgeBase, disableKnowledgeBase, listKnowledgeBases, publishKnowledgeBase } from '@/api/knowledge-bases';
-import KnowledgeCardActionsMenu from './KnowledgeCardActionsMenu.vue';
+import {
+    deleteKnowledgeBase,
+    disableKnowledgeBase,
+    listKnowledgeBases,
+    publishKnowledgeBase,
+} from '@/api/knowledge-bases';
 
-const emit = defineEmits(['create-knowledge', 'open-knowledge', 'open-edit-knowledge', 'open-recall-test']);
+const emit = defineEmits([
+    'create-knowledge',
+    'open-knowledge',
+    'open-edit-knowledge',
+    'open-recall-test',
+]);
 
 const router = useRouter();
 const knowledgeCards = ref([]);
 const searchKeyword = ref('');
 const loading = ref(false);
+const loadError = ref('');
 const publishingId = ref(null);
+const deletingId = ref(null);
+const page = ref(1);
+const pageSize = ref(10);
+const total = ref(0);
+const pageSizeOptions = [10, 20, 50];
+const currentUserProfile = computed(() => currentUserState.profile);
+const publishedCount = computed(
+    () => knowledgeCards.value.filter(item => item.publishStatus === 'PUBLISHED').length
+);
+const totalDocumentCount = computed(() =>
+    knowledgeCards.value.reduce((sum, item) => sum + (Number(item.docCount) || 0), 0)
+);
 
 function handleUnauthorized() {
     clearUserSession();
@@ -32,38 +60,68 @@ function formatCharCount(value) {
     return `${kiloChars} 千字符`;
 }
 
-const filteredKnowledgeCards = computed(() => {
-    const keyword = searchKeyword.value.trim().toLowerCase();
-    if (!keyword) {
-        return knowledgeCards.value;
-    }
+function formatUpdateText(item) {
+    return item?.updatedAt ? `更新于 ${item.updatedAt}` : '更新于 -';
+}
 
-    return knowledgeCards.value.filter(item => {
-        const name = (item.name || '').toLowerCase();
-        const kbCode = (item.kbCode || '').toLowerCase();
-        const description = (item.description || '').toLowerCase();
-        return name.includes(keyword) || kbCode.includes(keyword) || description.includes(keyword);
-    });
-});
-
-async function loadKnowledgeCards() {
+async function loadKnowledgeCards(targetPage = page.value) {
     loading.value = true;
+    loadError.value = '';
     try {
-        const data = await listKnowledgeBases({}, handleUnauthorized);
-        const list = Array.isArray(data?.records) ? data.records : [];
+        const requestedPage = Math.max(1, Number(targetPage) || 1);
+        const data = await listKnowledgeBases(
+            {
+                page: requestedPage,
+                pageSize: pageSize.value,
+                keyword: searchKeyword.value,
+            },
+            handleUnauthorized
+        );
+        const list = Array.isArray(data?.list)
+            ? data.list
+            : Array.isArray(data?.records)
+              ? data.records
+              : [];
         knowledgeCards.value = list.map(item => KnowledgeBean.fromApi(item));
+        total.value = Number(data?.total ?? 0) || 0;
+        page.value = Number(data?.page ?? data?.current ?? requestedPage) || requestedPage;
+        pageSize.value = Number(data?.pageSize ?? data?.size ?? pageSize.value) || pageSize.value;
+        if (knowledgeCards.value.length === 0 && total.value > 0 && page.value > 1) {
+            const lastPage = Math.max(1, Math.ceil(total.value / pageSize.value));
+            if (lastPage !== page.value) {
+                await loadKnowledgeCards(lastPage);
+            }
+        }
     } catch (error) {
         knowledgeCards.value = [];
-        await alert({
-            title: '加载失败',
-            message: error?.message || '知识库列表加载失败，请稍后重试。',
-        });
+        total.value = 0;
+        loadError.value = error?.message || '知识库列表加载失败，请稍后重试。';
     } finally {
         loading.value = false;
     }
 }
 
+function handleSearch() {
+    loadKnowledgeCards(1);
+}
+
+function handlePageChange(nextPage) {
+    loadKnowledgeCards(nextPage);
+}
+
+function handlePageSizeChange(nextSize) {
+    const safeSize = Number(nextSize);
+    if (!Number.isFinite(safeSize) || safeSize <= 0 || safeSize === pageSize.value) {
+        return;
+    }
+    pageSize.value = safeSize;
+    loadKnowledgeCards(1);
+}
+
 function openRecallTest(item) {
+    if (!canOperateKnowledge(item)) {
+        return;
+    }
     emit('open-recall-test', item);
 }
 
@@ -72,10 +130,16 @@ function openKnowledge(item) {
 }
 
 function openEditKnowledge(item) {
+    if (!canOperateKnowledge(item)) {
+        return;
+    }
     emit('open-edit-knowledge', item);
 }
 
 async function removeKnowledge(item) {
+    if (!canOperateKnowledge(item) || deletingId.value === item.id) {
+        return;
+    }
     const confirmed = await confirm({
         title: '删除知识库',
         message: `确认删除知识库“${item.name || ''}”吗？删除后不可恢复。`,
@@ -87,18 +151,24 @@ async function removeKnowledge(item) {
         return;
     }
 
+    deletingId.value = item.id;
     try {
         await deleteKnowledgeBase(item.id, handleUnauthorized);
-        knowledgeCards.value = knowledgeCards.value.filter(card => card.id !== item.id);
+        await loadKnowledgeCards(page.value);
     } catch (error) {
         await alert({
             title: '删除失败',
             message: error?.message || '删除知识库失败，请稍后重试。',
         });
+    } finally {
+        deletingId.value = null;
     }
 }
 
 async function publishKnowledge(item) {
+    if (!canOperateKnowledge(item) || publishingId.value === item.id) {
+        return;
+    }
     const confirmed = await confirm({
         title: '发布知识库工具',
         message: `确认将知识库“${item.name || ''}”发布到工具库吗？`,
@@ -112,7 +182,7 @@ async function publishKnowledge(item) {
     publishingId.value = item.id;
     try {
         await publishKnowledgeBase(item.id, handleUnauthorized);
-        await loadKnowledgeCards();
+        await loadKnowledgeCards(page.value);
     } catch (error) {
         await alert({
             title: '发布失败',
@@ -124,6 +194,9 @@ async function publishKnowledge(item) {
 }
 
 async function disableKnowledge(item) {
+    if (!canOperateKnowledge(item) || publishingId.value === item.id) {
+        return;
+    }
     const confirmed = await confirm({
         title: '停用知识库工具',
         message: `确认停用知识库“${item.name || ''}”在工具库中的发布状态吗？`,
@@ -137,7 +210,7 @@ async function disableKnowledge(item) {
     publishingId.value = item.id;
     try {
         await disableKnowledgeBase(item.id, handleUnauthorized);
-        await loadKnowledgeCards();
+        await loadKnowledgeCards(page.value);
     } catch (error) {
         await alert({
             title: '停用失败',
@@ -160,16 +233,24 @@ function publishStatusLabel(item) {
 
 function publishStatusClass(item) {
     if (item?.publishStatus === 'PUBLISHED') {
-        return 'bg-emerald-50 text-emerald-600';
+        return 'border border-emerald-100 bg-emerald-50 text-emerald-700';
     }
     if (item?.publishStatus === 'DISABLED') {
-        return 'bg-slate-100 text-slate-500';
+        return 'border border-slate-200 bg-slate-50 text-slate-500';
     }
-    return 'bg-amber-50 text-amber-600';
+    return 'border border-amber-100 bg-amber-50 text-amber-700';
 }
 
-function publishActionLabel(item) {
-    return item?.publishStatus === 'PUBLISHED' ? '重新发布' : '发布工具';
+function permissionScopeLabel(item) {
+    return getResourcePermissionDescription(item?.permissionScope);
+}
+
+function permissionScopeClass(item) {
+    return getResourcePermissionBadgeClass(item?.permissionScope);
+}
+
+function canOperateKnowledge(item) {
+    return canOperateKnowledgeBase(item, currentUserProfile.value);
 }
 
 onMounted(() => {
@@ -179,138 +260,245 @@ onMounted(() => {
 
 <template>
     <section
-        class="admin-page admin-page--knowledge-list flex h-full min-h-0 flex-col bg-slate-50"
+        class="admin-page admin-page--knowledge-list flex h-full min-h-0 flex-col bg-slate-100"
         data-component="AdminKnowledgePanel"
     >
-        <header
-            class="sticky top-0 z-20 flex items-center justify-between bg-slate-50/80 px-8 py-6 backdrop-blur-md"
-        >
-            <h2 class="text-2xl font-bold text-slate-900">知识库</h2>
-
-            <div class="flex items-center gap-4">
-                <div
-                    class="flex items-center gap-4 rounded-lg border border-slate-200 bg-white px-3 py-1.5 shadow-sm"
-                >
-                    <label class="flex cursor-pointer items-center gap-2">
-                        <input
-                            checked
-                            name="scope"
-                            type="radio"
-                            class="h-4 w-4 border-slate-300 text-primary focus:ring-primary"
-                        >
-                        <span class="text-sm text-slate-600">所有知识库</span>
-                        <span class="material-symbols-outlined text-sm text-slate-300">help_outline</span>
-                    </label>
-                    <div class="h-4 w-px bg-slate-200"></div>
-                    <div class="flex items-center gap-1 text-sm text-slate-500">
-                        <span class="material-symbols-outlined text-sm">cloud_done</span>
-                        <span>{{ loading ? '加载中...' : `${knowledgeCards.length} 个知识库` }}</span>
-                    </div>
+        <header class="shrink-0 border-b border-slate-200 bg-white px-8 py-5">
+            <div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                <div>
+                    <h1 class="text-3xl font-bold tracking-tight text-slate-900">知识库</h1>
+                    <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
+                        管理知识库、文档向量入库和发布到工具库后的检索能力。
+                    </p>
                 </div>
-
-                <div class="relative">
-                    <span
-                        class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-lg text-slate-400"
-                    >search</span>
-                    <input
-                        v-model="searchKeyword"
-                        type="text"
-                        placeholder="搜索..."
-                        class="w-64 rounded-lg border border-slate-200 bg-white py-2 pl-10 pr-4 text-sm transition-all focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                    >
-                </div>
-
                 <button
                     type="button"
-                    class="flex items-center gap-1 rounded-lg bg-primary px-6 py-2 font-semibold text-white shadow-md shadow-blue-500/20 transition-all hover:bg-blue-700"
+                    class="inline-flex self-start items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-sm shadow-blue-600/15 transition hover:bg-blue-700 xl:self-auto"
                     @click="emit('create-knowledge')"
                 >
-                    <span class="material-symbols-outlined text-sm">add</span>
+                    <span class="material-symbols-outlined text-base">add</span>
                     <span>创建知识库</span>
                 </button>
             </div>
+
+            <div class="mt-5 grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center">
+                <div class="grid gap-2 sm:grid-cols-3">
+                    <article class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                        <p class="text-lg font-bold text-slate-900">{{ total }}</p>
+                        <p class="text-[11px] text-slate-500">知识库总数</p>
+                    </article>
+                    <article class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                        <p class="text-lg font-bold text-slate-900">{{ publishedCount }}</p>
+                        <p class="text-[11px] text-slate-500">当前页已发布</p>
+                    </article>
+                    <article class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                        <p class="text-lg font-bold text-slate-900">{{ totalDocumentCount }}</p>
+                        <p class="text-[11px] text-slate-500">当前页文档数</p>
+                    </article>
+                </div>
+                <div class="flex min-w-0 flex-wrap items-center gap-2 sm:flex-nowrap">
+                    <div class="relative min-w-0 flex-1 sm:w-72 sm:flex-none">
+                        <span
+                            class="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                        >
+                            search
+                        </span>
+                        <input
+                            v-model.trim="searchKeyword"
+                            type="text"
+                            placeholder="搜索知识库名称、编码或描述"
+                            class="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-4 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10"
+                            @keyup.enter="handleSearch"
+                        />
+                    </div>
+                    <button
+                        type="button"
+                        class="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                        @click="handleSearch"
+                    >
+                        <span class="material-symbols-outlined text-[18px]">search</span>
+                        <span>搜索</span>
+                    </button>
+                </div>
+            </div>
         </header>
 
-        <div
-            v-if="!loading && filteredKnowledgeCards.length === 0"
-            class="flex flex-1 items-center justify-center px-8 pb-12"
-        >
-            <div class="rounded-2xl border border-dashed border-slate-300 bg-white px-10 py-12 text-center">
-                <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
-                    <span class="material-symbols-outlined text-3xl">folder_off</span>
+        <div class="flex min-h-0 flex-1 flex-col p-6">
+            <div class="custom-scrollbar min-h-0 flex-1 overflow-y-auto">
+                <div
+                    v-if="loadError"
+                    class="mb-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600"
+                >
+                    {{ loadError }}
                 </div>
-                <h3 class="text-lg font-semibold text-slate-800">暂无知识库</h3>
-                <p class="mt-2 text-sm text-slate-500">先创建一个知识库，再上传文档开始分块和向量入库。</p>
-            </div>
-        </div>
 
-        <div
-            v-else
-            class="custom-scrollbar grid content-start flex-1 grid-cols-1 gap-6 overflow-y-auto px-8 pb-12 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-3"
-        >
-            <article
-                v-for="item in filteredKnowledgeCards"
-                :key="item.id || item.name"
-                class="group flex h-full cursor-pointer flex-col rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:border-primary/30 hover:shadow-md"
-                @click="openKnowledge(item)"
-            >
-                <div class="mb-4 flex items-start justify-between">
-                    <div
-                        class="flex h-12 w-12 items-center justify-center rounded-lg bg-blue-50 text-primary transition-transform group-hover:scale-110"
+                <div
+                    v-if="loading"
+                    class="rounded-2xl border border-slate-200 bg-white px-6 py-10 text-sm text-slate-400 shadow-sm"
+                >
+                    知识库加载中...
+                </div>
+
+                <div
+                    v-else-if="!knowledgeCards.length"
+                    class="rounded-2xl border border-dashed border-slate-200 bg-white px-6 py-14 text-center text-sm text-slate-400"
+                >
+                    当前筛选条件下没有匹配知识库
+                </div>
+
+                <div
+                    v-else
+                    class="grid gap-4 lg:grid-cols-2 xl:grid-cols-3 min-[1680px]:grid-cols-4"
+                >
+                    <article
+                        v-for="item in knowledgeCards"
+                        :key="item.id || item.name"
+                        class="flex min-h-[238px] cursor-pointer flex-col rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-[0_10px_24px_rgba(15,23,42,0.06)]"
+                        @click="openKnowledge(item)"
                     >
-                        <span class="material-symbols-outlined">folder</span>
-                    </div>
-                    <KnowledgeCardActionsMenu
-                        @recall-test="openRecallTest(item)"
-                        @edit="openEditKnowledge(item)"
-                        @delete="removeKnowledge(item)"
-                    />
+                        <div class="flex items-start gap-3">
+                            <div
+                                class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-blue-100 bg-blue-50 text-blue-600"
+                            >
+                                <span class="material-symbols-outlined text-[21px]">folder</span>
+                            </div>
+                            <div class="min-w-0 flex-1">
+                                <div class="flex items-start justify-between gap-3">
+                                    <div class="min-w-0">
+                                        <h2 class="truncate text-base font-bold text-slate-900">
+                                            {{ item.name || '未命名知识库' }}
+                                        </h2>
+                                        <p class="mt-0.5 truncate text-[11px] text-slate-400">
+                                            {{ item.kbCode || '未设置编码' }}
+                                        </p>
+                                    </div>
+                                    <span
+                                        class="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                                        :class="publishStatusClass(item)"
+                                    >
+                                        {{ publishStatusLabel(item) }}
+                                    </span>
+                                </div>
+                                <p
+                                    class="mt-2 line-clamp-2 min-h-10 text-xs leading-5 text-slate-500"
+                                >
+                                    {{ item.description || '暂无描述' }}
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="mt-3 flex flex-wrap gap-1.5">
+                            <span
+                                class="rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ring-black/5"
+                                :class="permissionScopeClass(item)"
+                            >
+                                {{ permissionScopeLabel(item) }}
+                            </span>
+                            <span
+                                class="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-500"
+                            >
+                                {{ formatCount(item.docCount, '文档') }}
+                            </span>
+                            <span
+                                class="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-500"
+                            >
+                                {{ formatCharCount(item.charCount) }}
+                            </span>
+                            <span
+                                class="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-500"
+                            >
+                                {{ formatUpdateText(item) }}
+                            </span>
+                        </div>
+
+                        <p
+                            v-if="item.lastPublishMessage"
+                            class="mt-2 line-clamp-1 text-xs leading-5 text-slate-400"
+                        >
+                            {{ item.lastPublishMessage }}
+                        </p>
+
+                        <div
+                            v-if="canOperateKnowledge(item)"
+                            class="mt-auto border-t border-slate-100 pt-3"
+                            @click.stop
+                        >
+                            <div class="grid grid-cols-4 gap-1.5">
+                                <button
+                                    type="button"
+                                    aria-label="知识库召回测试"
+                                    class="inline-flex h-8 items-center justify-center gap-1 whitespace-nowrap rounded-lg bg-blue-600 px-2 text-xs font-semibold text-white shadow-sm shadow-blue-600/10 transition hover:bg-blue-700"
+                                    @click="openRecallTest(item)"
+                                >
+                                    <span class="material-symbols-outlined text-[17px]"
+                                        >science</span
+                                    >
+                                    <span>召回</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    aria-label="编辑知识库"
+                                    class="inline-flex h-8 items-center justify-center gap-1 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                                    @click="openEditKnowledge(item)"
+                                >
+                                    <span class="material-symbols-outlined text-[17px]">edit</span>
+                                    <span>编辑</span>
+                                </button>
+                                <button
+                                    v-if="item.publishStatus !== 'PUBLISHED'"
+                                    type="button"
+                                    aria-label="发布知识库工具"
+                                    class="inline-flex h-8 items-center justify-center gap-1 whitespace-nowrap rounded-lg border border-blue-100 bg-blue-50 px-2 text-xs font-semibold text-blue-700 transition hover:border-blue-200 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                    :disabled="publishingId === item.id"
+                                    @click="publishKnowledge(item)"
+                                >
+                                    <span class="material-symbols-outlined text-[17px]">
+                                        {{ publishingId === item.id ? 'sync' : 'publish' }}
+                                    </span>
+                                    <span>{{
+                                        publishingId === item.id ? '处理中...' : '发布'
+                                    }}</span>
+                                </button>
+                                <button
+                                    v-if="item.publishStatus === 'PUBLISHED'"
+                                    type="button"
+                                    aria-label="停用知识库发布"
+                                    class="inline-flex h-8 items-center justify-center gap-1 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                    :disabled="publishingId === item.id"
+                                    @click="disableKnowledge(item)"
+                                >
+                                    <span class="material-symbols-outlined text-[17px]">block</span>
+                                    <span>停用</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    aria-label="删除知识库"
+                                    class="inline-flex h-8 items-center justify-center gap-1 whitespace-nowrap rounded-lg border border-rose-200 bg-white px-2 text-xs font-semibold text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                    :disabled="deletingId === item.id"
+                                    @click="removeKnowledge(item)"
+                                >
+                                    <span class="material-symbols-outlined text-[17px]"
+                                        >delete</span
+                                    >
+                                    <span>
+                                        {{ deletingId === item.id ? '删除中...' : '删除' }}
+                                    </span>
+                                </button>
+                            </div>
+                        </div>
+                    </article>
                 </div>
-                <div class="mb-2 flex items-center gap-2">
-                    <h3 class="min-w-0 flex-1 truncate text-lg font-bold text-slate-900">
-                        {{ item.name }}
-                    </h3>
-                    <span class="shrink-0 rounded px-2 py-1 text-[11px]" :class="publishStatusClass(item)">
-                        {{ publishStatusLabel(item) }}
-                    </span>
-                </div>
-                <div class="mb-3 flex items-center gap-2 text-xs text-slate-500">
-                    <span class="rounded-md bg-slate-100 px-2 py-1 font-medium text-slate-600">Code</span>
-                    <span class="font-mono text-slate-600">{{ item.kbCode || '-' }}</span>
-                </div>
-                <div class="mb-4 flex items-center gap-3 text-xs text-slate-400">
-                    <span>{{ formatCount(item.docCount, '文档') }}</span>
-                    <span>•</span>
-                    <span>{{ formatCharCount(item.charCount) }}</span>
-                </div>
-                <div class="flex-1">
-                    <p class="line-clamp-2 text-sm leading-relaxed text-slate-500">
-                        {{ item.description || '暂无描述' }}
-                    </p>
-                    <p v-if="item.lastPublishMessage" class="mt-3 text-xs leading-5 text-slate-400">
-                        {{ item.lastPublishMessage }}
-                    </p>
-                </div>
-                <div class="mt-4 flex items-center gap-2" @click.stop>
-                    <button
-                        type="button"
-                        class="rounded-lg border border-primary/20 px-3 py-1.5 text-sm font-medium text-primary transition-all hover:border-primary/30 hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50"
-                        :disabled="publishingId === item.id"
-                        @click="publishKnowledge(item)"
-                    >
-                        {{ publishingId === item.id ? '处理中...' : publishActionLabel(item) }}
-                    </button>
-                    <button
-                        v-if="item.publishStatus === 'PUBLISHED'"
-                        type="button"
-                        class="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-500 transition-all hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                        :disabled="publishingId === item.id"
-                        @click="disableKnowledge(item)"
-                    >
-                        停用发布
-                    </button>
-                </div>
-            </article>
+            </div>
+            <div class="flex h-[54px] shrink-0 items-end justify-end">
+                <MiniPagination
+                    :page="page"
+                    :page-size="pageSize"
+                    :total="total"
+                    :page-size-options="pageSizeOptions"
+                    @page-change="handlePageChange"
+                    @page-size-change="handlePageSizeChange"
+                />
+            </div>
         </div>
     </section>
 </template>

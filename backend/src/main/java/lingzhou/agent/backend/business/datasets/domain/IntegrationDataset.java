@@ -28,6 +28,10 @@ public class IntegrationDataset {
 
     private String description;
 
+    private Long ownerUserId;
+
+    private Integer permissionScope;
+
     private String businessLogic;
 
     private String status;
@@ -108,6 +112,22 @@ public class IntegrationDataset {
 
     public void setDescription(String description) {
         this.description = description;
+    }
+
+    public Long getOwnerUserId() {
+        return ownerUserId;
+    }
+
+    public void setOwnerUserId(Long ownerUserId) {
+        this.ownerUserId = ownerUserId;
+    }
+
+    public Integer getPermissionScope() {
+        return permissionScope;
+    }
+
+    public void setPermissionScope(Integer permissionScope) {
+        this.permissionScope = permissionScope;
     }
 
     public String getBusinessLogic() {

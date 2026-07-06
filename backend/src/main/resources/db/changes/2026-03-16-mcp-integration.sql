@@ -2,7 +2,7 @@
 -- 执行时间：2026-03-16
 -- 影响表：tool_catalog, mcp_server
 -- 说明：
--- 1. 新库初始化请继续使用 backend/src/main/resources/db/schema.sql
+-- 1. 新库初始化请继续使用 deploy/lingz/db/schema.sql
 -- 2. 本脚本用于已有库的增量升级
 
 -- ============================================

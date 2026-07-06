@@ -22,6 +22,22 @@ public class SkillCatalog {
 
     private String source;
 
+    private Long ownerUserId;
+
+    private String version;
+
+    private String author;
+
+    private String icon;
+
+    private String iconColor;
+
+    private String toolBindingStatus;
+
+    private String toolBindingMessage;
+
+    private String toolBindingDetails;
+
     private Integer visible;
 
     private Integer sortOrder;
@@ -78,6 +94,70 @@ public class SkillCatalog {
 
     public void setSource(String source) {
         this.source = source;
+    }
+
+    public Long getOwnerUserId() {
+        return ownerUserId;
+    }
+
+    public void setOwnerUserId(Long ownerUserId) {
+        this.ownerUserId = ownerUserId;
+    }
+
+    public String getVersion() {
+        return version;
+    }
+
+    public void setVersion(String version) {
+        this.version = version;
+    }
+
+    public String getAuthor() {
+        return author;
+    }
+
+    public void setAuthor(String author) {
+        this.author = author;
+    }
+
+    public String getIcon() {
+        return icon;
+    }
+
+    public void setIcon(String icon) {
+        this.icon = icon;
+    }
+
+    public String getIconColor() {
+        return iconColor;
+    }
+
+    public void setIconColor(String iconColor) {
+        this.iconColor = iconColor;
+    }
+
+    public String getToolBindingStatus() {
+        return toolBindingStatus;
+    }
+
+    public void setToolBindingStatus(String toolBindingStatus) {
+        this.toolBindingStatus = toolBindingStatus;
+    }
+
+    public String getToolBindingMessage() {
+        return toolBindingMessage;
+    }
+
+    public void setToolBindingMessage(String toolBindingMessage) {
+        this.toolBindingMessage = toolBindingMessage;
+    }
+
+    public String getToolBindingDetails() {
+        return toolBindingDetails;
+    }
+
+    public void setToolBindingDetails(String toolBindingDetails) {
+        this.toolBindingDetails = toolBindingDetails;
     }
 
     public Integer getVisible() {

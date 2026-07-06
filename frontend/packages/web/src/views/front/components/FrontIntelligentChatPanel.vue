@@ -6,8 +6,6 @@
         empty-title="知识库智能问答"
         empty-description="基于已接入知识库检索证据，为你提供可溯源的答案。"
         draft-placeholder="基于选定的知识库提问..."
-        footer-status-text="内容由 AI 生成，请注意甄别"
-        footer-state-label="Ready"
         :show-knowledge-select="true"
         :enable-attachments="false"
         :knowledge-options="knowledgeOptions"

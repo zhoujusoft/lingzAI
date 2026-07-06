@@ -1,8 +1,5 @@
 <template>
-    <FrontSkillsPanel
-        @unauthorized="emitUnauthorized"
-        @open-skill-chat="handleOpenSkillChat"
-    />
+    <FrontSkillsPanel @unauthorized="emitUnauthorized" @open-skill-chat="handleOpenSkillChat" />
 </template>
 
 <script setup>

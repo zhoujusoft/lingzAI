@@ -1,11 +1,5 @@
-export {
-    UserBean,
-} from './UserBean';
+export { UserBean } from './UserBean';
 
-export {
-    KnowledgeBean,
-} from './KnowledgeBean';
+export { KnowledgeBean } from './KnowledgeBean';
 
-export {
-    ChatConversationBean,
-} from './ChatConversationBean';
+export { ChatConversationBean } from './ChatConversationBean';

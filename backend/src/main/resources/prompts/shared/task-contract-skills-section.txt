@@ -1,0 +1,4 @@
+
+当前已生效的技能契约：
+{{skillItems}}
+{{skillSwitchGuidanceLine}}

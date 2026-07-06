@@ -1,19 +1,16 @@
-import {
-    requestJson as doRequestJson,
-    requestRaw as doRequestRaw,
-} from '@lingzhou/core/http/request';
 import { DATASET_CHAT_SESSION_STORAGE_KEY } from '@/model/session';
 import { listIntegrationDatasets } from '@/api/integration';
+import {
+    buildRuntimeChatBody,
+    sendRuntimeSseRequest,
+    fetchConversationListRequest,
+    fetchConversationMessagesRequest,
+    deleteConversationRequest,
+    parseSseEventPayload,
+} from './sseChatAdapterShared';
 
 let cachedDatasetIds = null;
 let cachedDatasetAt = 0;
-
-function createRequestOptions(options = {}, onUnauthorized) {
-    return {
-        ...options,
-        onUnauthorized,
-    };
-}
 
 function normalizeDatasetId(value) {
     if (value == null) {
@@ -33,7 +30,11 @@ function normalizeDatasetId(value) {
 }
 
 function isPublishedDataset(item) {
-    return String(item?.publishStatus || '').trim().toUpperCase() === 'PUBLISHED';
+    return (
+        String(item?.publishStatus || '')
+            .trim()
+            .toUpperCase() === 'PUBLISHED'
+    );
 }
 
 async function loadDatasetIds(onUnauthorized) {
@@ -76,115 +77,93 @@ const SESSION_TYPE = 'DATASET_CHAT';
 
 export const intelligentDatasetChatAdapter = {
     sessionStorageKey: DATASET_CHAT_SESSION_STORAGE_KEY,
+    continuationSessionTypes: [SESSION_TYPE],
 
-    async sendStream({ message, fileIds: _fileIds, sessionId, selectedKnowledge, onUnauthorized }) {
+    async sendStream({
+        message,
+        fileIds: _fileIds,
+        sessionId,
+        selectedKnowledge,
+        messageType,
+        eventPayload,
+        systemPromptAppend,
+        options,
+        onUnauthorized,
+    }) {
         const datasetId = await resolveDatasetIdBySelection(selectedKnowledge, onUnauthorized);
         if (datasetId == null) {
             throw new Error('未找到可用数据集或当前数据集选择无效，请重新选择。');
         }
-        return doRequestRaw(
-            `/api/integration/datasets/${datasetId}/chat/stream`,
-            createRequestOptions(
-                {
-                    method: 'POST',
-                    responseType: 'stream',
-                    auth: true,
-                    body: {
-                        message,
-                        sessionId,
-                    },
-                },
-                onUnauthorized
-            )
-        );
+        return sendRuntimeSseRequest(`/api/integration/datasets/${datasetId}/chat/stream`, {
+            auth: true,
+            onUnauthorized,
+            body: buildRuntimeChatBody({
+                message,
+                fileIds: [],
+                sessionId,
+                messageType,
+                eventPayload,
+                systemPromptAppend,
+                options,
+            }),
+        });
     },
 
-    async fetchConversationList({ selectedKnowledge, onUnauthorized } = {}) {
+    async fetchConversationList({
+        selectedKnowledge,
+        pageNo = 1,
+        pageSize = 20,
+        onUnauthorized,
+    } = {}) {
         const datasetId = await resolveDatasetIdBySelection(selectedKnowledge, onUnauthorized);
         if (datasetId == null) {
             return { data: { items: [] } };
         }
-        const { data } = await doRequestJson(
-            `/api/chat/sessions?sessionType=${SESSION_TYPE}&scopeId=${datasetId}&limit=50`,
-            createRequestOptions(
-                {
-                    method: 'GET',
-                    auth: true,
-                },
-                onUnauthorized
-            )
-        );
-
-        return {
-            data: {
-                items: Array.isArray(data?.items) ? data.items : [],
-            },
-        };
+        return fetchConversationListRequest('/api/chat/sessions', {
+            auth: true,
+            onUnauthorized,
+            sessionType: SESSION_TYPE,
+            scopeId: datasetId,
+            pageNo,
+            pageSize,
+        });
     },
 
-    async fetchMessages({ conversationId, selectedKnowledge, pageNo = 1, pageSize = 100, onUnauthorized } = {}) {
-        const encoded = encodeURIComponent(String(conversationId || '').trim());
-        if (!encoded) {
-            return { data: { items: [] } };
-        }
+    async fetchMessages({
+        conversationId,
+        selectedKnowledge,
+        pageNo = 1,
+        pageSize = 100,
+        onUnauthorized,
+    } = {}) {
         const datasetId = await resolveDatasetIdBySelection(selectedKnowledge, onUnauthorized);
         if (datasetId == null) {
             return { data: { items: [] } };
         }
-        const { data } = await doRequestJson(
-            `/api/chat/sessions/${encoded}/messages?sessionType=${SESSION_TYPE}&scopeId=${datasetId}&pageNo=${pageNo}&pageSize=${pageSize}`,
-            createRequestOptions(
-                {
-                    method: 'GET',
-                    auth: true,
-                },
-                onUnauthorized
-            )
-        );
-
-        return {
-            data: {
-                items: Array.isArray(data?.items) ? data.items : [],
-            },
-        };
+        return fetchConversationMessagesRequest('/api/chat/sessions', {
+            conversationId,
+            sessionType: SESSION_TYPE,
+            scopeId: datasetId,
+            pageNo,
+            pageSize,
+            auth: true,
+            onUnauthorized,
+        });
     },
 
     async deleteConversation({ conversationId, selectedKnowledge, onUnauthorized } = {}) {
-        const encoded = encodeURIComponent(String(conversationId || '').trim());
-        if (!encoded) {
-            return { data: { success: true, alreadyDeleted: true } };
-        }
         const datasetId = await resolveDatasetIdBySelection(selectedKnowledge, onUnauthorized);
         if (datasetId == null) {
             return { data: { success: true, alreadyDeleted: true } };
         }
-        const { data } = await doRequestJson(
-            `/api/chat/sessions/${encoded}?sessionType=${SESSION_TYPE}&scopeId=${datasetId}`,
-            createRequestOptions(
-                {
-                    method: 'DELETE',
-                    auth: true,
-                },
-                onUnauthorized
-            )
-        );
-        return { data };
+        return deleteConversationRequest('/api/chat/sessions', {
+            conversationId,
+            sessionType: SESSION_TYPE,
+            scopeId: datasetId,
+            auth: true,
+            onUnauthorized,
+        });
     },
 
-    parseEventPayload(data) {
-        try {
-            const parsed = JSON.parse(data);
-            if (parsed && typeof parsed === 'object' && parsed.type) {
-                return parsed;
-            }
-        } catch (error) {
-            // fall through
-        }
-
-        if (data === '[DONE]') {
-            return { type: 'done', content: '' };
-        }
-
-        return { type: 'message', content: data };
-    },
+    parseEventPayload: parseSseEventPayload,
 };

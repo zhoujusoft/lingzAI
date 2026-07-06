@@ -8,6 +8,7 @@ import { ROUTE_PATHS } from '@/router/routePaths';
 import {
     formatMcpTime,
     getMcpAuthLabel,
+    getMcpPermissionScopeLabel,
     getMcpServerScopeLabel,
     getMcpTransportLabel,
 } from '@/views/admin/components/mcp-management/mcpManagementShared';
@@ -54,14 +55,14 @@ function backToList() {
 }
 
 function openEditPage() {
-    if (!server.value?.id) {
+    if (!server.value?.id || server.value?.canOperate === false) {
         return;
     }
     router.push(ROUTE_PATHS.adminMcpManagementEdit(server.value.id));
 }
 
 async function handleRefresh() {
-    if (!server.value?.id || refreshing.value) {
+    if (!server.value?.id || refreshing.value || server.value?.canOperate === false) {
         return;
     }
     refreshing.value = true;
@@ -83,7 +84,7 @@ async function handleRefresh() {
 }
 
 async function handleDelete() {
-    if (!server.value?.id || deleting.value) {
+    if (!server.value?.id || deleting.value || server.value?.canOperate === false) {
         return;
     }
     const confirmed = await confirm({
@@ -121,23 +122,18 @@ watch(
 
 <template>
     <section class="flex h-full min-h-0 flex-col bg-slate-50">
-        <header class="border-b border-slate-200 bg-white px-8 py-6">
+        <header class="border-b border-slate-200 bg-white px-8 py-5">
             <div class="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
                 <div class="min-w-0">
                     <button
                         type="button"
-                        class="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+                        class="mb-4 inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
                         @click="backToList"
                     >
                         <span class="material-symbols-outlined text-base">arrow_back</span>
                         返回列表
                     </button>
-                    <p
-                        class="mt-5 text-xs font-semibold uppercase tracking-[0.32em] text-slate-400"
-                    >
-                        MCP Detail
-                    </p>
-                    <h2 class="mt-3 text-3xl font-bold tracking-tight text-slate-900">
+                    <h2 class="text-3xl font-bold tracking-tight text-slate-900">
                         {{ server?.displayName || 'MCP 服务详情' }}
                     </h2>
                     <p class="mt-2 text-sm leading-6 text-slate-500">
@@ -149,6 +145,7 @@ watch(
 
                 <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
                     <button
+                        v-if="server?.canOperate !== false"
                         type="button"
                         class="rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
                         @click="openEditPage"
@@ -156,6 +153,7 @@ watch(
                         编辑服务
                     </button>
                     <button
+                        v-if="server?.canOperate !== false"
                         type="button"
                         class="rounded-2xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                         :disabled="refreshing || !server?.id"
@@ -164,6 +162,7 @@ watch(
                         {{ refreshing ? '刷新中...' : '刷新工具目录' }}
                     </button>
                     <button
+                        v-if="server?.canOperate !== false"
                         type="button"
                         class="rounded-2xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
                         :disabled="deleting || !server?.id"
@@ -205,6 +204,12 @@ watch(
                 >
                     {{ loadError }}
                 </p>
+                <p
+                    v-if="server.canOperate === false"
+                    class="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700"
+                >
+                    当前仅有查看权限，编辑、刷新和删除入口已隐藏。
+                </p>
 
                 <section class="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm">
                     <div class="flex items-center justify-between gap-4">
@@ -218,71 +223,49 @@ watch(
 
                     <div class="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                         <article class="rounded-3xl bg-slate-50 px-4 py-4">
-                            <p
-                                class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400"
-                            >
-                                Scope
-                            </p>
+                            <p class="text-xs font-semibold text-slate-400">作用域</p>
                             <p class="mt-2 text-sm text-slate-700">
                                 {{ getMcpServerScopeLabel(server.serverScope) }}
                             </p>
                         </article>
                         <article class="rounded-3xl bg-slate-50 px-4 py-4">
-                            <p
-                                class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400"
-                            >
-                                Server Key
+                            <p class="text-xs font-semibold text-slate-400">权限范围</p>
+                            <p class="mt-2 text-sm text-slate-700">
+                                {{ getMcpPermissionScopeLabel(server.permissionScope) }}
                             </p>
+                        </article>
+                        <article class="rounded-3xl bg-slate-50 px-4 py-4">
+                            <p class="text-xs font-semibold text-slate-400">服务密钥</p>
                             <p class="mt-2 break-all font-mono text-sm text-slate-700">
                                 {{ server.serverKey }}
                             </p>
                         </article>
                         <article class="rounded-3xl bg-slate-50 px-4 py-4">
-                            <p
-                                class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400"
-                            >
-                                Endpoint
-                            </p>
+                            <p class="text-xs font-semibold text-slate-400">服务端点</p>
                             <p class="mt-2 break-all text-sm text-slate-700">
                                 {{ server.endpoint }}
                             </p>
                         </article>
                         <article class="rounded-3xl bg-slate-50 px-4 py-4">
-                            <p
-                                class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400"
-                            >
-                                Transport
-                            </p>
+                            <p class="text-xs font-semibold text-slate-400">传输协议</p>
                             <p class="mt-2 text-sm text-slate-700">
                                 {{ getMcpTransportLabel(server.transportType) }}
                             </p>
                         </article>
                         <article class="rounded-3xl bg-slate-50 px-4 py-4">
-                            <p
-                                class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400"
-                            >
-                                Auth
-                            </p>
+                            <p class="text-xs font-semibold text-slate-400">鉴权配置</p>
                             <p class="mt-2 text-sm text-slate-700">
                                 {{ getMcpAuthLabel(server.authType, server.hasAuthConfig) }}
                             </p>
                         </article>
                         <article class="rounded-3xl bg-slate-50 px-4 py-4">
-                            <p
-                                class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400"
-                            >
-                                Last Refreshed
-                            </p>
+                            <p class="text-xs font-semibold text-slate-400">最后同步时间</p>
                             <p class="mt-2 text-sm text-slate-700">
                                 {{ formatMcpTime(server.lastRefreshedAt) }}
                             </p>
                         </article>
                         <article class="rounded-3xl bg-slate-50 px-4 py-4">
-                            <p
-                                class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400"
-                            >
-                                Updated
-                            </p>
+                            <p class="text-xs font-semibold text-slate-400">更新时间</p>
                             <p class="mt-2 text-sm text-slate-700">
                                 {{ formatMcpTime(server.updatedAt) }}
                             </p>
@@ -320,6 +303,7 @@ watch(
                             先刷新一次工具目录，把远程 MCP tools 拉到平台中。
                         </p>
                         <button
+                            v-if="server.canOperate !== false"
                             type="button"
                             class="mt-5 rounded-2xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700"
                             @click="handleRefresh"

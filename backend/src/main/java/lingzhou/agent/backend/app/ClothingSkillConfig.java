@@ -15,14 +15,19 @@
  */
 package lingzhou.agent.backend.app;
 
-import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import lingzhou.agent.backend.capability.skillruntime.registry.SkillRuntimeRegistry;
-import lingzhou.agent.backend.capability.tool.runtime.FrontendRenderToolService;
-import lingzhou.agent.backend.capability.tool.registry.GlobalToolRegistry;
+import lingzhou.agent.backend.business.chat.attachment.FileParseToolProvider;
+import lingzhou.agent.backend.business.chat.execution.tool.RuntimeSystemToolProvider;
+import lingzhou.agent.backend.business.chat.execution.workspace.RuntimeExecutionProperties;
 import lingzhou.agent.backend.business.chat.service.ChatFileService;
+import lingzhou.agent.backend.business.datasets.service.MinioService;
+import lingzhou.agent.backend.capability.skillruntime.registry.SkillRuntimeRegistry;
+import lingzhou.agent.backend.capability.tool.registry.GlobalToolRegistry;
+import lingzhou.agent.backend.capability.tool.runtime.FrontendRenderToolService;
+import lingzhou.agent.backend.capability.webfetch.WebFetchToolProvider;
 import lingzhou.agent.spring.ai.skill.core.DefaultSkillKit;
 import lingzhou.agent.spring.ai.skill.core.SkillKit;
 import lingzhou.agent.spring.ai.skill.core.SkillPoolManager;
@@ -30,60 +35,31 @@ import lingzhou.agent.spring.ai.skill.spi.SkillAwareToolCallbackResolver;
 import lingzhou.agent.spring.ai.skill.spi.SkillAwareToolCallingManager;
 import lingzhou.agent.spring.ai.skill.support.DefaultSkillPoolManager;
 import lingzhou.agent.spring.ai.skill.support.SimpleSkillBox;
-import org.springframework.ai.chat.memory.ChatMemory;
-import org.springframework.ai.chat.memory.ChatMemoryRepository;
-import org.springframework.ai.chat.memory.InMemoryChatMemoryRepository;
-import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.model.tool.DefaultToolCallingManager;
 import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.ai.support.ToolCallbacks;
 import org.springframework.ai.tool.ToolCallback;
-import org.springframework.ai.tool.annotation.Tool;
-import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.ai.tool.function.FunctionToolCallback;
 import org.springframework.ai.tool.resolution.DelegatingToolCallbackResolver;
 import org.springframework.ai.tool.resolution.StaticToolCallbackResolver;
-import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.ParameterizedTypeReference;
 
 @Configuration
-@EnableConfigurationProperties({ChatModelProperties.class, ChatMemoryProperties.class, SkillProperties.class, ModelProviderProperties.class})
+@EnableConfigurationProperties({
+    ChatModelProperties.class,
+    ChatContextProperties.class,
+    SkillProperties.class,
+    ModelProviderProperties.class,
+    RuntimeExecutionProperties.class
+})
 public class ClothingSkillConfig {
 
     @Bean
     public SkillPoolManager skillPoolManager() {
         return new DefaultSkillPoolManager();
-    }
-
-    @Bean
-    @ConditionalOnProperty(prefix = "app.chat.memory", name = "type", havingValue = "redis")
-    public ChatMemoryRepository redisChatMemoryRepository(
-            ObjectProvider<RedisChatMemoryRepositoryFactory> redisFactoryProvider) {
-        RedisChatMemoryRepositoryFactory redisFactory = redisFactoryProvider.getIfAvailable();
-        if (redisFactory == null) {
-            throw new IllegalStateException(
-                    "app.chat.memory.type=redis is enabled, but no RedisChatMemoryRepositoryFactory bean was found.");
-        }
-        return redisFactory.create();
-    }
-
-    @Bean
-    @ConditionalOnMissingBean(ChatMemoryRepository.class)
-    public ChatMemoryRepository inMemoryChatMemoryRepository() {
-        return new InMemoryChatMemoryRepository();
-    }
-
-    @Bean
-    public ChatMemory chatMemory(ChatMemoryRepository repository, ChatMemoryProperties properties) {
-        return MessageWindowChatMemory.builder()
-                .chatMemoryRepository(repository)
-                .maxMessages(properties.getMaxMessages())
-                .build();
     }
 
     @Bean
@@ -93,10 +69,28 @@ public class ClothingSkillConfig {
 
     @Bean
     public GlobalToolRegistry globalToolRegistry(
-            ChatFileService chatFileService, FrontendRenderToolService frontendRenderToolService) {
+            ChatFileService chatFileService,
+            FrontendRenderToolService frontendRenderToolService,
+            MinioService minioService,
+            RuntimeSystemToolProvider runtimeSystemToolProvider,
+            FileParseToolProvider fileParseToolProvider,
+            WebFetchToolProvider webFetchToolProvider) {
         ClothingSkillTools.setChatUploadReader(chatFileService::readFileAsString);
         ClothingSkillTools.setChatUploadMaterializer(chatFileService::materializeToLocalPath);
-        return new GlobalToolRegistry(buildBaseTools(frontendRenderToolService));
+        ClothingSkillTools.setArtifactWriter((folder, fileName, content, sourcePath, contentType) -> {
+            if (sourcePath != null && !sourcePath.isBlank()) {
+                return minioService.uploadArtifact(
+                        Path.of(sourcePath).toAbsolutePath().normalize(), folder, fileName, contentType);
+            }
+            return minioService.uploadArtifact(
+                    folder,
+                    fileName,
+                    content == null ? new byte[0] : content.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                    contentType);
+        });
+        return new GlobalToolRegistry(
+                buildBaseTools(
+                        frontendRenderToolService, runtimeSystemToolProvider, fileParseToolProvider, webFetchToolProvider));
     }
 
     @Bean
@@ -119,7 +113,9 @@ public class ClothingSkillConfig {
         ToolCallingManager delegate = DefaultToolCallingManager.builder()
                 .toolCallbackResolver(new DelegatingToolCallbackResolver(List.of(
                         new StaticToolCallbackResolver(globalToolRegistry.getToolCallbacks()),
-                        SkillAwareToolCallbackResolver.builder().skillKit(skillKit).build())))
+                        SkillAwareToolCallbackResolver.builder()
+                                .skillKit(skillKit)
+                                .build())))
                 .build();
         return SkillAwareToolCallingManager.builder()
                 .skillKit(skillKit)
@@ -127,56 +123,66 @@ public class ClothingSkillConfig {
                 .build();
     }
 
-    private static List<ToolCallback> buildBaseTools(FrontendRenderToolService frontendRenderToolService) {
-        Object toolProvider = new Object() {
-            @Tool(description = "Read a local file or chat-upload virtual path as UTF-8 text.")
-            public String readFile(@ToolParam(description = "Absolute or relative file path") String path) {
-                return ClothingSkillTools.readFileAsString(path);
+    private static List<GlobalToolRegistry.ToolRegistration> buildBaseTools(
+            FrontendRenderToolService frontendRenderToolService,
+            RuntimeSystemToolProvider runtimeSystemToolProvider,
+            FileParseToolProvider fileParseToolProvider,
+            WebFetchToolProvider webFetchToolProvider) {
+        List<GlobalToolRegistry.ToolRegistration> registrations = new ArrayList<>();
+        for (ToolCallback callback : ToolCallbacks.from(runtimeSystemToolProvider)) {
+            String toolName = callback.getToolDefinition() == null
+                    ? null
+                    : callback.getToolDefinition().name();
+            if ("runtime_tool".equals(toolName)) {
+                continue;
             }
-
-            @Tool(description = "Write UTF-8 text to a local file path, creating parent directories if needed.")
-            public String writeFile(
-                    @ToolParam(description = "Absolute or relative file path") String path,
-                    @ToolParam(description = "UTF-8 text content") String content) {
-                return ClothingSkillTools.writeFileAsString(path, content);
-            }
-
-            @Tool(description = "Execute a python script with arguments and return stdout as text.")
-            public String runPython(
-                    @ToolParam(description = "Absolute or relative path to a python script") String scriptPath,
-                    @ToolParam(description = "Command arguments joined by spaces") String args) {
-                return ClothingSkillTools.runPythonScript(scriptPath, args);
-            }
-        };
-
-        List<ToolCallback> callbacks = new ArrayList<>();
-        callbacks.addAll(List.of(ToolCallbacks.from(toolProvider)));
-        callbacks.addAll(List.of(ToolCallbacks.from(new DetoxHealthRiskToolProvider())));
-        callbacks.add(FunctionToolCallback.builder(
-                        "get_render_template",
-                        (Map<String, Object> arguments, org.springframework.ai.chat.model.ToolContext toolContext) ->
-                                frontendRenderToolService.getRenderTemplate(arguments))
-                .description("根据模板编码返回前端渲染模板定义，可选结合目标 API 工具生成有效 dataSchema。")
-                .inputType(new ParameterizedTypeReference<Map<String, Object>>() {})
-                .inputSchema(frontendRenderToolService.getTemplateInputSchema())
-                .build());
-        callbacks.add(FunctionToolCallback.builder(
-                        "build_frontend_render_payload",
-                        (Map<String, Object> arguments, org.springframework.ai.chat.model.ToolContext toolContext) ->
-                                frontendRenderToolService.buildRenderPayload(arguments))
-                .description("根据模板、业务数据和组件配置封装前端渲染结果。")
-                .inputType(new ParameterizedTypeReference<Map<String, Object>>() {})
-                .inputSchema(frontendRenderToolService.buildPayloadInputSchema())
-                .build());
-        callbacks.add(FunctionToolCallback.builder(
-                        "generate_frontend_render",
-                        (Map<String, Object> arguments, org.springframework.ai.chat.model.ToolContext toolContext) ->
-                                frontendRenderToolService.generate(arguments))
-                .description("兼容旧链路：根据模板和业务数据生成前端渲染结果。")
-                .inputType(new ParameterizedTypeReference<Map<String, Object>>() {})
-                .inputSchema(frontendRenderToolService.buildPayloadInputSchema())
-                .build());
-        return List.copyOf(callbacks);
+            registrations.add(new GlobalToolRegistry.ToolRegistration(callback, false, true));
+        }
+        for (ToolCallback callback : ToolCallbacks.from(fileParseToolProvider)) {
+            registrations.add(new GlobalToolRegistry.ToolRegistration(callback, false, true));
+        }
+        for (ToolCallback callback : ToolCallbacks.from(webFetchToolProvider)) {
+            registrations.add(new GlobalToolRegistry.ToolRegistration(callback, false, true));
+        }
+        for (ToolCallback callback : ToolCallbacks.from(new DetoxHealthRiskToolProvider())) {
+            registrations.add(new GlobalToolRegistry.ToolRegistration(callback, true, false));
+        }
+        registrations.add(new GlobalToolRegistry.ToolRegistration(
+                FunctionToolCallback.builder(
+                                "get_render_template",
+                                (Map<String, Object> arguments,
+                                        org.springframework.ai.chat.model.ToolContext toolContext) ->
+                                        frontendRenderToolService.getRenderTemplate(arguments))
+                        .description("根据模板编码返回前端渲染模板定义，可选结合目标 API 工具生成有效 dataSchema。")
+                        .inputType(new ParameterizedTypeReference<Map<String, Object>>() {})
+                        .inputSchema(frontendRenderToolService.getTemplateInputSchema())
+                        .build(),
+                false,
+                true));
+        registrations.add(new GlobalToolRegistry.ToolRegistration(
+                FunctionToolCallback.builder(
+                                "build_frontend_render_payload",
+                                (Map<String, Object> arguments,
+                                        org.springframework.ai.chat.model.ToolContext toolContext) ->
+                                        frontendRenderToolService.buildRenderPayload(arguments))
+                        .description("根据模板、业务数据和组件配置封装前端渲染结果。")
+                        .inputType(new ParameterizedTypeReference<Map<String, Object>>() {})
+                        .inputSchema(frontendRenderToolService.buildPayloadInputSchema())
+                        .build(),
+                false,
+                true));
+        registrations.add(new GlobalToolRegistry.ToolRegistration(
+                FunctionToolCallback.builder(
+                                "generate_frontend_render",
+                                (Map<String, Object> arguments,
+                                        org.springframework.ai.chat.model.ToolContext toolContext) ->
+                                        frontendRenderToolService.generate(arguments))
+                        .description("兼容旧链路：根据模板和业务数据生成前端渲染结果。")
+                        .inputType(new ParameterizedTypeReference<Map<String, Object>>() {})
+                        .inputSchema(frontendRenderToolService.buildPayloadInputSchema())
+                        .build(),
+                false,
+                true));
+        return List.copyOf(registrations);
     }
-
 }

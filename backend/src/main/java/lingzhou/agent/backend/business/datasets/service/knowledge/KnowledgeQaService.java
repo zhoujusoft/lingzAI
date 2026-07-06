@@ -7,17 +7,28 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 import lingzhou.agent.backend.app.RagQaProperties;
 import lingzhou.agent.backend.business.chat.domain.enums.ConversationSessionType;
+import lingzhou.agent.backend.business.chat.service.ConversationContextWindowService;
+import lingzhou.agent.backend.business.chat.service.ConversationEventService;
 import lingzhou.agent.backend.business.chat.service.ConversationHistoryService;
+import lingzhou.agent.backend.business.chat.service.ConversationMessageUsagePayload;
+import lingzhou.agent.backend.business.chat.service.UserTokenQuotaService;
+import lingzhou.agent.backend.business.license.service.LicenseService;
 import lingzhou.agent.backend.business.datasets.domain.KnowledgeBase;
 import lingzhou.agent.backend.business.datasets.domain.VO.RecallChunkVo;
+import lingzhou.agent.backend.capability.agentruntime.capabilities.TokenUsageCapabilityAdapter;
+import lingzhou.agent.backend.capability.agentruntime.prompt.PromptEngineeringService;
+import lingzhou.agent.backend.capability.agentruntime.usage.RuntimeRunUsageSnapshot;
+import lingzhou.agent.backend.capability.agentruntime.usage.RuntimeTokenUsageAccumulator;
 import lingzhou.agent.backend.capability.modelruntime.ModelRuntimeClientFactory;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
-import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -37,35 +48,58 @@ public class KnowledgeQaService {
             Pattern.compile("(优先|先).*(查|检索).*(知识库)|后续.*知识库|都.*知识库", Pattern.CASE_INSENSITIVE);
 
     private static final Pattern SMALL_TALK_HEURISTIC_PATTERN = Pattern.compile(
-            "^(你好|您好|hello|hi|嗨|你是谁|你是什么|介绍一下你自己|在吗|谢谢|再见|早上好|晚上好)[!！。,.，?？ ]*$",
-            Pattern.CASE_INSENSITIVE);
+            "^(你好|您好|hello|hi|嗨|你是谁|你是什么|介绍一下你自己|在吗|谢谢|再见|早上好|晚上好)[!！。,.，?？ ]*$", Pattern.CASE_INSENSITIVE);
 
     private final ModelRuntimeClientFactory modelRuntimeClientFactory;
-    private final ChatMemory chatMemory;
+    private final ConversationEventService conversationEventService;
+    private final ConversationContextWindowService conversationContextWindowService;
     private final KnowledgeChunkSearchService knowledgeChunkSearchService;
     private final ConversationHistoryService conversationHistoryService;
     private final RagQaProperties qaProperties;
+    private final PromptEngineeringService promptEngineeringService;
+    private final LicenseService licenseService;
+    private final UserTokenQuotaService userTokenQuotaService;
+    private final TokenUsageCapabilityAdapter tokenUsageCapability;
     private final Map<String, Integer> preferKbRoundsBySession = new ConcurrentHashMap<>();
 
     public KnowledgeQaService(
             ModelRuntimeClientFactory modelRuntimeClientFactory,
-            ChatMemory chatMemory,
+            ConversationEventService conversationEventService,
+            ConversationContextWindowService conversationContextWindowService,
             KnowledgeChunkSearchService knowledgeChunkSearchService,
             ConversationHistoryService conversationHistoryService,
-            RagQaProperties qaProperties) {
+            RagQaProperties qaProperties,
+            PromptEngineeringService promptEngineeringService,
+            LicenseService licenseService,
+            UserTokenQuotaService userTokenQuotaService,
+            TokenUsageCapabilityAdapter tokenUsageCapability) {
         this.modelRuntimeClientFactory = modelRuntimeClientFactory;
-        this.chatMemory = chatMemory;
+        this.conversationEventService = conversationEventService;
+        this.conversationContextWindowService = conversationContextWindowService;
         this.knowledgeChunkSearchService = knowledgeChunkSearchService;
         this.conversationHistoryService = conversationHistoryService;
         this.qaProperties = qaProperties;
+        this.promptEngineeringService = promptEngineeringService;
+        this.licenseService = licenseService;
+        this.userTokenQuotaService = userTokenQuotaService;
+        this.tokenUsageCapability = tokenUsageCapability;
     }
 
-    public Flux<ServerSentEvent<String>> streamAnswer(Long kbId, KnowledgeBase kb, QaStreamRequest request, Long userId) {
+    public Flux<ServerSentEvent<String>> streamAnswer(
+            Long kbId, KnowledgeBase kb, QaStreamRequest request, Long userId) {
         if (kbId == null || request == null || !StringUtils.hasText(request.message())) {
             return Flux.just(errorEvent("message is required")).concatWithValues(doneEvent());
         }
         if (userId == null || userId <= 0) {
             return Flux.just(errorEvent("user is required")).concatWithValues(doneEvent());
+        }
+        String licenseError = licenseService.validateConversationAccess(userId, ConversationSessionType.KNOWLEDGE_QA);
+        if (StringUtils.hasText(licenseError)) {
+            return Flux.just(errorEvent(licenseError)).concatWithValues(doneEvent());
+        }
+        String quotaError = userTokenQuotaService.validateQuota(userId, ConversationSessionType.KNOWLEDGE_QA);
+        if (StringUtils.hasText(quotaError)) {
+            return Flux.just(errorEvent(quotaError)).concatWithValues(doneEvent());
         }
 
         String query = request.message().trim();
@@ -97,7 +131,8 @@ public class KnowledgeQaService {
                     query,
                     retrievalRoute ? "KB_QA" : "SMALL_TALK",
                     JSON.toJSONString(params),
-                    "[]");
+                    "[]",
+                    null);
         } catch (Exception ex) {
             log.error(
                     "会话初始化失败：kbId={}, userId={}, sessionCode={}, error={}",
@@ -139,43 +174,66 @@ public class KnowledgeQaService {
         String answerMode = resolveAnswerMode(retrievalRoute, recalls);
         String fallbackReason = resolveFallbackReason(answerMode, recalls);
         String documentListJson = "KB_QA".equals(answerMode) ? buildDocumentListJson(recalls) : "[]";
-        String userPrompt = buildPromptByMode(answerMode, kb, query, recalls, fallbackReason);
-        String systemPrompt = buildSystemPromptByMode(answerMode);
-
+        String userPrompt =
+                promptEngineeringService.buildKnowledgeAnswerUserPrompt(answerMode, kb, query, recalls, fallbackReason);
+        String systemPrompt = promptEngineeringService.buildKnowledgeAnswerSystemPrompt(answerMode);
+        final String finalAnswerMode = answerMode;
+        final String finalFallbackReason = fallbackReason;
+        final List<RecallChunkVo> finalRecalls = recalls;
         AtomicReference<String> answerRef = new AtomicReference<>("");
         AtomicBoolean finalized = new AtomicBoolean(false);
         AtomicBoolean modelFailed = new AtomicBoolean(false);
         long startedAt = System.currentTimeMillis();
         var chatRuntimeBundle = modelRuntimeClientFactory.createChatBundle();
+        RuntimeTokenUsageAccumulator tokenAccumulator =
+                tokenUsageCapability.createAccumulator(chatRuntimeBundle.config(), startedAt);
+        tokenUsageCapability.ensureRunStarted(context, null, chatRuntimeBundle.config(), startedAt);
+        List<Message> historyMessages =
+                conversationEventService.buildSpringHistoryMessages(context.sessionCode(), context.userMessageId());
+        AtomicReference<String> previousResponseText = new AtomicReference<>("");
+        AtomicLong currentRoundStartedAt = new AtomicLong(startedAt);
 
         Flux<ServerSentEvent<String>> citationStream =
                 "KB_QA".equals(answerMode) ? buildCitationStream(recalls) : Flux.empty();
 
-        Flux<ServerSentEvent<String>> answerStream = chatRuntimeBundle.chatClient()
-                .prompt()
-                .advisors(MessageChatMemoryAdvisor.builder(chatMemory)
-                        .conversationId(context.sessionCode())
-                        .build())
-                .system(systemPrompt)
-                .user(userPrompt)
-                .stream()
-                .content()
-                .flatMap(chunk -> {
-                    String delta = normalizeDelta(chunk);
-                    if (!StringUtils.hasText(delta)) {
-                        return Flux.empty();
+        var promptSpec = chatRuntimeBundle.chatClient().prompt();
+        if (!historyMessages.isEmpty()) {
+            promptSpec = promptSpec.messages(historyMessages);
+        }
+        Flux<ServerSentEvent<String>> answerStream = promptSpec.system(systemPrompt).user(userPrompt).stream()
+                .chatResponse()
+                .flatMap(chatResponse -> {
+                    String delta = extractDelta(chatResponse, previousResponseText);
+                    boolean usageOnlyChunk = isUsageOnlyChunk(chatResponse, delta);
+                    if (StringUtils.hasText(delta)) {
+                        answerRef.updateAndGet(existing -> existing + delta);
                     }
-                    answerRef.updateAndGet(existing -> existing + delta);
-                    return Flux.just(messageEvent(delta));
+                    if (!usageOnlyChunk || tokenAccumulator.hasCurrentCall()) {
+                        tokenAccumulator.ensureCurrentCall(currentRoundStartedAt.get());
+                    }
+                    tokenUsageCapability.recordResponse(tokenAccumulator, chatResponse);
+                    if (usageOnlyChunk) {
+                        tokenUsageCapability.completeCurrentCall(
+                                tokenAccumulator, "COMPLETED", System.currentTimeMillis(), safeLength(answerRef.get()));
+                        currentRoundStartedAt.set(System.currentTimeMillis());
+                    }
+                    return StringUtils.hasText(delta) ? Flux.just(messageEvent(delta)) : Flux.empty();
                 })
                 .onErrorResume(error -> {
                     modelFailed.set(true);
                     if (finalized.compareAndSet(false, true)) {
+                        long completedAt = System.currentTimeMillis();
+                        tokenUsageCapability.completeCurrentCall(
+                                tokenAccumulator, "FAILED", completedAt, safeLength(answerRef.get()));
+                        RuntimeRunUsageSnapshot usageSnapshot =
+                                tokenUsageCapability.snapshot(tokenAccumulator, "FAILED", completedAt);
+                        ConversationMessageUsagePayload usagePayload =
+                                tokenUsageCapability.toMessageUsagePayload(usageSnapshot);
                         log.error(
                                 "知识问答流式生成失败：kbId={}, sessionCode={}, answerMode={}, error={}",
                                 kbId,
                                 context.sessionCode(),
-                                answerMode,
+                                finalAnswerMode,
                                 error.getMessage(),
                                 error);
                         conversationHistoryService.failMessage(
@@ -183,7 +241,15 @@ public class KnowledgeQaService {
                                 error.getMessage(),
                                 answerRef.get(),
                                 null,
-                                System.currentTimeMillis() - startedAt);
+                                completedAt - startedAt,
+                                usagePayload);
+                        conversationEventService.upsertAssistantMessage(
+                                context,
+                                answerRef.get(),
+                                "normal",
+                                buildKnowledgeContextMetadata(finalAnswerMode, finalFallbackReason, finalRecalls));
+                        tokenUsageCapability.finalizeRun(context, null, usageSnapshot);
+                        conversationContextWindowService.compactIfNeeded(context);
                     }
                     return Flux.just(errorEvent(error.getMessage()));
                 })
@@ -191,24 +257,53 @@ public class KnowledgeQaService {
                     if (modelFailed.get()) {
                         return Flux.empty();
                     }
-                    return buildFallbackNoticeStream(answerMode, answerRef);
+                    return buildFallbackNoticeStream(finalAnswerMode, answerRef);
                 }))
                 .doOnComplete(() -> {
                     if (finalized.compareAndSet(false, true)) {
+                        long completedAt = System.currentTimeMillis();
+                        tokenUsageCapability.completeCurrentCall(
+                                tokenAccumulator, "COMPLETED", completedAt, safeLength(answerRef.get()));
+                        RuntimeRunUsageSnapshot usageSnapshot =
+                                tokenUsageCapability.snapshot(tokenAccumulator, "COMPLETED", completedAt);
+                        ConversationMessageUsagePayload usagePayload =
+                                tokenUsageCapability.toMessageUsagePayload(usageSnapshot);
                         conversationHistoryService.completeMessage(
                                 context,
                                 answerRef.get(),
                                 documentListJson,
                                 "[]",
                                 null,
-                                System.currentTimeMillis() - startedAt);
+                                completedAt - startedAt,
+                                usagePayload);
+                        conversationEventService.upsertAssistantMessage(
+                                context,
+                                answerRef.get(),
+                                "normal",
+                                buildKnowledgeContextMetadata(finalAnswerMode, finalFallbackReason, finalRecalls));
+                        tokenUsageCapability.finalizeRun(context, null, usageSnapshot);
+                        conversationContextWindowService.compactIfNeeded(context);
                     }
                 })
                 .doFinally(signalType -> {
                     if (signalType == reactor.core.publisher.SignalType.CANCEL
                             && finalized.compareAndSet(false, true)) {
+                        long completedAt = System.currentTimeMillis();
+                        tokenUsageCapability.completeCurrentCall(
+                                tokenAccumulator, "CANCELLED", completedAt, safeLength(answerRef.get()));
+                        RuntimeRunUsageSnapshot usageSnapshot =
+                                tokenUsageCapability.snapshot(tokenAccumulator, "CANCELLED", completedAt);
+                        ConversationMessageUsagePayload usagePayload =
+                                tokenUsageCapability.toMessageUsagePayload(usageSnapshot);
                         conversationHistoryService.interruptMessage(
-                                context, answerRef.get(), null, System.currentTimeMillis() - startedAt);
+                                context, answerRef.get(), null, completedAt - startedAt, usagePayload);
+                        conversationEventService.upsertAssistantMessage(
+                                context,
+                                answerRef.get(),
+                                "normal",
+                                buildKnowledgeContextMetadata(finalAnswerMode, finalFallbackReason, finalRecalls));
+                        tokenUsageCapability.finalizeRun(context, null, usageSnapshot);
+                        conversationContextWindowService.compactIfNeeded(context);
                     }
                 });
 
@@ -219,13 +314,59 @@ public class KnowledgeQaService {
         metaPayload.put("fallbackReason", fallbackReason);
         metaPayload.put("retrievalStrategy", retrievalStrategy);
         metaPayload.put("preferenceActive", preferenceDecision.forceKb());
-        metaPayload.put("preferenceRemainingRounds", lifecycle.remainingRounds() == null ? "" : lifecycle.remainingRounds());
+        metaPayload.put(
+                "preferenceRemainingRounds", lifecycle.remainingRounds() == null ? "" : lifecycle.remainingRounds());
         metaPayload.put("preferenceExpired", lifecycle.preferenceExpired());
 
         return Flux.just(metaEvent(metaPayload))
                 .concatWith(citationStream)
                 .concatWith(answerStream)
                 .concatWithValues(doneEvent());
+    }
+
+    private String buildKnowledgeContextMetadata(
+            String answerMode, String fallbackReason, List<RecallChunkVo> recalls) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("answerMode", answerMode);
+        metadata.put("fallbackReason", fallbackReason);
+        metadata.put("recallCount", recalls == null ? 0 : recalls.size());
+        return JSON.toJSONString(metadata);
+    }
+
+    private String extractDelta(ChatResponse chatResponse, AtomicReference<String> previousResponseText) {
+        if (chatResponse == null
+                || chatResponse.getResult() == null
+                || chatResponse.getResult().getOutput() == null) {
+            return "";
+        }
+        AssistantMessage output = chatResponse.getResult().getOutput();
+        String current = output.getText();
+        if (current == null) {
+            current = "";
+        }
+        String previous = previousResponseText.get();
+        String delta = current.startsWith(previous) ? current.substring(previous.length()) : current;
+        previousResponseText.set(current);
+        return normalizeDelta(delta);
+    }
+
+    private boolean isUsageOnlyChunk(ChatResponse chatResponse, String delta) {
+        return hasUsage(chatResponse) && !StringUtils.hasText(delta);
+    }
+
+    private boolean hasUsage(ChatResponse chatResponse) {
+        if (chatResponse == null
+                || chatResponse.getMetadata() == null
+                || chatResponse.getMetadata().getUsage() == null) {
+            return false;
+        }
+        return chatResponse.getMetadata().getUsage().getPromptTokens() != null
+                || chatResponse.getMetadata().getUsage().getCompletionTokens() != null
+                || chatResponse.getMetadata().getUsage().getTotalTokens() != null;
+    }
+
+    private int safeLength(String value) {
+        return value == null ? 0 : value.length();
     }
 
     private int normalizeTopK(Integer value) {
@@ -306,23 +447,13 @@ public class KnowledgeQaService {
                     .createChatBundle()
                     .chatClient()
                     .prompt()
-                    .system("""
-                            你是意图分类器。仅输出一个标签：SMALL_TALK 或 KB_QA。
-                            SMALL_TALK：问候、寒暄、自我介绍、泛聊天，不依赖知识库证据。
-                            KB_QA：需要基于知识库事实回答的问题。
-                            禁止输出任何解释或多余字符。
-                            """)
-                    .user("用户问题：%s".formatted(query))
+                    .system(promptEngineeringService.buildKnowledgeIntentClassifierSystemPrompt())
+                    .user(promptEngineeringService.buildKnowledgeIntentClassifierUserPrompt(query))
                     .call()
                     .content();
             return parseIntentLabel(label);
         } catch (Exception ex) {
-            log.warn(
-                    "意图分类模型调用失败，使用启发式分类：kbId={}, sessionCode={}, error={}",
-                    kbId,
-                    sessionCode,
-                    ex.getMessage(),
-                    ex);
+            log.warn("意图分类模型调用失败，使用启发式分类：kbId={}, sessionCode={}, error={}", kbId, sessionCode, ex.getMessage(), ex);
             return null;
         }
     }
@@ -387,59 +518,6 @@ public class KnowledgeQaService {
         }
         return "";
     }
-    private String buildSystemPromptByMode(String answerMode) {
-        if ("KB_QA".equals(answerMode)) {
-            return """
-                你是知识库问答助手。
-                只能基于当前提供的知识库内容进行回答，不得编造不存在的信息。
-
-                如果信息不足以回答问题，请明确说明：“当前知识库中没有找到相关内容”或“信息不足以支持回答”。
-
-                回答要求：
-                - 优先用简洁自然的语言直接回答问题，不要写成长篇说明
-                - 在不影响阅读的情况下，可以在关键信息后标注来源编号，如[1][2]
-                - 不要逐条罗列来源或做“分析报告式”输出
-                - 不要输出工具调用信息
-                """;
-        }
-        if ("LLM_FALLBACK".equals(answerMode)) {
-            return """
-                你是通用问答助手。
-                当前问题未命中知识库，请基于通用知识进行回答。
-
-                回答要求：
-                - 保持简洁、清晰，优先直接回答问题
-                - 对不确定的信息要明确说明（如“可能”、“一般情况下”）
-                - 不要编造“来自知识库”的内容或引用
-                - 不要输出工具调用信息
-                """;
-        }
-        return """
-            你是对话助手。
-            当前是闲聊或简单问题，请用自然、友好的语气直接回答。
-
-            回答要求：
-            - 简洁自然，不要过度解释
-            - 不要输出工具调用信息
-            """;
-    }
-
-    private String buildPromptByMode(
-            String answerMode, KnowledgeBase kb, String query, List<RecallChunkVo> recalls, String fallbackReason) {
-        if ("KB_QA".equals(answerMode)) {
-            return buildQaPrompt(kb, query, recalls);
-        }
-        if ("LLM_FALLBACK".equals(answerMode)) {
-            return """
-                    用户问题：
-                    %s
-
-                    未命中原因：%s
-                    请直接给出尽可能有帮助的回答。
-                    """.formatted(query, fallbackReason);
-        }
-        return query;
-    }
 
     private Flux<ServerSentEvent<String>> buildFallbackNoticeStream(
             String answerMode, AtomicReference<String> answerRef) {
@@ -495,75 +573,21 @@ public class KnowledgeQaService {
             return Flux.empty();
         }
 
-        return Flux.fromIterable(recalls)
-                .index()
-                .map(tuple -> {
-                    long idx = tuple.getT1();
-                    RecallChunkVo item = tuple.getT2();
-                    Map<String, Object> content = new LinkedHashMap<>();
-                    content.put("ref", idx + 1);
-                    content.put("docId", item.getDocId());
-                    content.put("chunkId", item.getChunkId());
-                    content.put("indexId", StringUtils.hasText(item.getId()) ? item.getId() : "");
-                    content.put("fileName", StringUtils.hasText(item.getFileName()) ? item.getFileName() : "unknown");
-                    content.put("lawTitle", StringUtils.hasText(item.getLawTitle()) ? item.getLawTitle() : "");
-                    content.put("articleCn", StringUtils.hasText(item.getArticleCn()) ? item.getArticleCn() : "");
-                    content.put("score", item.getScore() == null ? 0D : item.getScore());
-                    content.put("snippet", normalizeChunk(item.getContent()));
-                    return citationEvent(content);
-                });
-    }
-
-    private String buildQaPrompt(KnowledgeBase kb, String query, List<RecallChunkVo> recalls) {
-        String kbName = kb == null ? "" : StringUtils.trimWhitespace(kb.getKbName());
-        if (recalls == null || recalls.isEmpty()) {
-            return """
-                    你将回答一个知识库问题，但当前没有可用证据。
-                    问题：
-                    %s
-
-                    请明确说明未检索到足够证据，不要编造。
-                    """.formatted(query);
-        }
-
-        String evidence = buildEvidenceSection(recalls);
-        return """
-                知识库：%s
-                用户问题：
-                %s
-
-                可用证据（按相关性排序）：
-                %s
-
-                请仅基于上述证据作答，回答尽量结构化，并在关键结论后附上证据编号，如[1][2]。
-                如果证据无法支持结论，请明确说明不确定。
-                """.formatted(StringUtils.hasText(kbName) ? kbName : "未命名知识库", query, evidence);
-    }
-
-    private String buildEvidenceSection(List<RecallChunkVo> recalls) {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < recalls.size(); i++) {
-            RecallChunkVo item = recalls.get(i);
-            String content = safeTrim(item.getContent(), 600);
-            String fileName = buildEvidenceSourceName(item);
-            String indexId = StringUtils.hasText(item.getId()) ? item.getId() : "N/A";
-            sb.append("[").append(i + 1).append("] ")
-                    .append("file=").append(fileName)
-                    .append(", indexId=").append(indexId)
-                    .append(", score=").append(item.getScore() == null ? 0D : item.getScore())
-                    .append("\n")
-                    .append(content)
-                    .append("\n\n");
-        }
-        return sb.toString();
-    }
-
-    private String safeTrim(String text, int maxLength) {
-        if (!StringUtils.hasText(text)) {
-            return "";
-        }
-        String value = text.trim();
-        return value.length() <= maxLength ? value : value.substring(0, maxLength);
+        return Flux.fromIterable(recalls).index().map(tuple -> {
+            long idx = tuple.getT1();
+            RecallChunkVo item = tuple.getT2();
+            Map<String, Object> content = new LinkedHashMap<>();
+            content.put("ref", idx + 1);
+            content.put("docId", item.getDocId());
+            content.put("chunkId", item.getChunkId());
+            content.put("indexId", StringUtils.hasText(item.getId()) ? item.getId() : "");
+            content.put("fileName", StringUtils.hasText(item.getFileName()) ? item.getFileName() : "unknown");
+            content.put("lawTitle", StringUtils.hasText(item.getLawTitle()) ? item.getLawTitle() : "");
+            content.put("articleCn", StringUtils.hasText(item.getArticleCn()) ? item.getArticleCn() : "");
+            content.put("score", item.getScore() == null ? 0D : item.getScore());
+            content.put("snippet", normalizeChunk(item.getContent()));
+            return citationEvent(content);
+        });
     }
 
     private String normalizeChunk(String text) {
@@ -601,7 +625,9 @@ public class KnowledgeQaService {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("type", type);
         payload.put("content", content);
-        return ServerSentEvent.builder(JSON.toJSONString(payload)).event(eventName).build();
+        return ServerSentEvent.builder(JSON.toJSONString(payload))
+                .event(eventName)
+                .build();
     }
 
     private String buildDocumentListJson(List<RecallChunkVo> recalls) {
@@ -624,18 +650,6 @@ public class KnowledgeQaService {
             items.add(citation);
         }
         return JSON.toJSONString(items);
-    }
-
-    private String buildEvidenceSourceName(RecallChunkVo item) {
-        String lawTitle = StringUtils.hasText(item.getLawTitle()) ? item.getLawTitle() : item.getFileName();
-        String articleCn = item.getArticleCn();
-        if (StringUtils.hasText(lawTitle) && StringUtils.hasText(articleCn)) {
-            return lawTitle + " " + articleCn;
-        }
-        if (StringUtils.hasText(lawTitle)) {
-            return lawTitle;
-        }
-        return "unknown";
     }
 
     public record QaStreamRequest(String message, String sessionId, Integer topK) {}

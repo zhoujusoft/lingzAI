@@ -58,12 +58,10 @@ function normalizeModel(item) {
         temperature: typeof item?.temperature === 'number' ? item.temperature : null,
         maxTokens: Number.isInteger(item?.maxTokens) ? item.maxTokens : null,
         systemPrompt: item?.systemPrompt || '',
-        enableThinking:
-            typeof item?.enableThinking === 'boolean' ? item.enableThinking : null,
+        enableThinking: typeof item?.enableThinking === 'boolean' ? item.enableThinking : null,
         dimensions: Number.isInteger(item?.dimensions) ? item.dimensions : null,
         timeoutMs: Number.isInteger(item?.timeoutMs) ? item.timeoutMs : null,
-        fallbackRrf:
-            typeof item?.fallbackRrf === 'boolean' ? item.fallbackRrf : null,
+        fallbackRrf: typeof item?.fallbackRrf === 'boolean' ? item.fallbackRrf : null,
         defaultModel: Boolean(item?.defaultModel),
         builtin: Boolean(item?.builtin),
         createdAt: item?.createdAt || '',
@@ -112,6 +110,22 @@ export function listModelLibraryModels(params = {}, onUnauthorized) {
     ).then(result => (Array.isArray(result) ? result.map(normalizeModel) : []));
 }
 
+export function listAvailableChatModels(onUnauthorized) {
+    return authedJson('/api/model-library/chat-options', { method: 'GET' }, onUnauthorized).then(
+        result =>
+            (Array.isArray(result) ? result : []).map(item => ({
+                id: Number(item?.id) || null,
+                value: Number(item?.id) || null,
+                label: item?.displayName || '',
+                description: item?.description || '',
+                vendorId: Number(item?.vendorId) || null,
+                vendorName: item?.vendorName || '',
+                modelName: item?.modelName || '',
+                defaultModel: Boolean(item?.defaultModel),
+            }))
+    );
+}
+
 export function createModelLibraryModel(payload, onUnauthorized) {
     return authedJson(
         '/api/model-library/models',
@@ -126,6 +140,18 @@ export function updateModelLibraryModel(id, payload, onUnauthorized) {
         { method: 'PUT', body: payload },
         onUnauthorized
     ).then(normalizeModel);
+}
+
+export function validateModelLibraryModel(payload, onUnauthorized) {
+    return authedJson(
+        '/api/model-library/models/validate',
+        { method: 'POST', body: payload },
+        onUnauthorized
+    );
+}
+
+export function deleteModelLibraryModel(id, onUnauthorized) {
+    return authedJson(`/api/model-library/models/${id}`, { method: 'DELETE' }, onUnauthorized);
 }
 
 export function listModelLibraryDefaults(onUnauthorized) {

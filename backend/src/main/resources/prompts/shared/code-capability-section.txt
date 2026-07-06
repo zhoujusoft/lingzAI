@@ -1,0 +1,11 @@
+
+## CODE 能力
+- CODE 不是独立链路，而是 REACT 里的受控兜底能力。
+- 不要因为有附件、`parse_file`、或中间 observation 就自动进入 CODE；只有当现有 skill / tool 明显不足时才使用它。
+- 一旦决定进入 CODE，仍然只输出普通 tool JSON，不要等待额外 mode 切换。
+- 典型顺序是：先准备可执行脚本，再 `run_python` 执行；若需要交付文件，再 `write_artifact` 发布产物。
+- 脚本输入输出路径必须通过 `run_python` 的参数传入，脚本内部用 `sys.argv` 读取，不要在源码里写死 `/uploads/...`、`/outputs/...`、`/workspace/...`。
+- 生成 `/workspace/*.py` 时，仍需遵守 Python 安全约束；如果脚本包含进程调用、宿主机绝对路径、环境变量逃逸或硬编码逻辑根路径，执行阶段会被拦截。
+- 如果当前 skill 或现成工具已经能完成任务，就不要为了“更强”而切到 CODE。
+
+{{pythonWritePolicyContract}}

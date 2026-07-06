@@ -6,6 +6,7 @@ import lingzhou.agent.backend.business.datasets.domain.IntegrationDataset;
 import lingzhou.agent.backend.business.skill.mapper.SkillToolBindingMapper;
 import lingzhou.agent.backend.business.tool.domain.ToolCatalog;
 import lingzhou.agent.backend.business.tool.mapper.ToolCatalogMapper;
+import lingzhou.agent.backend.common.permission.ResourcePermissionSupport;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -17,7 +18,8 @@ public class DatasetToolPublishService {
     private final ToolCatalogMapper toolCatalogMapper;
     private final SkillToolBindingMapper skillToolBindingMapper;
 
-    public DatasetToolPublishService(ToolCatalogMapper toolCatalogMapper, SkillToolBindingMapper skillToolBindingMapper) {
+    public DatasetToolPublishService(
+            ToolCatalogMapper toolCatalogMapper, SkillToolBindingMapper skillToolBindingMapper) {
         this.toolCatalogMapper = toolCatalogMapper;
         this.skillToolBindingMapper = skillToolBindingMapper;
     }
@@ -46,8 +48,14 @@ public class DatasetToolPublishService {
             toolCatalog.setDescription(seed.description());
             toolCatalog.setToolType(TOOL_TYPE_DATASET);
             toolCatalog.setBindable(1);
+            if (toolCatalog.getEnabledGlobal() == null) {
+                toolCatalog.setEnabledGlobal(0);
+            }
             toolCatalog.setOwnerSkillName(null);
             toolCatalog.setSource(buildSource(datasetCode));
+            toolCatalog.setOwnerUserId(dataset == null ? null : dataset.getOwnerUserId());
+            toolCatalog.setPermissionScope(
+                    resolvePermissionScope(dataset == null ? null : dataset.getPermissionScope()));
             if (toolCatalog.getId() == null) {
                 toolCatalogMapper.insert(toolCatalog);
             } else {
@@ -63,6 +71,21 @@ public class DatasetToolPublishService {
             skillToolBindingMapper.deleteByToolNames(toolNames);
         }
         toolCatalogMapper.deleteBySource(buildSource(datasetCode));
+    }
+
+    public void syncPermissions(IntegrationDataset dataset) {
+        String datasetCode = normalizeCode(dataset == null ? null : dataset.getDatasetCode());
+        List<ToolCatalog> catalogs = toolCatalogMapper.selectBySource(buildSource(datasetCode));
+        if (catalogs.isEmpty()) {
+            return;
+        }
+        Long ownerUserId = dataset == null ? null : dataset.getOwnerUserId();
+        Integer permissionScope = resolvePermissionScope(dataset == null ? null : dataset.getPermissionScope());
+        for (ToolCatalog catalog : catalogs) {
+            catalog.setOwnerUserId(ownerUserId);
+            catalog.setPermissionScope(permissionScope);
+            toolCatalogMapper.updateById(catalog);
+        }
     }
 
     public List<String> listToolNames(String datasetCode) {
@@ -95,7 +118,9 @@ public class DatasetToolPublishService {
         seeds.add(new PublishedToolSeed(
                 baseName + ".execute_dataset_sql",
                 datasetName + " / SQL 执行",
-                "在数据集“" + datasetName + "”允许范围内执行查询 SQL 并返回结果。SQL 中表名必须使用 objectCode，不要使用中文对象名。",
+                "在数据集“"
+                        + datasetName
+                        + "”允许范围内执行查询 SQL。始终返回 rowSchema 和最多 3 条 previewRows；结果少于 3 条时直接返回完整数据，达到 3 条时完整结果写入 resultFile。resultFile 的 JSON 顶层是对象，固定结构包含 columns、rowSchema、rowCount、rows；Python 读取完整数据必须使用 json.load(f)[\"rows\"]。需要 Python 二次处理或生成文件时，只生成读取 resultFile 的最小脚本并通过 run_python args 传入路径，禁止使用 file_write 重写查询数据或把数据嵌入脚本。SQL 中表名必须使用 objectCode，不要使用中文对象名。",
                 71002));
         return List.copyOf(seeds);
     }
@@ -113,6 +138,10 @@ public class DatasetToolPublishService {
 
     private String normalizeText(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    private Integer resolvePermissionScope(Integer value) {
+        return ResourcePermissionSupport.normalizeScope(value);
     }
 
     private record PublishedToolSeed(String toolName, String displayName, String description, int sortOrder) {}

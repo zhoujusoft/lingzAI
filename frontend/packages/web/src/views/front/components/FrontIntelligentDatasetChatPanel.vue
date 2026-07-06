@@ -6,8 +6,6 @@
         empty-title="Agent 智能问数"
         empty-description="会按需理解数据集结构、查看 schema，并可多次执行只读 SQL 完成统计分析。"
         draft-placeholder="输入统计分析问题，例如按月份统计订单趋势..."
-        footer-status-text="内容由 AI 生成，请注意甄别"
-        footer-state-label="Ready"
         :show-knowledge-select="true"
         :enable-attachments="false"
         :knowledge-options="datasetOptions"
@@ -39,7 +37,11 @@ function normalizeDatasetId(value) {
 }
 
 function isPublishedDataset(item) {
-    return String(item?.publishStatus || '').trim().toUpperCase() === 'PUBLISHED';
+    return (
+        String(item?.publishStatus || '')
+            .trim()
+            .toUpperCase() === 'PUBLISHED'
+    );
 }
 
 function buildDatasetOptions(records = []) {

@@ -11,7 +11,6 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import lingzhou.agent.backend.capability.tool.publish.KnowledgeBaseToolPublishService;
 import lingzhou.agent.backend.business.datasets.domain.KnowledgeBase;
 import lingzhou.agent.backend.business.datasets.domain.KnowledgeBasePublishBinding;
 import lingzhou.agent.backend.business.datasets.domain.KnowledgeDocument;
@@ -22,7 +21,9 @@ import lingzhou.agent.backend.business.datasets.mapper.KnowledgeBasePublishBindi
 import lingzhou.agent.backend.business.datasets.mapper.KnowledgeDocumentMapper;
 import lingzhou.agent.backend.business.datasets.service.IKnowledgeBaseService;
 import lingzhou.agent.backend.business.datasets.service.IKnowledgeDocumentService;
+import lingzhou.agent.backend.capability.tool.publish.KnowledgeBaseToolPublishService;
 import lingzhou.agent.backend.common.lzException.TaskException;
+import lingzhou.agent.backend.common.permission.ResourcePermissionSupport;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -75,10 +76,13 @@ public class KnowledgeBaseServiceImpl implements IKnowledgeBaseService {
     public List<KnowledgeBase> selectKnowledgeBaseList(KnowledgeBase knowledgeBase) {
         List<KnowledgeBase> knowledgeBases = knowledgeBaseMapper.selectKnowledgeBaseList(knowledgeBase);
         knowledgeBases.forEach(this::enrichKnowledgeBaseStats);
-        Map<Long, KnowledgeBasePublishBinding> bindingMap = knowledgeBasePublishBindingMapper
-                .selectByKbIds(knowledgeBases.stream().map(KnowledgeBase::getKbId).toList())
-                .stream()
-                .collect(Collectors.toMap(KnowledgeBasePublishBinding::getKbId, Function.identity()));
+        Map<Long, KnowledgeBasePublishBinding> bindingMap =
+                knowledgeBasePublishBindingMapper
+                        .selectByKbIds(knowledgeBases.stream()
+                                .map(KnowledgeBase::getKbId)
+                                .toList())
+                        .stream()
+                        .collect(Collectors.toMap(KnowledgeBasePublishBinding::getKbId, Function.identity()));
         knowledgeBases.forEach(item -> applyPublishBinding(item, bindingMap.get(item.getKbId())));
         return knowledgeBases;
     }
@@ -91,6 +95,20 @@ public class KnowledgeBaseServiceImpl implements IKnowledgeBaseService {
     }
 
     @Override
+    public IPage<KnowledgeBase> selectVisibleKnowledgeBasePage(
+            KnowledgeBase knowledgeBase,
+            long pageNum,
+            long pageSize,
+            String keyword,
+            boolean admin,
+            Long operatorUserId) {
+        IPage<KnowledgeBase> page = knowledgeBaseMapper.selectVisibleKnowledgeBasePage(
+                knowledgeBase, pageNum, pageSize, keyword, admin, operatorUserId);
+        page.getRecords().forEach(this::enrichKnowledgeBaseStats);
+        return page;
+    }
+
+    @Override
     public int insertKnowledgeBase(KnowledgeBase knowledgeBase) throws TaskException {
         if (knowledgeBase == null) {
             throw new TaskException("知识库参数不能为空", TaskException.Code.UNKNOWN);
@@ -98,6 +116,7 @@ public class KnowledgeBaseServiceImpl implements IKnowledgeBaseService {
         knowledgeBase.setKbName(requireName(knowledgeBase.getKbName()));
         knowledgeBase.setKbCode(resolveCreateKbCode(knowledgeBase.getKbCode()));
         knowledgeBase.setDescription(normalizeDescription(knowledgeBase.getDescription()));
+        knowledgeBase.setPermissionScope(normalizePermissionScope(knowledgeBase.getPermissionScope()));
         ensureUniqueName(knowledgeBase);
         ensureUniqueCode(knowledgeBase);
         Date now = new Date();
@@ -122,11 +141,17 @@ public class KnowledgeBaseServiceImpl implements IKnowledgeBaseService {
         knowledgeBase.setKbName(resolveUpdatedName(knowledgeBase, existing));
         knowledgeBase.setKbCode(resolveUpdatedKbCode(knowledgeBase, existing));
         knowledgeBase.setDescription(resolveUpdatedDescription(knowledgeBase, existing));
+        knowledgeBase.setOwnerUserId(resolveUpdatedOwnerUserId(knowledgeBase, existing));
+        knowledgeBase.setPermissionScope(resolveUpdatedPermissionScope(knowledgeBase, existing));
         ensureUniqueName(knowledgeBase);
         ensureUniqueCode(knowledgeBase);
         resetPublishedStateIfCodeChanged(existing, knowledgeBase);
         knowledgeBase.setUpdatedAt(new Date());
-        return knowledgeBaseMapper.updateKnowledgeBase(knowledgeBase);
+        int affected = knowledgeBaseMapper.updateKnowledgeBase(knowledgeBase);
+        if (affected > 0) {
+            knowledgeBaseToolPublishService.syncPermissions(knowledgeBase);
+        }
+        return affected;
     }
 
     @Override
@@ -166,7 +191,8 @@ public class KnowledgeBaseServiceImpl implements IKnowledgeBaseService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public KnowledgeDocument createKnowledgeBaseWithDocument(
-            KnowledgeBase knowledgeBase, MultipartFile file, String chunkStrategy, String chunkConfig) throws Exception {
+            KnowledgeBase knowledgeBase, MultipartFile file, String chunkStrategy, String chunkConfig)
+            throws Exception {
         try {
             int rows = insertKnowledgeBase(knowledgeBase);
             if (rows <= 0 || knowledgeBase.getKbId() == null) {
@@ -242,6 +268,20 @@ public class KnowledgeBaseServiceImpl implements IKnowledgeBaseService {
         return normalizeDescription(existing.getDescription());
     }
 
+    private Long resolveUpdatedOwnerUserId(KnowledgeBase incoming, KnowledgeBase existing) {
+        if (incoming.getOwnerUserId() != null) {
+            return incoming.getOwnerUserId();
+        }
+        return existing.getOwnerUserId();
+    }
+
+    private Integer resolveUpdatedPermissionScope(KnowledgeBase incoming, KnowledgeBase existing) {
+        if (incoming.getPermissionScope() != null) {
+            return normalizePermissionScope(incoming.getPermissionScope());
+        }
+        return normalizePermissionScope(existing.getPermissionScope());
+    }
+
     private void resetPublishedStateIfCodeChanged(KnowledgeBase existing, KnowledgeBase updated) {
         String existingCode = normalizeText(existing == null ? null : existing.getKbCode());
         String updatedCode = normalizeText(updated == null ? null : updated.getKbCode());
@@ -272,6 +312,10 @@ public class KnowledgeBaseServiceImpl implements IKnowledgeBaseService {
 
     private String normalizeDescription(String value) {
         return normalizeText(value);
+    }
+
+    private Integer normalizePermissionScope(Integer value) {
+        return ResourcePermissionSupport.normalizeScope(value);
     }
 
     private String normalizeText(String value) {

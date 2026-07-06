@@ -1,8 +1,22 @@
 <script setup>
+import { computed } from 'vue';
+import { useRoute } from 'vue-router';
 import { Dialog, DialogPanel, TransitionChild, TransitionRoot } from '@headlessui/vue';
 
-defineProps({
+const props = defineProps({
     open: {
+        type: Boolean,
+        default: false,
+    },
+    closable: {
+        type: Boolean,
+        default: true,
+    },
+    zIndex: {
+        type: Number,
+        default: 999,
+    },
+    constrainedHeight: {
         type: Boolean,
         default: false,
     },
@@ -13,12 +27,26 @@ defineProps({
 });
 
 const emit = defineEmits(['close', 'after-leave']);
+const route = useRoute();
+const shouldScaleForAdmin = computed(() => route.path.startsWith('/admin'));
+
+function handleClose() {
+    if (!props.closable) {
+        return;
+    }
+    emit('close');
+}
 </script>
 
 <template>
     <Teleport to="body">
         <TransitionRoot appear :show="open" as="template" @after-leave="emit('after-leave')">
-            <Dialog as="div" class="relative z-[999]" @close="emit('close')">
+            <Dialog
+                as="div"
+                class="relative"
+                :style="{ zIndex: String(props.zIndex) }"
+                @close="handleClose"
+            >
                 <TransitionChild
                     as="template"
                     enter="ease-out duration-200"
@@ -44,8 +72,12 @@ const emit = defineEmits(['close', 'after-leave']);
                         >
                             <DialogPanel
                                 :class="[
-                                    'flex w-full max-w-[480px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200',
-                                    panelClass,
+                                    'flex w-full flex-col rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200',
+                                    shouldScaleForAdmin ? 'scale-75' : '',
+                                    props.constrainedHeight
+                                        ? 'max-h-[calc(100vh-2rem)] overflow-hidden'
+                                        : '',
+                                    props.panelClass || 'max-w-[480px]',
                                 ]"
                             >
                                 <slot name="header" />

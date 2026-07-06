@@ -35,28 +35,12 @@ const defaultPromptOptions = {
     destructive: false,
 };
 
-const defaultState = {
-    open: false,
-    modal: null,
-};
-
 export const overlayState = reactive({
-    active: {
-        ...defaultState,
-    },
+    stack: [],
 });
 
 const overlayQueue = [];
-let activeResolver = null;
-
-function resetActiveState() {
-    Object.assign(overlayState.active, defaultState);
-}
-
-function applyRequest(request) {
-    overlayState.active.modal = request.modal;
-    overlayState.active.open = true;
-}
+let nextOverlayId = 1;
 
 function normalizeSection(section) {
     if (!section) {
@@ -77,6 +61,8 @@ function normalizeModal(modal) {
     return {
         ...modal,
         panelClass: modal.panelClass || '',
+        constrainedHeight: Boolean(modal.constrainedHeight),
+        contentScrollable: Boolean(modal.contentScrollable),
         header: normalizeSection(modal.header),
         content: normalizeSection(modal.content),
         footer: normalizeSection(modal.footer),
@@ -84,23 +70,35 @@ function normalizeModal(modal) {
 }
 
 function openNextOverlay() {
-    if (overlayState.active.open || !overlayQueue.length) {
+    if (overlayState.stack.length > 0 || !overlayQueue.length) {
         return;
     }
 
     const nextRequest = overlayQueue.shift();
-    activeResolver = nextRequest.resolve;
-    applyRequest(nextRequest);
+    activateRequest(nextRequest);
 }
 
-function enqueueOverlay(modal) {
+function activateRequest(request) {
+    request.open = true;
+    overlayState.stack.push(request);
+}
+
+function enqueueOverlay(modal, { stackOnActive = false } = {}) {
     const normalizedModal = normalizeModal(modal);
 
     return new Promise(resolve => {
-        overlayQueue.push({
+        const request = {
+            id: nextOverlayId++,
             modal: normalizedModal,
             resolve,
-        });
+            open: false,
+            result: false,
+        };
+        if (stackOnActive && overlayState.stack.length > 0) {
+            activateRequest(request);
+            return;
+        }
+        overlayQueue.push(request);
         openNextOverlay();
     });
 }
@@ -136,6 +134,8 @@ function buildModalBySchema(schema) {
     return {
         context: schema.context || {},
         panelClass: schema.panelClass || '',
+        constrainedHeight: Boolean(schema.constrainedHeight),
+        contentScrollable: Boolean(schema.contentScrollable),
         header: schema.header,
         content: schema.content,
         footer: schema.footer,
@@ -177,6 +177,10 @@ export function openModal(options = {}) {
         destructive = false,
         resolveWith = null,
         panelClass = '',
+        stackOnActive = false,
+        replaceActive = false,
+        constrainedHeight = false,
+        contentScrollable = false,
     } = options;
 
     const defaultHeader = {
@@ -201,6 +205,8 @@ export function openModal(options = {}) {
     const modal = buildModalBySchema({
         context,
         panelClass,
+        constrainedHeight,
+        contentScrollable,
         header: resolveSection(header, defaultHeader),
         content: resolveSection(content, {
             component: ModalMessageContentSection,
@@ -209,20 +215,39 @@ export function openModal(options = {}) {
         footer: resolveSection(footer, defaultFooter),
     });
 
-    return enqueueOverlay(modal);
+    return enqueueOverlay(modal, {
+        stackOnActive: stackOnActive || replaceActive,
+    });
 }
 
 export function resolveActiveOverlay(result = true) {
-    // Called by OverlayHost on confirm/cancel to close current modal and resolve caller's Promise.
-    const resolver = activeResolver;
-    activeResolver = null;
-    resetActiveState();
-
-    if (resolver) {
-        resolver(result);
+    const topRequest = overlayState.stack[overlayState.stack.length - 1];
+    if (!topRequest || !topRequest.open) {
+        return;
     }
+    resolveOverlayById(topRequest.id, result);
+}
 
-    queueMicrotask(openNextOverlay);
+export function resolveOverlayById(requestId, result = true) {
+    const request = overlayState.stack.find(item => item.id === requestId);
+    if (!request || !request.open) {
+        return;
+    }
+    request.result = result;
+    request.open = false;
+}
+
+export function finalizeOverlayById(requestId) {
+    const requestIndex = overlayState.stack.findIndex(item => item.id === requestId);
+    if (requestIndex < 0) {
+        return;
+    }
+    const [completedRequest] = overlayState.stack.splice(requestIndex, 1);
+    completedRequest?.resolve?.(completedRequest.result);
+
+    if (overlayState.stack.length === 0) {
+        queueMicrotask(openNextOverlay);
+    }
 }
 
 export function confirm(options = {}) {

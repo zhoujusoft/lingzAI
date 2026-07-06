@@ -4,9 +4,18 @@ import { useRouter } from 'vue-router';
 import KnowledgeStepProgress from './KnowledgeStepProgress.vue';
 import PageLayout from '@/components/PageLayout.vue';
 import { uploadDocument } from '@/api/datasets';
-import { createKnowledgeBase, createKnowledgeBaseWithDocument, updateKnowledgeBase } from '@/api/knowledge-bases';
+import {
+    createKnowledgeBase,
+    createKnowledgeBaseWithDocument,
+    updateKnowledgeBase,
+} from '@/api/knowledge-bases';
 import { alert } from '@/composables/useModal';
-import { clearUserSession } from '@/composables/useCurrentUser';
+import { clearUserSession, currentUserState } from '@/composables/useCurrentUser';
+import { canChangeKnowledgePermission } from '@/model/knowledge-permissions';
+import {
+    RESOURCE_PERMISSION_UI_OPTIONS,
+    normalizeResourcePermissionScope,
+} from '@/model/resource-permissions';
 import { ROUTE_PATHS } from '@/router/routePaths';
 
 const props = defineProps({
@@ -22,6 +31,8 @@ const router = useRouter();
 const knowledgeName = ref(props.knowledge.name || '');
 const knowledgeCode = ref(props.knowledge.kbCode || '');
 const knowledgeDescription = ref(props.knowledge.description || '');
+const permissionScope = ref(normalizeResourcePermissionScope(props.knowledge.permissionScope));
+const permissionOptions = RESOURCE_PERMISSION_UI_OPTIONS;
 const selectedType = ref('rag');
 const uploads = ref([]);
 const fileInputRef = ref(null);
@@ -36,7 +47,13 @@ const KB_CODE_PATTERN = /^[A-Za-z0-9._-]+$/;
 
 const processingFile = computed(() => uploads.value.find(item => item.isUploading));
 const isEditMode = computed(() => Boolean(activeKnowledgeId.value));
-const currentTargetPath = computed(() => props.knowledge?.path || props.knowledge?.name || '根目录');
+const canEditPermissionScope = computed(
+    () =>
+        !isEditMode.value || canChangeKnowledgePermission(props.knowledge, currentUserState.profile)
+);
+const currentTargetPath = computed(
+    () => props.knowledge?.path || props.knowledge?.name || '根目录'
+);
 const submitButtonText = computed(() => {
     if (isUploading.value) {
         return '处理中...';
@@ -129,26 +146,31 @@ async function startUpload() {
     uploadError.value = '';
 
     try {
+        const permissionScopeForSubmit = canEditPermissionScope.value
+            ? permissionScope.value
+            : normalizeResourcePermissionScope(props.knowledge?.permissionScope);
         if (!uploads.value.length) {
             isUploading.value = true;
             const result = isEditMode.value
                 ? await updateKnowledgeBase(
-                    {
-                        kbId: activeKnowledgeId.value,
-                        kbName: knowledgeName.value.trim(),
-                        kbCode: knowledgeCode.value.trim(),
-                        description: knowledgeDescription.value.trim(),
-                    },
-                    handleUnauthorized,
-                )
+                      {
+                          kbId: activeKnowledgeId.value,
+                          kbName: knowledgeName.value.trim(),
+                          kbCode: knowledgeCode.value.trim(),
+                          description: knowledgeDescription.value.trim(),
+                          permissionScope: permissionScopeForSubmit,
+                      },
+                      handleUnauthorized
+                  )
                 : await createKnowledgeBase(
-                    {
-                        kbName: knowledgeName.value.trim(),
-                        kbCode: knowledgeCode.value.trim(),
-                        description: knowledgeDescription.value.trim(),
-                    },
-                    handleUnauthorized,
-                );
+                      {
+                          kbName: knowledgeName.value.trim(),
+                          kbCode: knowledgeCode.value.trim(),
+                          description: knowledgeDescription.value.trim(),
+                          permissionScope: permissionScopeForSubmit,
+                      },
+                      handleUnauthorized
+                  );
             if (!isEditMode.value && !result?.kbId) {
                 throw new Error('知识库创建失败');
             }
@@ -164,13 +186,16 @@ async function startUpload() {
                 name: knowledgeName.value.trim(),
                 kbCode: knowledgeCode.value.trim(),
                 description: knowledgeDescription.value.trim(),
+                permissionScope: permissionScopeForSubmit,
                 parentId: null,
                 path: '',
             });
             return;
         }
 
-        const pendingFile = uploads.value.find(item => item.status === 'pending' || item.status === 'failed');
+        const pendingFile = uploads.value.find(
+            item => item.status === 'pending' || item.status === 'failed'
+        );
         if (!pendingFile) {
             return;
         }
@@ -187,9 +212,10 @@ async function startUpload() {
                     kbName: knowledgeName.value.trim(),
                     kbCode: knowledgeCode.value.trim(),
                     description: knowledgeDescription.value.trim(),
+                    permissionScope: permissionScopeForSubmit,
                     file: pendingFile.file,
                 },
-                handleUnauthorized,
+                handleUnauthorized
             );
             if (!result?.kbId) {
                 throw new Error('知识库创建失败');
@@ -203,8 +229,9 @@ async function startUpload() {
                     kbName: knowledgeName.value.trim(),
                     kbCode: knowledgeCode.value.trim(),
                     description: knowledgeDescription.value.trim(),
+                    permissionScope: permissionScopeForSubmit,
                 },
-                handleUnauthorized,
+                handleUnauthorized
             );
             result = await uploadDocument({
                 kbId: activeKnowledgeId.value,
@@ -224,6 +251,7 @@ async function startUpload() {
             name: knowledgeName.value.trim(),
             kbCode: knowledgeCode.value.trim(),
             description: knowledgeDescription.value.trim(),
+            permissionScope: permissionScopeForSubmit,
             parentId: props.knowledge?.parentId ?? null,
             path: props.knowledge?.path || '',
             document: {
@@ -282,9 +310,10 @@ watch(
         knowledgeName.value = knowledge?.name || '';
         knowledgeCode.value = knowledge?.kbCode || '';
         knowledgeDescription.value = knowledge?.description || '';
+        permissionScope.value = normalizeResourcePermissionScope(knowledge?.permissionScope);
         activeKnowledgeId.value = knowledge?.id || null;
     },
-    { immediate: true, deep: true },
+    { immediate: true, deep: true }
 );
 </script>
 
@@ -318,9 +347,11 @@ watch(
                         type="text"
                         placeholder="请输入知识库名称"
                         class="w-full rounded-xl border px-4 py-3 outline-none transition-all placeholder:text-slate-400 focus:ring-2"
-                        :class="fieldErrors.knowledgeName
-                            ? 'border-red-300 bg-red-50/40 focus:border-red-300 focus:ring-red-100'
-                            : 'border-slate-200 focus:border-primary focus:ring-primary/20'"
+                        :class="
+                            fieldErrors.knowledgeName
+                                ? 'border-red-300 bg-red-50/40 focus:border-red-300 focus:ring-red-100'
+                                : 'border-slate-200 focus:border-primary focus:ring-primary/20'
+                        "
                     />
                     <p v-if="fieldErrors.knowledgeName" class="text-sm text-red-500">
                         {{ fieldErrors.knowledgeName }}
@@ -332,9 +363,11 @@ watch(
                             type="text"
                             placeholder="留空则自动生成，例如 support_center_v1"
                             class="w-full rounded-xl border px-4 py-3 font-mono outline-none transition-all placeholder:text-slate-400 focus:ring-2"
-                            :class="fieldErrors.knowledgeCode
-                                ? 'border-red-300 bg-red-50/40 focus:border-red-300 focus:ring-red-100'
-                                : 'border-slate-200 focus:border-primary focus:ring-primary/20'"
+                            :class="
+                                fieldErrors.knowledgeCode
+                                    ? 'border-red-300 bg-red-50/40 focus:border-red-300 focus:ring-red-100'
+                                    : 'border-slate-200 focus:border-primary focus:ring-primary/20'
+                            "
                         />
                         <p class="text-sm text-slate-500">
                             发布成工具后会用于稳定工具标识，建议使用可读且长期稳定的编码。
@@ -355,6 +388,40 @@ watch(
                             class="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none transition-all placeholder:text-slate-400 focus:border-primary focus:ring-2 focus:ring-primary/20"
                         />
                     </div>
+                    <div class="space-y-3">
+                        <label class="block text-base font-bold text-slate-800">权限范围</label>
+                        <div class="space-y-2">
+                            <label
+                                v-for="option in permissionOptions"
+                                :key="option.value"
+                                class="flex items-start gap-3 rounded-lg border border-slate-200 px-4 py-3"
+                                :class="
+                                    canEditPermissionScope
+                                        ? 'cursor-pointer'
+                                        : 'cursor-not-allowed opacity-70'
+                                "
+                            >
+                                <input
+                                    v-model.number="permissionScope"
+                                    :value="option.value"
+                                    type="radio"
+                                    class="mt-1 h-4 w-4 border-slate-300 text-primary focus:ring-primary"
+                                    :disabled="!canEditPermissionScope"
+                                />
+                                <div>
+                                    <div class="text-sm font-medium text-slate-800">
+                                        {{ option.label }}
+                                    </div>
+                                    <div class="text-xs text-slate-500">
+                                        {{ option.description }}
+                                    </div>
+                                </div>
+                            </label>
+                        </div>
+                        <p v-if="!canEditPermissionScope" class="text-xs text-amber-700">
+                            仅创建人或系统管理员可修改资源权限。
+                        </p>
+                    </div>
                 </section>
 
                 <section class="space-y-4">
@@ -363,10 +430,16 @@ watch(
                         <button
                             type="button"
                             class="relative flex items-center gap-4 rounded-2xl border-2 p-6 text-left"
-                            :class="selectedType === 'rag' ? 'border-primary bg-blue-50/30' : 'border-slate-200 bg-slate-50/30'"
+                            :class="
+                                selectedType === 'rag'
+                                    ? 'border-primary bg-blue-50/30'
+                                    : 'border-slate-200 bg-slate-50/30'
+                            "
                             @click="selectedType = 'rag'"
                         >
-                            <div class="flex h-12 w-12 items-center justify-center rounded-lg bg-blue-100 text-primary">
+                            <div
+                                class="flex h-12 w-12 items-center justify-center rounded-lg bg-blue-100 text-primary"
+                            >
                                 <span class="material-symbols-outlined text-2xl">description</span>
                             </div>
                             <div>
@@ -375,8 +448,12 @@ watch(
                             </div>
                         </button>
 
-                        <div class="relative flex cursor-not-allowed items-center gap-4 rounded-2xl border border-slate-200 bg-slate-50/30 p-6">
-                            <div class="flex h-12 w-12 items-center justify-center rounded-lg bg-slate-100 text-slate-400">
+                        <div
+                            class="relative flex cursor-not-allowed items-center gap-4 rounded-2xl border border-slate-200 bg-slate-50/30 p-6"
+                        >
+                            <div
+                                class="flex h-12 w-12 items-center justify-center rounded-lg bg-slate-100 text-slate-400"
+                            >
                                 <span class="material-symbols-outlined text-2xl">psychology</span>
                             </div>
                             <div>
@@ -384,7 +461,10 @@ watch(
                                 <div class="text-sm text-slate-500">高精度语义理解与推理</div>
                             </div>
                             <div class="absolute right-4 top-4">
-                                <span class="rounded bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-500">Coming Soon</span>
+                                <span
+                                    class="rounded bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-500"
+                                    >Coming Soon</span
+                                >
                             </div>
                         </div>
                     </div>
@@ -404,7 +484,9 @@ watch(
                         <div class="flex items-start gap-3">
                             <span class="material-symbols-outlined text-red-500">error</span>
                             <div class="flex-1">
-                                <div class="text-sm font-medium text-red-800">{{ uploadError }}</div>
+                                <div class="text-sm font-medium text-red-800">
+                                    {{ uploadError }}
+                                </div>
                                 <button
                                     v-if="processingFile && processingFile.status === 'failed'"
                                     type="button"
@@ -432,13 +514,18 @@ watch(
                             multiple
                             @change="handleFileChange"
                         />
-                        <div class="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-blue-50 text-blue-400 transition-transform group-hover:scale-110">
+                        <div
+                            class="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-blue-50 text-blue-400 transition-transform group-hover:scale-110"
+                        >
                             <span class="material-symbols-outlined text-3xl">cloud_upload</span>
                         </div>
                         <div class="font-medium text-slate-600">
-                            将文件拖拽至此，或 <span class="text-primary hover:underline">选择文件</span>
+                            将文件拖拽至此，或
+                            <span class="text-primary hover:underline">选择文件</span>
                         </div>
-                        <div class="mt-2 text-sm text-slate-400">支持 PDF, TXT, MD, DOCX (最大 20MB)</div>
+                        <div class="mt-2 text-sm text-slate-400">
+                            支持 PDF, TXT, MD, DOCX (最大 20MB)
+                        </div>
                     </button>
 
                     <div v-if="uploads.length" class="mt-6 space-y-3">
@@ -452,17 +539,26 @@ watch(
                                     class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl"
                                     :class="getFileIconClass(item.ext)"
                                 >
-                                    <span class="material-symbols-outlined text-xl">{{ getFileIcon(item.ext) }}</span>
+                                    <span class="material-symbols-outlined text-xl">{{
+                                        getFileIcon(item.ext)
+                                    }}</span>
                                 </div>
                                 <div class="min-w-0">
-                                    <div class="truncate font-medium text-slate-800">{{ item.name }}</div>
+                                    <div class="truncate font-medium text-slate-800">
+                                        {{ item.name }}
+                                    </div>
                                     <div class="text-sm text-slate-400">{{ item.size }}</div>
-                                    <div v-if="item.errorMessage" class="text-xs text-red-500">{{ item.errorMessage }}</div>
+                                    <div v-if="item.errorMessage" class="text-xs text-red-500">
+                                        {{ item.errorMessage }}
+                                    </div>
                                 </div>
                             </div>
 
                             <div class="ml-4 flex items-center gap-4">
-                                <span class="text-sm font-medium" :class="getStatusColor(item.status)">
+                                <span
+                                    class="text-sm font-medium"
+                                    :class="getStatusColor(item.status)"
+                                >
                                     {{ getStatusLabel(item.status) }}
                                 </span>
                                 <button

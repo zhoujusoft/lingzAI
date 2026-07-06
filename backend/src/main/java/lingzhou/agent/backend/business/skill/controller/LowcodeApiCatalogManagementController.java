@@ -20,7 +20,8 @@ public class LowcodeApiCatalogManagementController {
     }
 
     @PostMapping("/register")
-    public LowcodeApiCatalogService.RegistrationView register(@RequestBody RegisterRequest request) throws TaskException {
+    public LowcodeApiCatalogService.RegistrationView register(@RequestBody RegisterRequest request)
+            throws TaskException {
         return lowcodeApiCatalogService.register(new LowcodeApiCatalogService.RegisterCommand(
                 request.platformKey(),
                 request.appId(),
@@ -28,8 +29,10 @@ public class LowcodeApiCatalogManagementController {
                 request.apiId(),
                 request.apiCode(),
                 request.apiName(),
-                request.description(),
+                request.apiRemark(),
+                request.toolDisplayName(),
                 request.toolName(),
+                request.toolRemark(),
                 request.remoteSchema()));
     }
 
@@ -47,7 +50,9 @@ public class LowcodeApiCatalogManagementController {
             String apiId,
             String apiCode,
             String apiName,
-            String description,
+            String apiRemark,
+            String toolDisplayName,
             String toolName,
+            String toolRemark,
             Object remoteSchema) {}
 }

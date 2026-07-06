@@ -1,6 +1,6 @@
 package lingzhou.agent.backend.business.skill.service;
 
-import com.fasterxml.jackson.core.type.TypeReference;
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.client.McpSyncClient;
@@ -13,6 +13,11 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Pattern;
+import lingzhou.agent.backend.business.datasets.service.KnowledgeBasePermissionService;
+import lingzhou.agent.backend.business.skill.domain.McpServer;
+import lingzhou.agent.backend.business.skill.mapper.McpServerMapper;
+import lingzhou.agent.backend.business.skill.mapper.SkillToolBindingMapper;
+import lingzhou.agent.backend.business.system.model.SysUserModel;
 import lingzhou.agent.backend.capability.mcp.adapter.ExternalMcpAdapterRegistry;
 import lingzhou.agent.backend.capability.mcp.adapter.ExternalMcpSession;
 import lingzhou.agent.backend.capability.mcp.client.McpClientFactory;
@@ -21,10 +26,9 @@ import lingzhou.agent.backend.capability.mcp.publish.McpToolPublishService;
 import lingzhou.agent.backend.capability.mcp.registry.McpToolRegistryService;
 import lingzhou.agent.backend.capability.mcp.support.McpJsonSupport;
 import lingzhou.agent.backend.capability.mcp.support.McpServerScope;
-import lingzhou.agent.backend.business.skill.domain.McpServer;
-import lingzhou.agent.backend.business.skill.mapper.McpServerMapper;
-import lingzhou.agent.backend.business.skill.mapper.SkillToolBindingMapper;
+import lingzhou.agent.backend.common.enums.ResourcePermissionScope;
 import lingzhou.agent.backend.common.lzException.TaskException;
+import lingzhou.agent.backend.common.permission.ResourcePermissionSupport;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -40,8 +44,8 @@ public class McpServerService {
     private static final String REFRESH_STATUS_IDLE = "IDLE";
     private static final String REFRESH_STATUS_SUCCESS = "SUCCESS";
     private static final String REFRESH_STATUS_FAILED = "FAILED";
-    private static final ObjectMapper JSON = new ObjectMapper()
-            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+    private static final ObjectMapper JSON =
+            new ObjectMapper().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
     private final McpServerMapper mcpServerMapper;
     private final SkillToolBindingMapper skillToolBindingMapper;
@@ -49,6 +53,7 @@ public class McpServerService {
     private final McpToolPublishService mcpToolPublishService;
     private final McpToolRegistryService mcpToolRegistryService;
     private final ExternalMcpAdapterRegistry externalMcpAdapterRegistry;
+    private final KnowledgeBasePermissionService knowledgeBasePermissionService;
 
     public McpServerService(
             McpServerMapper mcpServerMapper,
@@ -56,30 +61,44 @@ public class McpServerService {
             McpClientFactory mcpClientFactory,
             McpToolPublishService mcpToolPublishService,
             McpToolRegistryService mcpToolRegistryService,
-            ExternalMcpAdapterRegistry externalMcpAdapterRegistry) {
+            ExternalMcpAdapterRegistry externalMcpAdapterRegistry,
+            KnowledgeBasePermissionService knowledgeBasePermissionService) {
         this.mcpServerMapper = mcpServerMapper;
         this.skillToolBindingMapper = skillToolBindingMapper;
         this.mcpClientFactory = mcpClientFactory;
         this.mcpToolPublishService = mcpToolPublishService;
         this.mcpToolRegistryService = mcpToolRegistryService;
         this.externalMcpAdapterRegistry = externalMcpAdapterRegistry;
+        this.knowledgeBasePermissionService = knowledgeBasePermissionService;
     }
 
-    public List<McpServerView> listServers() {
-        List<McpServer> servers = mcpServerMapper.selectAllOrdered();
+    public McpServerPageResult listServers(Integer page, Integer pageSize, String keyword, Long operatorUserId) {
+        SysUserModel operator = resolveOperator(operatorUserId);
+        int safePage = Math.max(page == null ? 1 : page, 1);
+        int safePageSize = Math.max(1, Math.min(pageSize == null ? 10 : pageSize, 1000));
+        IPage<McpServer> pageData = mcpServerMapper.searchPage(
+                safePage,
+                safePageSize,
+                keyword,
+                knowledgeBasePermissionService.isAdmin(operator),
+                operatorUserId);
+        List<McpServer> servers = pageData.getRecords();
         Map<String, List<McpToolView>> toolsBySource = loadToolViewsBySources(servers);
         List<McpServerView> views = new ArrayList<>(servers.size());
         for (McpServer server : servers) {
             views.add(toView(
                     server,
-                    toolsBySource.getOrDefault(McpToolNaming.source(server.getServerKey()), List.of())));
+                    toolsBySource.getOrDefault(McpToolNaming.source(server.getServerKey()), List.of()),
+                    operator));
         }
-        return views;
+        return new McpServerPageResult(views, pageData.getTotal(), safePage, safePageSize);
     }
 
-    public McpServerView getServer(Long serverId) throws TaskException {
+    public McpServerView getServer(Long serverId, Long operatorUserId) throws TaskException {
+        SysUserModel operator = resolveOperator(operatorUserId);
         McpServer server = requireServer(serverId);
-        return toView(server, loadToolViews(McpToolNaming.source(server.getServerKey())));
+        assertCanViewServerDetail(server, operator);
+        return toView(server, loadToolViews(McpToolNaming.source(server.getServerKey())), operator);
     }
 
     public Set<String> listEnabledToolNames() {
@@ -90,31 +109,44 @@ public class McpServerService {
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public McpServerView createServer(CreateCommand command) throws TaskException {
+    public McpServerView createServer(CreateCommand command, Long operatorUserId) throws TaskException {
         String serverKey = normalizeServerKey(command.serverKey());
         if (mcpServerMapper.selectByServerKey(serverKey) != null) {
             throw new TaskException("MCP serverKey 已存在", TaskException.Code.UNKNOWN);
         }
         McpServer server = new McpServer();
-        applyCreate(server, command, serverKey);
+        applyCreate(server, command, serverKey, operatorUserId);
         server.setLastRefreshStatus(REFRESH_STATUS_IDLE);
         server.setLastRefreshMessage("");
         mcpServerMapper.insert(server);
-        return toView(server, List.of());
+        return toView(server, List.of(), resolveOperator(operatorUserId));
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public McpServerView updateServer(Long serverId, UpdateCommand command) throws TaskException {
+    public McpServerView updateServer(Long serverId, UpdateCommand command, Long operatorUserId) throws TaskException {
+        SysUserModel operator = resolveOperator(operatorUserId);
         McpServer server = requireServer(serverId);
+        assertCanOperateServer(server, operator);
+        if (command != null && command.permissionScope() != null) {
+            int normalizedRequestScope = normalizePermissionScope(command.permissionScope());
+            int existingScope = normalizePermissionScope(server.getPermissionScope());
+            if (normalizedRequestScope != existingScope) {
+                assertCanChangePermissionScope(server, operator);
+            }
+        }
         applyUpdate(server, command);
         mcpServerMapper.updateById(server);
+        mcpToolPublishService.syncPermissions(
+                McpToolNaming.source(server.getServerKey()), server.getOwnerUserId(), server.getPermissionScope());
         mcpToolRegistryService.invalidate(server.getServerKey());
-        return toView(server, loadToolViews(McpToolNaming.source(server.getServerKey())));
+        return toView(server, loadToolViews(McpToolNaming.source(server.getServerKey())), operator);
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public RefreshResult refreshServer(Long serverId) throws TaskException {
+    public RefreshResult refreshServer(Long serverId, Long operatorUserId) throws TaskException {
+        SysUserModel operator = resolveOperator(operatorUserId);
         McpServer server = requireServer(serverId);
+        assertCanOperateServer(server, operator);
         String source = McpToolNaming.source(server.getServerKey());
         try {
             List<McpSchema.Tool> tools;
@@ -130,12 +162,14 @@ public class McpServerService {
                             : listToolsResult.tools();
                 }
             }
-            mcpToolPublishService.syncRemoteTools(server.getServerKey(), source, tools);
+            mcpToolPublishService.syncRemoteTools(
+                    server.getServerKey(), source, tools, server.getOwnerUserId(), server.getPermissionScope());
             server.setLastRefreshStatus(REFRESH_STATUS_SUCCESS);
             server.setLastRefreshMessage("同步 " + tools.size() + " 个 MCP 工具");
             server.setLastRefreshedAt(new Date());
             mcpServerMapper.updateById(server);
             mcpToolRegistryService.invalidate(server.getServerKey());
+
             logger.info("MCP tools refresh succeeded: serverKey={}, toolCount={}", server.getServerKey(), tools.size());
             return new RefreshResult(server.getId(), server.getServerKey(), tools.size());
         } catch (TaskException ex) {
@@ -148,8 +182,10 @@ public class McpServerService {
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public void deleteServer(Long serverId) throws TaskException {
+    public void deleteServer(Long serverId, Long operatorUserId) throws TaskException {
+        SysUserModel operator = resolveOperator(operatorUserId);
         McpServer server = requireServer(serverId);
+        assertCanOperateServer(server, operator);
         String source = McpToolNaming.source(server.getServerKey());
         List<String> toolNames = mcpToolPublishService.listToolNamesBySource(source);
         if (!toolNames.isEmpty()) {
@@ -165,21 +201,31 @@ public class McpServerService {
         return McpJsonSupport.parseJsonObject(json);
     }
 
-    private void applyCreate(McpServer server, CreateCommand command, String serverKey) throws TaskException {
+    private void applyCreate(McpServer server, CreateCommand command, String serverKey, Long ownerUserId)
+            throws TaskException {
         server.setServerKey(serverKey);
         server.setDisplayName(normalizeRequired(command.displayName(), "MCP server 展示名称不能为空"));
         server.setDescription(normalizeText(command.description()));
+        server.setOwnerUserId(ownerUserId);
+        server.setPermissionScope(normalizePermissionScope(command.permissionScope()));
         server.setServerScope(normalizeServerScope(command.serverScope()));
         server.setTransportType(normalizeTransportType(command.transportType()));
         server.setEndpoint(validateEndpoint(command.endpoint()));
         server.setAuthType(normalizeAuthType(command.authType()));
         server.setAuthConfigJson(validateAuthConfig(server.getAuthType(), command.authConfigJson()));
+        server.setHeadersJson(normalizeHeadersJson(command.headersJson()));
         server.setEnabled(Boolean.FALSE.equals(command.enabled()) ? 0 : 1);
+        server.setEnabledGlobal(0);
     }
 
     private void applyUpdate(McpServer server, UpdateCommand command) throws TaskException {
         server.setDisplayName(normalizeRequired(command.displayName(), "MCP server 展示名称不能为空"));
         server.setDescription(normalizeText(command.description()));
+        if (command.permissionScope() != null) {
+            server.setPermissionScope(normalizePermissionScope(command.permissionScope()));
+        } else {
+            server.setPermissionScope(normalizePermissionScope(server.getPermissionScope()));
+        }
         server.setServerScope(normalizeServerScope(command.serverScope()));
         server.setTransportType(normalizeTransportType(command.transportType()));
         server.setEndpoint(validateEndpoint(command.endpoint()));
@@ -191,6 +237,9 @@ public class McpServerService {
             server.setAuthConfigJson("");
         } else if (!StringUtils.hasText(server.getAuthConfigJson())) {
             throw new TaskException("Bearer Token 凭证不能为空", TaskException.Code.UNKNOWN);
+        }
+        if (command.headersJson() != null) {
+            server.setHeadersJson(normalizeHeadersJson(command.headersJson()));
         }
         server.setEnabled(Boolean.FALSE.equals(command.enabled()) ? 0 : 1);
     }
@@ -260,25 +309,121 @@ public class McpServerService {
     }
 
     private McpServerView toView(McpServer server, List<McpToolView> tools) {
+        return toView(server, tools, null);
+    }
+
+    private McpServerView toView(McpServer server, List<McpToolView> tools, SysUserModel operator) {
         List<McpToolView> safeTools = tools == null ? List.of() : List.copyOf(tools);
         return new McpServerView(
                 server.getId(),
                 server.getServerKey(),
                 server.getDisplayName(),
                 server.getDescription(),
+                server.getOwnerUserId(),
+                normalizePermissionScope(server.getPermissionScope()),
                 normalizeServerScopeForView(server.getServerScope()),
                 server.getTransportType(),
                 server.getEndpoint(),
                 server.getAuthType(),
                 StringUtils.hasText(server.getAuthConfigJson()),
+                server.getHeadersJson(),
+                StringUtils.hasText(server.getHeadersJson()),
                 server.getEnabled() != null && server.getEnabled() == 1,
+                server.getEnabledGlobal() != null && server.getEnabledGlobal() == 1,
                 server.getLastRefreshStatus(),
                 server.getLastRefreshMessage(),
                 server.getLastRefreshedAt(),
                 server.getCreatedAt(),
                 server.getUpdatedAt(),
                 safeTools.size(),
+                canViewServerDetail(server, operator),
+                canOperateServer(server, operator),
                 safeTools);
+    }
+
+    private SysUserModel resolveOperator(Long operatorUserId) {
+        return knowledgeBasePermissionService.resolveOperator(operatorUserId);
+    }
+
+    private boolean canViewServer(McpServer server, SysUserModel operator) {
+        if (server == null) {
+            return false;
+        }
+        if (isAdmin(operator)) {
+            return true;
+        }
+        Long operatorUserId = operator == null ? null : operator.getId();
+        return ResourcePermissionSupport.canView(server.getPermissionScope(), server.getOwnerUserId(), operatorUserId);
+    }
+
+    private boolean canOperateServer(McpServer server, SysUserModel operator) {
+        if (server == null) {
+            return false;
+        }
+        if (isAdmin(operator)) {
+            return true;
+        }
+        Long operatorUserId = operator == null ? null : operator.getId();
+        return ResourcePermissionSupport.canOperate(
+                server.getPermissionScope(), server.getOwnerUserId(), operatorUserId);
+    }
+
+    private boolean canViewServerDetail(McpServer server, SysUserModel operator) {
+        if (server == null) {
+            return false;
+        }
+        if (isAdmin(operator)) {
+            return true;
+        }
+        int scope = normalizePermissionScope(server.getPermissionScope());
+        if (scope == ResourcePermissionScope.PUBLIC_FULL_ACCESS.code()) {
+            return true;
+        }
+        Long operatorUserId = operator == null ? null : operator.getId();
+        return ResourcePermissionSupport.isOwner(server.getOwnerUserId(), operatorUserId);
+    }
+
+    private void assertCanViewServer(McpServer server, SysUserModel operator) throws TaskException {
+        if (!canViewServer(server, operator)) {
+            throw new TaskException("无权限查看该 MCP 服务", TaskException.Code.UNKNOWN);
+        }
+    }
+
+    private void assertCanViewServerDetail(McpServer server, SysUserModel operator) throws TaskException {
+        if (!canViewServerDetail(server, operator)) {
+            throw new TaskException("无权限查看该 MCP 服务详情", TaskException.Code.UNKNOWN);
+        }
+    }
+
+    private void assertCanOperateServer(McpServer server, SysUserModel operator) throws TaskException {
+        if (!canOperateServer(server, operator)) {
+            throw new TaskException("无权限操作该 MCP 服务", TaskException.Code.UNKNOWN);
+        }
+    }
+
+    private void assertCanChangePermissionScope(McpServer server, SysUserModel operator) throws TaskException {
+        if (server == null) {
+            throw new TaskException("MCP server 不存在", TaskException.Code.UNKNOWN);
+        }
+        if (isAdmin(operator)) {
+            return;
+        }
+        Long operatorUserId = operator == null ? null : operator.getId();
+        if (!isOwner(server.getOwnerUserId(), operatorUserId)) {
+            throw new TaskException("仅创建人或系统管理员可修改资源权限。", TaskException.Code.UNKNOWN);
+        }
+    }
+
+    private boolean isAdmin(SysUserModel operator) {
+        return knowledgeBasePermissionService.isAdmin(operator);
+    }
+
+    private int normalizePermissionScope(Integer value) {
+        return ResourcePermissionSupport.normalizeScope(value);
+    }
+
+    private boolean isOwner(Long ownerUserId, Long operatorUserId) {
+        return ResourcePermissionSupport.isOwner(ownerUserId, operatorUserId);
     }
 
     private static String normalizeServerKey(String value) throws TaskException {
@@ -340,11 +485,28 @@ public class McpServerService {
             return "";
         }
         Map<String, Object> authConfig = parseJsonObject(authConfigJson);
-        String token = authConfig == null ? "" : String.valueOf(authConfig.getOrDefault("token", "")).trim();
+        String token = authConfig == null
+                ? ""
+                : String.valueOf(authConfig.getOrDefault("token", "")).trim();
         if (!StringUtils.hasText(token)) {
             throw new TaskException("Bearer Token 凭证不能为空", TaskException.Code.UNKNOWN);
         }
         return String.format("{\"token\":\"%s\"}", token.replace("\\", "\\\\").replace("\"", "\\\""));
+    }
+
+    private static String normalizeHeadersJson(String headersJson) {
+        if (!StringUtils.hasText(headersJson)) {
+            return "";
+        }
+        try {
+            Map<String, Object> headers = parseJsonObject(headersJson);
+            if (headers == null || headers.isEmpty()) {
+                return "";
+            }
+            return headersJson.trim();
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     private static String normalizeRequired(String value, String message) throws TaskException {
@@ -375,18 +537,25 @@ public class McpServerService {
             String serverKey,
             String displayName,
             String description,
+            Long ownerUserId,
+            Integer permissionScope,
             String serverScope,
             String transportType,
             String endpoint,
             String authType,
             boolean hasAuthConfig,
+            String headersJson,
+            boolean hasHeaders,
             boolean enabled,
+            boolean enabledGlobal,
             String lastRefreshStatus,
             String lastRefreshMessage,
             Date lastRefreshedAt,
             Date createdAt,
             Date updatedAt,
             int toolCount,
+            boolean canViewDetail,
+            boolean canOperate,
             List<McpToolView> tools) {}
 
     public record McpToolView(
@@ -398,25 +567,31 @@ public class McpServerService {
             boolean bindable,
             Date updatedAt) {}
 
+    public record McpServerPageResult(List<McpServerView> list, long total, int page, int pageSize) {}
+
     public record CreateCommand(
             String serverKey,
             String displayName,
             String description,
+            Integer permissionScope,
             String serverScope,
             String transportType,
             String endpoint,
             String authType,
             String authConfigJson,
+            String headersJson,
             Boolean enabled) {}
 
     public record UpdateCommand(
             String displayName,
             String description,
+            Integer permissionScope,
             String serverScope,
             String transportType,
             String endpoint,
             String authType,
             String authConfigJson,
+            String headersJson,
             Boolean enabled) {}
 
     public record RefreshResult(Long serverId, String serverKey, int toolCount) {}

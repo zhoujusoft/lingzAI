@@ -11,14 +11,20 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
+import lingzhou.agent.backend.business.datasets.service.MinioService;
 import lingzhou.agent.backend.business.system.dao.SysUserMapper;
 import lingzhou.agent.backend.business.system.dao.SystemConfigMapper;
+import lingzhou.agent.backend.business.system.model.BrandingLogoUploadResult;
+import lingzhou.agent.backend.business.system.model.BrandingSettingsDto;
 import lingzhou.agent.backend.business.system.model.PlatformAuthConfig;
 import lingzhou.agent.backend.business.system.model.PlatformEndpointItem;
 import lingzhou.agent.backend.business.system.model.PlatformSettingsDto;
 import lingzhou.agent.backend.business.system.model.SysUserModel;
 import lingzhou.agent.backend.business.system.model.SystemConfigModel;
+import lingzhou.agent.backend.business.system.model.TokenQuotaSettingsDto;
+import lingzhou.agent.backend.business.system.model.UpdateBrandingSettingsInput;
 import lingzhou.agent.backend.business.system.model.UpdatePlatformSettingsInput;
+import lingzhou.agent.backend.business.system.model.UpdateTokenQuotaSettingsInput;
 import lingzhou.agent.backend.common.enums.UserType;
 import lingzhou.agent.backend.common.lzException.TaskException;
 import org.apache.commons.lang.StringUtils;
@@ -26,24 +32,37 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 @Service
 public class SystemConfigService {
 
     private static final Logger logger = LoggerFactory.getLogger(SystemConfigService.class);
     private static final String CONFIG_KEY_SELF_HOSTED_PLATFORMS = "self_hosted_platforms";
+    private static final String CONFIG_KEY_TOKEN_QUOTA_SETTINGS = "token_quota_settings";
+    private static final String CONFIG_KEY_UI_BRANDING_SETTINGS = "ui_branding_settings";
     private static final String AUTH_TYPE_NONE = "NONE";
     private static final String AUTH_TYPE_SYSTEM_TOKEN = "SYSTEM_TOKEN";
     private static final Pattern PLATFORM_KEY_PATTERN = Pattern.compile("[A-Za-z0-9._-]+");
-    private static final ObjectMapper JSON = new ObjectMapper()
-            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+    private static final long DEFAULT_INITIAL_GRANT_TOKENS = 1_000_000L;
+    private static final String DEFAULT_SYSTEM_NAME = "灵洲AI平台";
+    private static final String DEFAULT_LOGO_URL = "/logo.png";
+    private static final int MAX_SYSTEM_NAME_LENGTH = 32;
+    private static final long MAX_BRANDING_LOGO_SIZE = 2L * 1024 * 1024;
+    private static final Set<String> ALLOWED_BRANDING_LOGO_EXTENSIONS =
+            Set.of(".png", ".jpg", ".jpeg", ".webp", ".svg", ".ico");
+    private static final ObjectMapper JSON =
+            new ObjectMapper().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
     private final SystemConfigMapper systemConfigMapper;
     private final SysUserMapper sysUserMapper;
+    private final MinioService minioService;
 
-    public SystemConfigService(SystemConfigMapper systemConfigMapper, SysUserMapper sysUserMapper) {
+    public SystemConfigService(
+            SystemConfigMapper systemConfigMapper, SysUserMapper sysUserMapper, MinioService minioService) {
         this.systemConfigMapper = systemConfigMapper;
         this.sysUserMapper = sysUserMapper;
+        this.minioService = minioService;
     }
 
     public PlatformSettingsDto getPlatformSettings(Long operatorUserId) throws TaskException {
@@ -69,6 +88,105 @@ public class SystemConfigService {
                 .filter(item -> platformKey.trim().equals(item.getKey()))
                 .findFirst()
                 .orElseThrow(() -> new TaskException("平台不存在或未启用：" + platformKey, TaskException.Code.UNKNOWN));
+    }
+
+    public TokenQuotaSettingsDto getTokenQuotaSettings(Long operatorUserId) throws TaskException {
+        requireAdmin(operatorUserId);
+        return buildTokenQuotaSettingsDto(systemConfigMapper.selectByConfigKey(CONFIG_KEY_TOKEN_QUOTA_SETTINGS));
+    }
+
+    public TokenQuotaSettingsDto getTokenQuotaSettingsSnapshot() {
+        return buildTokenQuotaSettingsDto(systemConfigMapper.selectByConfigKey(CONFIG_KEY_TOKEN_QUOTA_SETTINGS));
+    }
+
+    public BrandingSettingsDto getBrandingSettings() {
+        return buildBrandingSettingsDto(systemConfigMapper.selectByConfigKey(CONFIG_KEY_UI_BRANDING_SETTINGS));
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public BrandingSettingsDto saveBrandingSettings(Long operatorUserId, UpdateBrandingSettingsInput input)
+            throws TaskException {
+        SysUserModel operator = requireAdmin(operatorUserId);
+        if (input == null) {
+            throw new TaskException("请求参数不能为空", TaskException.Code.UNKNOWN);
+        }
+
+        SystemConfigModel config = systemConfigMapper.selectByConfigKey(CONFIG_KEY_UI_BRANDING_SETTINGS);
+        boolean creating = config == null;
+        if (config == null) {
+            config = new SystemConfigModel();
+            config.setConfigKey(CONFIG_KEY_UI_BRANDING_SETTINGS);
+        }
+
+        String normalizedSystemName = normalizeSystemName(input.getSystemName());
+        String normalizedLogoObjectName = normalizeLogoObjectName(input.getLogoObjectName());
+        config.setStatus(1);
+        config.setConfigValue(serializeBrandingSettings(normalizedSystemName, normalizedLogoObjectName));
+
+        int affectedRows = creating ? systemConfigMapper.insert(config) : systemConfigMapper.updateById(config);
+        if (affectedRows <= 0) {
+            throw new TaskException("保存品牌配置失败", TaskException.Code.UNKNOWN);
+        }
+
+        logger.info(
+                "System config updated: configKey={}, operatorUserId={}, created={}",
+                CONFIG_KEY_UI_BRANDING_SETTINGS,
+                operator.getId(),
+                creating);
+        return buildBrandingSettingsDto(systemConfigMapper.selectByConfigKey(CONFIG_KEY_UI_BRANDING_SETTINGS));
+    }
+
+    public BrandingLogoUploadResult uploadBrandingLogo(Long operatorUserId, MultipartFile file) throws TaskException {
+        requireAdmin(operatorUserId);
+        if (file == null || file.isEmpty()) {
+            throw new TaskException("请先选择图标文件", TaskException.Code.UNKNOWN);
+        }
+        if (file.getSize() > MAX_BRANDING_LOGO_SIZE) {
+            throw new TaskException("图标文件不能超过 2MB", TaskException.Code.UNKNOWN);
+        }
+
+        String originalName = StringUtils.trimToEmpty(file.getOriginalFilename());
+        String extension = normalizeBrandingLogoExtension(originalName);
+        String uploadFileName = "logo" + extension;
+        try {
+            MinioService.ArtifactUploadResult uploadResult =
+                    minioService.uploadArtifact("branding", uploadFileName, file.getBytes(), file.getContentType());
+            BrandingLogoUploadResult result = new BrandingLogoUploadResult();
+            result.setLogoObjectName(uploadResult.objectName());
+            result.setLogoUrl(minioService.buildArtifactPreviewUrl(uploadResult.objectName(), uploadFileName));
+            result.setFaviconUrl(result.getLogoUrl());
+            return result;
+        } catch (Exception ex) {
+            logger.warn("Branding logo upload failed: fileName={}, error={}", originalName, ex.getMessage(), ex);
+            throw new TaskException("图标上传失败，请稍后重试", TaskException.Code.UNKNOWN, ex);
+        }
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public TokenQuotaSettingsDto saveTokenQuotaSettings(Long operatorUserId, UpdateTokenQuotaSettingsInput input)
+            throws TaskException {
+        SysUserModel operator = requireAdmin(operatorUserId);
+        if (input == null) {
+            throw new TaskException("请求参数不能为空", TaskException.Code.UNKNOWN);
+        }
+        SystemConfigModel config = systemConfigMapper.selectByConfigKey(CONFIG_KEY_TOKEN_QUOTA_SETTINGS);
+        boolean creating = config == null;
+        if (config == null) {
+            config = new SystemConfigModel();
+            config.setConfigKey(CONFIG_KEY_TOKEN_QUOTA_SETTINGS);
+        }
+        config.setStatus(normalizeStatus(input.getStatus(), "配置状态仅支持启用或停用"));
+        config.setConfigValue(serializeTokenQuotaSettings(input.getInitialGrantTokens()));
+        int affectedRows = creating ? systemConfigMapper.insert(config) : systemConfigMapper.updateById(config);
+        if (affectedRows <= 0) {
+            throw new TaskException("保存 token 配置失败", TaskException.Code.UNKNOWN);
+        }
+        logger.info(
+                "System config updated: configKey={}, operatorUserId={}, created={}",
+                CONFIG_KEY_TOKEN_QUOTA_SETTINGS,
+                operator.getId(),
+                creating);
+        return buildTokenQuotaSettingsDto(systemConfigMapper.selectByConfigKey(CONFIG_KEY_TOKEN_QUOTA_SETTINGS));
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -132,8 +250,84 @@ public class SystemConfigService {
         return dto;
     }
 
-    private String serializePlatformItems(List<PlatformEndpointItem> platforms, List<PlatformEndpointItem> existingItems)
-            throws TaskException {
+    private TokenQuotaSettingsDto buildTokenQuotaSettingsDto(SystemConfigModel config) {
+        TokenQuotaSettingsDto dto = new TokenQuotaSettingsDto();
+        dto.setConfigKey(CONFIG_KEY_TOKEN_QUOTA_SETTINGS);
+        if (config == null) {
+            dto.setStatus(0);
+            dto.setEnabled(false);
+            dto.setInitialGrantTokens(DEFAULT_INITIAL_GRANT_TOKENS);
+            return dto;
+        }
+        dto.setStatus(config.getStatus() == null ? 0 : config.getStatus());
+        dto.setEnabled(dto.getStatus() == 1);
+        dto.setInitialGrantTokens(parseInitialGrantTokens(config.getConfigValue()));
+        dto.setUpdatedAt(config.getUpdatedAt());
+        return dto;
+    }
+
+    private BrandingSettingsDto buildBrandingSettingsDto(SystemConfigModel config) {
+        BrandingSettingsDto dto = new BrandingSettingsDto();
+        dto.setConfigKey(CONFIG_KEY_UI_BRANDING_SETTINGS);
+        dto.setStatus(1);
+        dto.setSystemName(DEFAULT_SYSTEM_NAME);
+        dto.setLogoObjectName("");
+        dto.setLogoUrl(DEFAULT_LOGO_URL);
+        dto.setFaviconUrl(DEFAULT_LOGO_URL);
+
+        if (config == null) {
+            return dto;
+        }
+
+        dto.setStatus(config.getStatus() == null ? 1 : config.getStatus());
+        dto.setUpdatedAt(config.getUpdatedAt());
+        if (StringUtils.isBlank(config.getConfigValue())) {
+            return dto;
+        }
+
+        try {
+            Map<String, Object> payload =
+                    JSON.readValue(config.getConfigValue(), new TypeReference<Map<String, Object>>() {});
+            String systemName = normalizeSystemName(asText(payload.get("systemName")));
+            String logoObjectName = normalizeLogoObjectName(asText(payload.get("logoObjectName")));
+            dto.setSystemName(systemName);
+            dto.setLogoObjectName(logoObjectName);
+            if (StringUtils.isNotBlank(logoObjectName)) {
+                String previewFileName = "logo" + extractExtensionFromObjectName(logoObjectName);
+                String previewUrl = minioService.buildArtifactPreviewUrl(logoObjectName, previewFileName);
+                dto.setLogoUrl(previewUrl);
+                dto.setFaviconUrl(previewUrl);
+            }
+        } catch (Exception ex) {
+            logger.warn("Failed to parse system config: configKey={}", CONFIG_KEY_UI_BRANDING_SETTINGS, ex);
+        }
+        return dto;
+    }
+
+    private String serializeBrandingSettings(String systemName, String logoObjectName) throws TaskException {
+        try {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("systemName", systemName);
+            payload.put("logoObjectName", logoObjectName);
+            return JSON.writeValueAsString(payload);
+        } catch (Exception ex) {
+            throw new TaskException("品牌配置序列化失败", TaskException.Code.UNKNOWN, ex);
+        }
+    }
+
+    private String serializeTokenQuotaSettings(Long initialGrantTokens) throws TaskException {
+        long normalizedTokens = normalizeInitialGrantTokens(initialGrantTokens);
+        try {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("initialGrantTokens", normalizedTokens);
+            return JSON.writeValueAsString(payload);
+        } catch (Exception ex) {
+            throw new TaskException("token 配置序列化失败", TaskException.Code.UNKNOWN, ex);
+        }
+    }
+
+    private String serializePlatformItems(
+            List<PlatformEndpointItem> platforms, List<PlatformEndpointItem> existingItems) throws TaskException {
         Map<String, PlatformEndpointItem> existingByKey = new LinkedHashMap<>();
         if (existingItems != null) {
             for (PlatformEndpointItem item : existingItems) {
@@ -176,7 +370,8 @@ public class SystemConfigService {
                 normalized.setKey(key);
                 normalized.setName(name);
                 normalized.setApiUrl(validateApiUrl(apiUrl));
-                PlatformAuthConfig normalizedAuthConfig = normalizeAuthConfig(item.getAuthConfig(), existingByKey.get(key));
+                PlatformAuthConfig normalizedAuthConfig =
+                        normalizeAuthConfig(item.getAuthConfig(), existingByKey.get(key));
                 normalized.setStatus(normalizeStatus(item.getStatus(), "平台状态仅支持启用或停用"));
                 normalized.setAuthType(normalizeAuthType(item.getAuthType(), normalizedAuthConfig));
                 normalized.setAuthConfig(normalizedAuthConfig);
@@ -212,7 +407,9 @@ public class SystemConfigService {
                 item.setStatus(rawItem.getStatus() == null ? 1 : rawItem.getStatus());
                 item.setAuthType(resolveAuthType(rawItem.getAuthType(), rawItem.getAuthConfig()));
                 item.setAuthConfig(copyAuthConfig(rawItem.getAuthConfig(), maskSecrets));
-                if (StringUtils.isBlank(item.getKey()) && StringUtils.isBlank(item.getName()) && StringUtils.isBlank(item.getApiUrl())) {
+                if (StringUtils.isBlank(item.getKey())
+                        && StringUtils.isBlank(item.getName())
+                        && StringUtils.isBlank(item.getApiUrl())) {
                     continue;
                 }
                 items.add(item);
@@ -224,7 +421,8 @@ public class SystemConfigService {
         }
     }
 
-    private PlatformAuthConfig normalizeAuthConfig(PlatformAuthConfig input, PlatformEndpointItem existing) throws TaskException {
+    private PlatformAuthConfig normalizeAuthConfig(PlatformAuthConfig input, PlatformEndpointItem existing)
+            throws TaskException {
         PlatformAuthConfig incoming = input == null ? new PlatformAuthConfig() : input;
         PlatformAuthConfig normalized = new PlatformAuthConfig();
         normalized.setUsername(StringUtils.trimToEmpty(incoming.getUsername()));
@@ -274,7 +472,8 @@ public class SystemConfigService {
         PlatformAuthConfig source = authConfig == null ? new PlatformAuthConfig() : authConfig;
         result.setTncode(StringUtils.trimToEmpty(source.getTncode()));
         result.setUserId(StringUtils.trimToEmpty(source.getUserId()));
-        boolean configured = StringUtils.isNotBlank(source.getUsername()) && StringUtils.isNotBlank(source.getPassword());
+        boolean configured =
+                StringUtils.isNotBlank(source.getUsername()) && StringUtils.isNotBlank(source.getPassword());
         result.setCredentialConfigured(configured);
         boolean signatureConfigured =
                 StringUtils.isNotBlank(source.getAppKey()) && StringUtils.isNotBlank(source.getAppSecret());
@@ -334,6 +533,74 @@ public class SystemConfigService {
         }
     }
 
+    private long parseInitialGrantTokens(String configValue) {
+        if (StringUtils.isBlank(configValue)) {
+            return DEFAULT_INITIAL_GRANT_TOKENS;
+        }
+        try {
+            Map<String, Object> payload = JSON.readValue(configValue, new TypeReference<Map<String, Object>>() {});
+            Object value = payload == null ? null : payload.get("initialGrantTokens");
+            if (value instanceof Number number) {
+                return normalizeInitialGrantTokens(number.longValue());
+            }
+            if (value != null) {
+                return normalizeInitialGrantTokens(Long.parseLong(String.valueOf(value)));
+            }
+        } catch (Exception ex) {
+            logger.warn("Failed to parse system config: configKey={}", CONFIG_KEY_TOKEN_QUOTA_SETTINGS, ex);
+        }
+        return DEFAULT_INITIAL_GRANT_TOKENS;
+    }
+
+    private long normalizeInitialGrantTokens(Long value) throws TaskException {
+        long normalized = value == null ? DEFAULT_INITIAL_GRANT_TOKENS : value;
+        if (normalized < 0L) {
+            throw new TaskException("初始 token 额度不能小于 0", TaskException.Code.UNKNOWN);
+        }
+        return normalized;
+    }
+
+    private String normalizeSystemName(String systemName) throws TaskException {
+        String normalized = StringUtils.trimToEmpty(systemName);
+        if (StringUtils.isBlank(normalized)) {
+            return DEFAULT_SYSTEM_NAME;
+        }
+        if (normalized.length() > MAX_SYSTEM_NAME_LENGTH) {
+            throw new TaskException("系统名称长度不能超过 " + MAX_SYSTEM_NAME_LENGTH + " 个字符", TaskException.Code.UNKNOWN);
+        }
+        return normalized;
+    }
+
+    private String normalizeLogoObjectName(String logoObjectName) {
+        return StringUtils.trimToEmpty(logoObjectName);
+    }
+
+    private String normalizeBrandingLogoExtension(String fileName) throws TaskException {
+        String normalized = StringUtils.trimToEmpty(fileName);
+        int dotIndex = normalized.lastIndexOf('.');
+        if (dotIndex <= 0 || dotIndex >= normalized.length() - 1) {
+            throw new TaskException("图标文件缺少扩展名", TaskException.Code.UNKNOWN);
+        }
+        String extension = normalized.substring(dotIndex).toLowerCase();
+        if (!ALLOWED_BRANDING_LOGO_EXTENSIONS.contains(extension)) {
+            throw new TaskException("仅支持 png/jpg/jpeg/webp/svg/ico 图标格式", TaskException.Code.UNKNOWN);
+        }
+        return extension;
+    }
+
+    private String extractExtensionFromObjectName(String objectName) {
+        String normalized = StringUtils.trimToEmpty(objectName);
+        int dotIndex = normalized.lastIndexOf('.');
+        if (dotIndex <= 0 || dotIndex >= normalized.length() - 1) {
+            return ".png";
+        }
+        return normalized.substring(dotIndex);
+    }
+
+    private String asText(Object value) {
+        return value == null ? "" : String.valueOf(value).trim();
+    }
+
     private static Integer normalizeStatus(Integer status, String message) throws TaskException {
         if (status == null) {
             return 1;
@@ -345,7 +612,9 @@ public class SystemConfigService {
     }
 
     private static String normalizeAuthType(String authType, PlatformAuthConfig authConfig) throws TaskException {
-        String normalized = StringUtils.isBlank(authType) ? resolveAuthType(null, authConfig) : authType.trim().toUpperCase();
+        String normalized = StringUtils.isBlank(authType)
+                ? resolveAuthType(null, authConfig)
+                : authType.trim().toUpperCase();
         if (!AUTH_TYPE_SYSTEM_TOKEN.equals(normalized) && !AUTH_TYPE_NONE.equals(normalized)) {
             throw new TaskException("authType 仅支持 NONE 或 SYSTEM_TOKEN", TaskException.Code.UNKNOWN);
         }
