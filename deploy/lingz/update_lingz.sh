@@ -1,6 +1,7 @@
 #!/bin/bash
 #===============================================================================
 #  灵洲 AI 平台 - 版本更新脚本 v20260703
+#  更新时间: 2026-07-03
 #
 #  功能:
 #    1. 自动查找系统中已部署的灵洲目录 (含 docker-compose.yml + .env)
@@ -42,11 +43,11 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-log_info()    { echo -e "${GREEN}[INFO]${NC}  $(date '+%Y-%m-%d %H:%M:%S') - $*"; }
-log_warn()    { echo -e "${YELLOW}[WARN]${NC}  $(date '+%Y-%m-%d %H:%M:%S') - $*"; }
-log_error()   { echo -e "${RED}[ERROR]${NC} $(date '+%Y-%m-%d %H:%M:%S') - $*"; }
-log_step()    { echo -e "\n${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"; echo -e "${CYAN}$*${NC}"; echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"; }
-log_result()  { echo -e "\n${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"; echo -e "${GREEN}  $*${NC}"; echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"; }
+log_info()    { echo -e "${GREEN}[INFO]${NC}  $(date '+%Y-%m-%d %H:%M:%S') - $*" >&2; }
+log_warn()    { echo -e "${YELLOW}[WARN]${NC}  $(date '+%Y-%m-%d %H:%M:%S') - $*" >&2; }
+log_error()   { echo -e "${RED}[ERROR]${NC} $(date '+%Y-%m-%d %H:%M:%S') - $*" >&2; }
+log_step()    { echo -e "\n${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2; echo -e "${CYAN}$*${NC}" >&2; echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n" >&2; }
+log_result()  { echo -e "\n${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2; echo -e "${GREEN}  $*${NC}" >&2; echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n" >&2; }
 
 #======================== 帮助信息 ============================================
 show_help() {
@@ -107,8 +108,10 @@ is_lingz_deploy_dir() {
     local dir="$1"
     # 必须同时存在 docker-compose 文件和 .env
     local has_compose=false
-    [[ -f "$dir/docker-compose.yml" ]] || [[ -f "$dir/docker-compose.yaml" ]] \
-        || [[ -f "$dir/compose.yml" ]] || [[ -f "$dir/compose.yaml" ]] && has_compose=true
+    if [[ -f "$dir/docker-compose.yml" ]] || [[ -f "$dir/docker-compose.yaml" ]] \
+       || [[ -f "$dir/compose.yml" ]] || [[ -f "$dir/compose.yaml" ]]; then
+        has_compose=true
+    fi
     if ! $has_compose; then
         return 1
     fi
@@ -119,19 +122,51 @@ is_lingz_deploy_dir() {
     return 1
 }
 
+#======================== 通过运行中的容器查找部署目录 ===========================
+find_deploy_dir_by_container() {
+    local name
+    # 优先找 backend / frontend 容器，这些容器通常一定存在
+    for name in lingz-backend-1 lingz-frontend-1 lingz-nginx-1 lingz-web-1; do
+        if docker inspect "$name" &>/dev/null; then
+            local work_dir
+            work_dir=$(docker inspect "$name" -f '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' 2>/dev/null)
+            if [[ -n "$work_dir" ]] && [[ -d "$work_dir" ]]; then
+                echo "$work_dir"
+                return 0
+            fi
+            # 备选：从挂载卷中推断目录
+            local bind_src
+            bind_src=$(docker inspect "$name" -f '{{range .Mounts}}{{if eq .Type "bind"}}{{.Source}}{{printf "\n"}}{{end}}{{end}}' 2>/dev/null | grep -E '/lingz/?$' | head -1)
+            if [[ -n "$bind_src" ]] && [[ -d "$bind_src" ]]; then
+                echo "$bind_src"
+                return 0
+            fi
+        fi
+    done
+    return 1
+}
+
 #======================== 查找灵洲部署目录 ====================================
 find_deploy_dirs() {
     local found_dirs=()
 
     log_info "正在系统中查找灵洲部署目录..."
 
+    # 方式1: 先通过运行中的容器定位 (最可靠)
+    local container_dir
+    container_dir=$(find_deploy_dir_by_container)
+    if [[ -n "$container_dir" ]]; then
+        found_dirs+=("$container_dir")
+    fi
+
+    # 方式2: 文件系统搜索
     for search_path in "${SEARCH_PATHS[@]}"; do
         [[ ! -d "$search_path" ]] && continue
         # 限制搜索深度为 4 层，避免耗时过长
         while IFS= read -r dir; do
             found_dirs+=("$dir")
         done < <(find "$search_path" -maxdepth 4 -name ".env" -type f 2>/dev/null \
-            | while read -r env_file; do
+            | while IFS= read -r env_file; do
                 dir="$(dirname "$env_file")"
                 if is_lingz_deploy_dir "$dir"; then
                     echo "$dir"
@@ -151,7 +186,7 @@ find_deploy_dirs() {
         found_dirs=("${unique_dirs[@]}")
     fi
 
-    echo "${found_dirs[@]}"
+    printf '%s\n' "${found_dirs[@]}"
 }
 
 #======================== 读取当前版本号 ======================================
@@ -180,10 +215,9 @@ prompt_deploy_dir() {
         fi
     fi
 
-    # 自动查找
-    local found_str
-    found_str=$(find_deploy_dirs)
-    read -ra found_dirs <<< "$found_str"
+    # 自动查找 (输出按行分隔，mapfile 可正确读取含空格路径)
+    local found_dirs=()
+    mapfile -t found_dirs < <(find_deploy_dirs)
 
     echo ""
     if [[ ${#found_dirs[@]} -eq 0 ]]; then
