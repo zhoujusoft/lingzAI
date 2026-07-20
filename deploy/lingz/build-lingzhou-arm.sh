@@ -63,15 +63,41 @@ check_env() {
 
 extract_backend() {
     local CID="$1" CTX="$2"
-    mkdir -p "${CTX}/backend/target" "${CTX}/skills" "${CTX}/deploy/docker"
+    mkdir -p \
+        "${CTX}/backend/target" \
+        "${CTX}/workspaces/public/skills" \
+        "${CTX}/workspaces/public/skillstudio/skills" \
+        "${CTX}/workspaces/public/runtime-envs/python/default" \
+        "${CTX}/workspaces/public/runtime-envs/python/general-code" \
+        "${CTX}/deploy/docker"
 
     docker cp "${CID}:/app/app.jar" "${CTX}/backend/target/backend.jar" 2>/dev/null || {
         log_error "提取 app.jar 失败"; return 1
     }
     log_info "  backend.jar     : ✓ ($(du -sh "${CTX}/backend/target/backend.jar" | cut -f1))"
 
-    docker cp "${CID}:/app/default-skills/." "${CTX}/skills/" 2>/dev/null || log_warn "  skills/ 为空"
+    docker cp "${CID}:/app/default-workspaces/public/skills/." "${CTX}/workspaces/public/skills/" 2>/dev/null ||
+    docker cp "${CID}:/app/workspaces/public/skills/." "${CTX}/workspaces/public/skills/" 2>/dev/null ||
+    docker cp "${CID}:/app/default-skills/." "${CTX}/workspaces/public/skills/" 2>/dev/null ||
+    log_warn "  workspaces/public/skills/ 为空"
     log_info "  skills/         : ✓"
+
+    docker cp "${CID}:/app/default-workspaces/public/skillstudio/skills/." "${CTX}/workspaces/public/skillstudio/skills/" 2>/dev/null ||
+    docker cp "${CID}:/app/workspaces/public/skillstudio/skills/." "${CTX}/workspaces/public/skillstudio/skills/" 2>/dev/null ||
+    log_warn "  workspaces/public/skillstudio/skills/ 为空"
+    log_info "  skillstudio/    : ✓"
+
+    docker cp "${CID}:/app/default-workspaces/public/runtime-envs/python/default/requirements.txt" "${CTX}/workspaces/public/runtime-envs/python/default/requirements.txt" 2>/dev/null ||
+    docker cp "${CID}:/app/workspaces/public/runtime-envs/python/default/requirements.txt" "${CTX}/workspaces/public/runtime-envs/python/default/requirements.txt" 2>/dev/null || {
+        log_error "提取 default requirements.txt 失败"; return 1
+    }
+    log_info "  default req     : ✓"
+
+    docker cp "${CID}:/app/default-workspaces/public/runtime-envs/python/general-code/requirements.txt" "${CTX}/workspaces/public/runtime-envs/python/general-code/requirements.txt" 2>/dev/null ||
+    docker cp "${CID}:/app/workspaces/public/runtime-envs/python/general-code/requirements.txt" "${CTX}/workspaces/public/runtime-envs/python/general-code/requirements.txt" 2>/dev/null || {
+        log_error "提取 general-code requirements.txt 失败"; return 1
+    }
+    log_info "  general req     : ✓"
 
     docker cp "${CID}:/app/backend-entrypoint.sh" "${CTX}/deploy/docker/backend-entrypoint.sh" 2>/dev/null || log_warn "  entrypoint 缺失"
     chmod +x "${CTX}/deploy/docker/backend-entrypoint.sh" 2>/dev/null || true
