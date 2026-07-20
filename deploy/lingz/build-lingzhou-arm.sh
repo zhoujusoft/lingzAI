@@ -40,6 +40,7 @@ usage() {
 IMAGE_TAG="$1"
 TARGET_PLATFORM="${2:-linux/arm64}"
 APT_MIRROR_HOST="${APT_MIRROR_HOST:-deb.debian.org}"
+PIP_INDEX_URL="${PIP_INDEX_URL:-https://pypi.org/simple}"
 PIP_PLATFORM="${PIP_PLATFORM:-}"
 
 if [[ -z "${PIP_PLATFORM}" ]]; then
@@ -173,6 +174,7 @@ fetch_dockerfile() {
     sed -i 's|FROM eclipse-temurin:|FROM docker.m.daocloud.io/library/eclipse-temurin:|' "${OUT}"
     sed -i 's|FROM node:|FROM docker.m.daocloud.io/library/node:|'             "${OUT}"
     sed -i 's|FROM nginx:|FROM docker.m.daocloud.io/library/nginx:|'           "${OUT}"
+    sed -i "s#https://pypi.tuna.tsinghua.edu.cn/simple#${PIP_INDEX_URL}#g"     "${OUT}"
     log_info "  ${LABEL}: ✓"
 }
 
@@ -296,6 +298,7 @@ build_and_export() {
 
     log_step "交叉编译: ${IMG}:${IMAGE_TAG} → ${TARGET_PLATFORM}"
     log_info "APT 镜像源: ${APT_MIRROR_HOST}"
+    log_info "PIP 镜像源: ${PIP_INDEX_URL}"
     [[ -n "${PIP_PLATFORM}" ]] && log_info "PIP 平台标签: ${PIP_PLATFORM}"
     echo ""
 
