@@ -40,6 +40,18 @@ usage() {
 IMAGE_TAG="$1"
 TARGET_PLATFORM="${2:-linux/arm64}"
 APT_MIRROR_HOST="${APT_MIRROR_HOST:-deb.debian.org}"
+PIP_PLATFORM="${PIP_PLATFORM:-}"
+
+if [[ -z "${PIP_PLATFORM}" ]]; then
+    case "${TARGET_PLATFORM}" in
+        linux/arm64)
+            PIP_PLATFORM="manylinux2014_aarch64 manylinux_2_17_aarch64 manylinux_2_28_aarch64 linux_aarch64"
+            ;;
+        linux/amd64)
+            PIP_PLATFORM="manylinux2014_x86_64 manylinux_2_17_x86_64 manylinux_2_28_x86_64 linux_x86_64"
+            ;;
+    esac
+fi
 
 OUTPUT_TARS=()
 WORK_DIR=$(mktemp -d -t lingzhou-build-XXXXXX)
@@ -278,25 +290,26 @@ build_and_export() {
     local SAFE=$(echo "${IMG}" | tr '/:' '_')
     local PLAT_SAFE="${TARGET_PLATFORM//\//_}"
     local OUT="$(pwd)/${SAFE}_${IMAGE_TAG}_${PLAT_SAFE}.tar"
+    local LOG="$(pwd)/${SAFE}_${IMAGE_TAG}_${PLAT_SAFE}.build.log"
+    local BUILD_ARGS=(--build-arg "APT_MIRROR_HOST=${APT_MIRROR_HOST}")
+    [[ -n "${PIP_PLATFORM}" ]] && BUILD_ARGS+=(--build-arg "PIP_PLATFORM=${PIP_PLATFORM}")
 
     log_step "交叉编译: ${IMG}:${IMAGE_TAG} → ${TARGET_PLATFORM}"
     log_info "APT 镜像源: ${APT_MIRROR_HOST}"
+    [[ -n "${PIP_PLATFORM}" ]] && log_info "PIP 平台标签: ${PIP_PLATFORM}"
     echo ""
 
     # 先构建到本地 Docker daemon（单平台可用 --load）
-    docker buildx build \
+    if ! docker buildx build \
         --builder "${BUILDER_NAME}" \
         --platform "${TARGET_PLATFORM}" \
-        --build-arg "APT_MIRROR_HOST=${APT_MIRROR_HOST}" \
+        "${BUILD_ARGS[@]}" \
         --file "$(realpath "${DOCKERFILE}")" \
         --tag "${IMG}:${IMAGE_TAG}" \
         --load \
         "$(realpath "${CTX}")" \
-    2>&1 | tail -5
-
-    local BUILD_EXIT=$?
-    if [[ ${BUILD_EXIT} -ne 0 ]]; then
-        log_error "构建失败 (exit=${BUILD_EXIT})"
+        2>&1 | tee "${LOG}" | tail -80; then
+        log_error "构建失败，完整日志: ${LOG}"
         return 1
     fi
 
