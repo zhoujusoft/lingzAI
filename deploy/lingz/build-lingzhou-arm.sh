@@ -39,6 +39,7 @@ usage() {
 
 IMAGE_TAG="$1"
 TARGET_PLATFORM="${2:-linux/arm64}"
+APT_MIRROR_HOST="${APT_MIRROR_HOST:-deb.debian.org}"
 
 OUTPUT_TARS=()
 WORK_DIR=$(mktemp -d -t lingzhou-build-XXXXXX)
@@ -279,12 +280,14 @@ build_and_export() {
     local OUT="$(pwd)/${SAFE}_${IMAGE_TAG}_${PLAT_SAFE}.tar"
 
     log_step "交叉编译: ${IMG}:${IMAGE_TAG} → ${TARGET_PLATFORM}"
+    log_info "APT 镜像源: ${APT_MIRROR_HOST}"
     echo ""
 
     # 先构建到本地 Docker daemon（单平台可用 --load）
     docker buildx build \
         --builder "${BUILDER_NAME}" \
         --platform "${TARGET_PLATFORM}" \
+        --build-arg "APT_MIRROR_HOST=${APT_MIRROR_HOST}" \
         --file "$(realpath "${DOCKERFILE}")" \
         --tag "${IMG}:${IMAGE_TAG}" \
         --load \
